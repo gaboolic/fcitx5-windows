@@ -51,3 +51,9 @@ if (CYGWIN)
 endif()
 
 add_subdirectory(src)
+
+option(FCITX5_WINDOWS_BUILD_WIN32_IME
+       "Build win32/ TSF IME target (from repo root: links Fcitx5Core when built together)" ON)
+if(FCITX5_WINDOWS_BUILD_WIN32_IME)
+    add_subdirectory(win32)
+endif()

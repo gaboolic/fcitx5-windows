@@ -6,26 +6,28 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 }
 
 STDAPI Tsf::Deactivate() {
-    initTextEditSink(CComPtr<ITfDocumentMgr>());
+    candidateWin_.hide();
+    resetCompositionState();
+    initTextEditSink(nullptr);
     uninitThreadMgrEventSink();
     uninitKeyEventSink();
-    threadMgr_ = nullptr;
+    threadMgr_.Reset();
     clientId_ = TF_CLIENTID_NULL;
     return S_OK;
 }
 
 STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
                        DWORD dwFlags) {
-    CComPtr<ITfDocumentMgr> documentMgr;
+    ComPtr<ITfDocumentMgr> documentMgr;
     threadMgr_ = pThreadMgr;
     clientId_ = tfClientId;
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;
     }
 
-    if ((threadMgr_->GetFocus(&documentMgr) == S_OK) &&
-        (documentMgr != nullptr)) {
-        initTextEditSink(documentMgr);
+    if ((threadMgr_->GetFocus(documentMgr.ReleaseAndGetAddressOf()) == S_OK) &&
+        documentMgr) {
+        initTextEditSink(documentMgr.Get());
     }
 
     if (!initKeyEventSink()) {

@@ -2,8 +2,10 @@
 
 namespace fcitx {
 bool Tsf::initKeyEventSink() {
-    CComPtr<ITfKeystrokeMgr> keystrokeMgr;
-    if (threadMgr_->QueryInterface(&keystrokeMgr) != S_OK) {
+    ComPtr<ITfKeystrokeMgr> keystrokeMgr;
+    if (FAILED(threadMgr_->QueryInterface(
+            IID_ITfKeystrokeMgr,
+            reinterpret_cast<void **>(keystrokeMgr.ReleaseAndGetAddressOf())))) {
         return false;
     }
     return keystrokeMgr->AdviseKeyEventSink(clientId_, (ITfKeyEventSink *)this,
@@ -11,18 +13,27 @@ bool Tsf::initKeyEventSink() {
 }
 
 void Tsf::uninitKeyEventSink() {
-    CComPtr<ITfKeystrokeMgr> keystrokeMgr;
-    if (threadMgr_->QueryInterface(&keystrokeMgr) != S_OK) {
+    ComPtr<ITfKeystrokeMgr> keystrokeMgr;
+    if (FAILED(threadMgr_->QueryInterface(
+            IID_ITfKeystrokeMgr,
+            reinterpret_cast<void **>(keystrokeMgr.ReleaseAndGetAddressOf())))) {
         return;
     }
     keystrokeMgr->UnadviseKeyEventSink(clientId_);
 }
 
 BOOL Tsf::processKey(WPARAM wParam, LPARAM lParam) {
-    HRESULT phrSession;
-    textEditSinkContext_->RequestEditSession(
-        clientId_, this, TF_ES_ASYNCDONTCARE | TF_ES_READWRITE, &phrSession);
-    return TRUE;
+    if (!textEditSinkContext_ || !keyWouldBeHandled(wParam, lParam)) {
+        return FALSE;
+    }
+    pendingKeyWParam_ = wParam;
+    pendingKeyLParam_ = lParam;
+    HRESULT hr = E_FAIL;
+    if (FAILED(textEditSinkContext_->RequestEditSession(
+            clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr))) {
+        return FALSE;
+    }
+    return SUCCEEDED(hr) ? TRUE : FALSE;
 }
 
 STDMETHODIMP Tsf::OnSetFocus(BOOL fForeground) { return S_OK; }

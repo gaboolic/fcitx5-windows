@@ -1,11 +1,41 @@
 #include "tsf.h"
 #include <cassert>
 
+#if FCITX_WIN32_IME_WITH_CORE
+#include "Fcitx5ImeEngine.h"
+#endif
+
 extern void DllAddRef();
 extern void DllRelease();
 
 namespace fcitx {
-Tsf::Tsf() { DllAddRef(); }
+
+namespace {
+
+std::unique_ptr<ImeEngine> makeDefaultImeEngine() {
+#if FCITX_WIN32_IME_WITH_CORE
+    if (auto e = makeFcitx5ImeEngineAttempt()) {
+        return e;
+    }
+#endif
+    return makeStubImeEngine();
+}
+
+} // namespace
+
+Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
+    : engine_(engine ? std::move(engine) : makeDefaultImeEngine()) {
+    DllAddRef();
+    candidateWin_.setOnPick([this](int idx) {
+        pendingMousePick_ = idx;
+        if (!textEditSinkContext_) {
+            return;
+        }
+        HRESULT hr = E_FAIL;
+        textEditSinkContext_->RequestEditSession(
+            clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+    });
+}
 
 Tsf::~Tsf() { DllRelease(); }
 
@@ -31,6 +61,8 @@ STDAPI Tsf::QueryInterface(REFIID riid, void **ppvObject) {
         *ppvObject = (ITfKeyEventSink *)this;
     else if (IsEqualIID(riid, IID_ITfEditSession))
         *ppvObject = (ITfEditSession *)this;
+    else if (IsEqualIID(riid, IID_ITfCompositionSink))
+        *ppvObject = (ITfCompositionSink *)this;
 
     if (*ppvObject) {
         AddRef();

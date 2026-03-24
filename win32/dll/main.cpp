@@ -57,6 +57,9 @@ class ClassFactory : public IClassFactory {
 
 ClassFactory *factory = nullptr;
 
+#pragma warning(push)
+#pragma warning(disable : 4502 4518)
+
 __declspec(dllexport) STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid,
                                                void **ppvObject) {
     if (factory == nullptr) {
@@ -91,6 +94,8 @@ __declspec(dllexport) STDAPI DllRegisterServer() {
     DllUnregisterServer();
     return E_FAIL;
 }
+
+#pragma warning(pop)
 
 BOOL WINAPI DllMain(HINSTANCE hInstance, DWORD dwReason, LPVOID pvReserved) {
     switch (dwReason) {

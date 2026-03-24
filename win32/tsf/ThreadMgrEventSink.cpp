@@ -2,8 +2,10 @@
 
 namespace fcitx {
 bool Tsf::initThreadMgrEventSink() {
-    CComPtr<ITfSource> source;
-    if (threadMgr_->QueryInterface(IID_ITfSource, (void **)&source) != S_OK) {
+    ComPtr<ITfSource> source;
+    if (FAILED(threadMgr_->QueryInterface(
+            IID_ITfSource,
+            reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
         return false;
     }
     if (source->AdviseSink(IID_ITfThreadMgrEventSink,
@@ -15,12 +17,13 @@ bool Tsf::initThreadMgrEventSink() {
 }
 
 void Tsf::uninitThreadMgrEventSink() {
-    CComPtr<ITfSource> source;
+    ComPtr<ITfSource> source;
     if (threadMgrEventSinkCookie_ == TF_INVALID_COOKIE) {
         return;
     }
-    if (SUCCEEDED(
-            threadMgr_->QueryInterface(IID_ITfSource, (void **)&source))) {
+    if (SUCCEEDED(threadMgr_->QueryInterface(
+            IID_ITfSource,
+            reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
         source->UnadviseSink(threadMgrEventSinkCookie_);
     }
     threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;

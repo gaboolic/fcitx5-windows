@@ -1,4 +1,16 @@
 build
 build-msvc
+build-run
+build-kbd
+build-smoke
 dist
+install
 .cache
+
+# Visual Studio / MSVC
+.vs/
+*.vcxproj.user
+*.vcxproj.filters.user
+
+# User-local CMake
+CMakeUserPresets.json

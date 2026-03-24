@@ -1,33 +1,459 @@
+#include "CandidateListUiElement.h"
 #include "tsf.h"
 
+#include <cstdint>
+#include <string>
+
 namespace fcitx {
-STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
-    CComPtr<ITfInsertAtSelection> insertAtSelection;
-    if (textEditSinkContext_->QueryInterface(
-            IID_ITfInsertAtSelection, (LPVOID *)&insertAtSelection) != S_OK) {
+
+bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
+    if (!textEditSinkContext_ || !screenPt) {
+        return false;
+    }
+    ComPtr<ITfRange> range;
+    if (compositionRange_) {
+        range = compositionRange_;
+    } else {
+        ComPtr<ITfInsertAtSelection> ias;
+        if (FAILED(textEditSinkContext_->QueryInterface(
+                IID_ITfInsertAtSelection,
+                reinterpret_cast<void **>(ias.ReleaseAndGetAddressOf())))) {
+            return false;
+        }
+        if (FAILED(ias->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr, 0,
+                range.ReleaseAndGetAddressOf())) ||
+            !range) {
+            return false;
+        }
+    }
+    ComPtr<IEnumTfContextViews> enumViews;
+    if (FAILED(textEditSinkContext_->EnumViews(
+            enumViews.ReleaseAndGetAddressOf())) ||
+        !enumViews) {
+        return false;
+    }
+    ITfContextView *viewRaw = nullptr;
+    ULONG fetched = 0;
+    if (FAILED(enumViews->Next(1, &viewRaw, &fetched)) || fetched == 0 ||
+        !viewRaw) {
+        return false;
+    }
+    ComPtr<ITfContextView> view;
+    view.Attach(viewRaw);
+    HWND w = nullptr;
+    if (FAILED(view->GetWnd(&w)) || !w) {
+        return false;
+    }
+    RECT rc {};
+    BOOL clipped = FALSE;
+    if (FAILED(view->GetTextExt(ec, range.Get(), &rc, &clipped))) {
+        return false;
+    }
+    screenPt->x = rc.left;
+    screenPt->y = rc.bottom;
+    ClientToScreen(w, screenPt);
+    return true;
+}
+
+void Tsf::resetCompositionState() {
+    endCandidateListUiElement();
+    composition_.Reset();
+    compositionRange_.Reset();
+    if (engine_) {
+        engine_->clear();
+    }
+    pendingMousePick_ = -1;
+}
+
+bool Tsf::ensureCompositionStarted(TfEditCookie ec) {
+    if (composition_) {
+        return true;
+    }
+    ComPtr<ITfInsertAtSelection> insertAtSelection;
+    if (FAILED(textEditSinkContext_->QueryInterface(
+            IID_ITfInsertAtSelection,
+            reinterpret_cast<void **>(
+                insertAtSelection.ReleaseAndGetAddressOf())))) {
+        return false;
+    }
+    ComPtr<ITfRange> range;
+    if (FAILED(insertAtSelection->InsertTextAtSelection(
+            ec, TF_IAS_QUERYONLY, nullptr, 0,
+            range.ReleaseAndGetAddressOf()))) {
+        return false;
+    }
+    ComPtr<ITfContextComposition> contextComposition;
+    if (FAILED(textEditSinkContext_->QueryInterface(
+            IID_ITfContextComposition,
+            reinterpret_cast<void **>(
+                contextComposition.ReleaseAndGetAddressOf())))) {
+        return false;
+    }
+    if (FAILED(contextComposition->StartComposition(
+            ec, range.Get(), this, composition_.ReleaseAndGetAddressOf())) ||
+        !composition_) {
+        return false;
+    }
+    compositionRange_.Reset();
+    if (FAILED(composition_->GetRange(
+            compositionRange_.ReleaseAndGetAddressOf())) ||
+        !compositionRange_) {
+        composition_.Reset();
+        return false;
+    }
+    return true;
+}
+
+void Tsf::updatePreeditText(TfEditCookie ec) {
+    if (!compositionRange_ || !engine_) {
+        return;
+    }
+    const auto &p = engine_->preedit();
+    compositionRange_->SetText(ec, 0, p.c_str(), static_cast<LONG>(p.size()));
+}
+
+void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
+    candidateWin_.hide();
+    endCandidateListUiElement();
+    if (compositionRange_) {
+        compositionRange_->SetText(ec, 0, text.c_str(),
+                                  static_cast<LONG>(text.size()));
+    }
+    if (composition_) {
+        composition_->EndComposition(ec);
+    }
+    composition_.Reset();
+    compositionRange_.Reset();
+    if (engine_) {
+        engine_->clear();
+    }
+}
+
+void Tsf::endCompositionCancel(TfEditCookie ec) {
+    candidateWin_.hide();
+    endCandidateListUiElement();
+    if (compositionRange_) {
+        compositionRange_->SetText(ec, 0, L"", 0);
+    }
+    if (composition_) {
+        composition_->EndComposition(ec);
+    }
+    composition_.Reset();
+    compositionRange_.Reset();
+    if (engine_) {
+        engine_->clear();
+    }
+}
+
+void Tsf::drainCommitsAfterEngine(TfEditCookie ec) {
+    if (!engine_) {
+        return;
+    }
+    for (;;) {
+        const std::wstring w = engine_->drainNextCommit();
+        if (w.empty()) {
+            break;
+        }
+        endCompositionCommit(ec, w);
+    }
+}
+
+void Tsf::afterFcitxEngineKey(TfEditCookie ec) {
+    drainCommitsAfterEngine(ec);
+    if (!engine_) {
+        return;
+    }
+    if (engine_->preedit().empty() && engine_->candidates().empty()) {
+        if (composition_) {
+            endCompositionCancel(ec);
+        }
+    } else {
+        if (!ensureCompositionStarted(ec)) {
+            return;
+        }
+        updatePreeditText(ec);
+        syncCandidateWindow(ec);
+    }
+}
+
+HRESULT Tsf::queryCandidateListDocumentMgr(ITfDocumentMgr **ppDim) {
+    if (!ppDim) {
+        return E_INVALIDARG;
+    }
+    *ppDim = nullptr;
+    if (!textEditSinkContext_) {
         return E_FAIL;
     }
-    CComPtr<ITfRange> range;
-    if (insertAtSelection->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr,
-                                                 0, &range) != S_OK) {
-        return E_FAIL;
+    return textEditSinkContext_->GetDocumentMgr(ppDim);
+}
+
+void Tsf::endCandidateListUiElement() {
+    if (candidateUiElementId_ == TF_INVALID_UIELEMENTID || !threadMgr_) {
+        return;
     }
-    CComPtr<ITfContextComposition> contextComposition;
-    if (textEditSinkContext_->QueryInterface(
-            IID_ITfContextComposition, (void **)&contextComposition) != S_OK) {
-        return E_FAIL;
+    ComPtr<ITfUIElementMgr> mgr;
+    if (SUCCEEDED(threadMgr_->QueryInterface(
+            IID_ITfUIElementMgr,
+            reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
+        mgr->EndUIElement(candidateUiElementId_);
     }
-    CComPtr<ITfComposition> composition;
-    if (contextComposition->StartComposition(ec, range, this, &composition) !=
-            S_OK ||
-        composition == nullptr) {
-        return E_FAIL;
+    candidateUiElementId_ = TF_INVALID_UIELEMENTID;
+}
+
+void Tsf::syncCandidateListUiElement() {
+    if (!threadMgr_ || !engine_) {
+        endCandidateListUiElement();
+        return;
+    }
+    if (engine_->candidates().empty()) {
+        endCandidateListUiElement();
+        return;
+    }
+    ComPtr<ITfUIElementMgr> mgr;
+    if (FAILED(threadMgr_->QueryInterface(
+            IID_ITfUIElementMgr,
+            reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
+        return;
+    }
+    if (!candidateListUi_) {
+        candidateListUi_.Attach(new CandidateListUiElement(this));
+    }
+    ITfUIElement *el = static_cast<ITfUIElement *>(candidateListUi_.Get());
+    if (candidateUiElementId_ == TF_INVALID_UIELEMENTID) {
+        BOOL show = TRUE;
+        DWORD id = TF_INVALID_UIELEMENTID;
+        if (SUCCEEDED(mgr->BeginUIElement(el, &show, &id))) {
+            candidateUiElementId_ = id;
+        }
+    } else {
+        mgr->UpdateUIElement(candidateUiElementId_);
+    }
+}
+
+void Tsf::syncCandidateWindow(TfEditCookie ec) {
+    if (!engine_ || !textEditSinkContext_) {
+        candidateWin_.hide();
+        endCandidateListUiElement();
+        return;
+    }
+    const auto &cands = engine_->candidates();
+    if (cands.empty()) {
+        candidateWin_.hide();
+        endCandidateListUiElement();
+        return;
+    }
+    std::vector<std::wstring> labels;
+    labels.reserve(cands.size());
+    for (size_t i = 0; i < cands.size(); ++i) {
+        if (i < 9) {
+            labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
+        } else if (i == 9) {
+            labels.push_back(L"0. " + cands[i]);
+        } else {
+            labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
+        }
+    }
+    POINT pt = {100, 100};
+    if (!queryCandidateAnchor(ec, &pt)) {
+        if (GetCaretPos(&pt)) {
+            HWND focus = GetFocus();
+            if (focus) {
+                ClientToScreen(focus, &pt);
+            }
+        }
+    }
+    candidateWin_.show(pt.x, pt.y, labels, engine_->highlightIndex());
+    syncCandidateListUiElement();
+}
+
+bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
+    if (!textEditSinkContext_ || !engine_) {
+        return false;
+    }
+    const UINT vk = static_cast<UINT>(wParam);
+    if (engine_->imManagerHotkeyWouldEat(
+            vk, static_cast<std::uintptr_t>(lParam))) {
+        return true;
+    }
+    if (vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        return true;
+    }
+    if (!chineseActive_) {
+        return false;
+    }
+    if (vk == VK_ESCAPE || vk == VK_BACK || vk == VK_RETURN) {
+        return true;
+    }
+    if (vk == VK_SPACE) {
+        return !engine_->candidates().empty();
+    }
+    if (!engine_->candidates().empty() &&
+        ((vk >= '0' && vk <= '9') || vk == VK_UP || vk == VK_DOWN)) {
+        return true;
+    }
+    if (vk >= 'A' && vk <= 'Z') {
+        if (GetKeyState(VK_SHIFT) & 0x8000) {
+            return false;
+        }
+        return true;
+    }
+    return false;
+}
+
+HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp) {
+    if (!engine_) {
+        return S_OK;
+    }
+    const UINT vk = static_cast<UINT>(wp);
+
+    if (engine_->tryConsumeImManagerHotkey(vk,
+                                           static_cast<std::uintptr_t>(lp))) {
+        afterFcitxEngineKey(ec);
+        drainCommitsAfterEngine(ec);
+        return S_OK;
     }
 
-    range->SetText(ec, 0, L"哈", 1);
+    if (vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        chineseActive_ = !chineseActive_;
+        if (!chineseActive_) {
+            endCompositionCancel(ec);
+        }
+        syncCandidateWindow(ec);
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
 
-    composition->EndComposition(ec);
+    if (!chineseActive_) {
+        return S_OK;
+    }
 
+    if (vk == VK_ESCAPE) {
+        endCompositionCancel(ec);
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (vk == VK_BACK) {
+        if (!engine_->preedit().empty()) {
+            engine_->backspace();
+            if (engine_->preedit().empty()) {
+                endCompositionCancel(ec);
+            } else {
+                ensureCompositionStarted(ec);
+                updatePreeditText(ec);
+                syncCandidateWindow(ec);
+            }
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (!engine_->candidates().empty() && vk >= '0' && vk <= '9') {
+        const int idx = (vk == '0') ? 9 : (static_cast<int>(vk - '1'));
+        if (idx >= 0 && engine_->hasCandidate(static_cast<size_t>(idx))) {
+            if (engine_->tryForwardCandidateKey(vk)) {
+                afterFcitxEngineKey(ec);
+            } else {
+                endCompositionCommit(
+                    ec, engine_->candidateText(static_cast<size_t>(idx)));
+            }
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (!engine_->candidates().empty() && (vk == VK_UP || vk == VK_DOWN)) {
+        if (engine_->tryForwardCandidateKey(vk)) {
+            afterFcitxEngineKey(ec);
+        } else {
+            if (vk == VK_UP) {
+                engine_->moveHighlight(-1);
+            } else {
+                engine_->moveHighlight(1);
+            }
+            syncCandidateWindow(ec);
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (vk == VK_RETURN) {
+        if (!engine_->candidates().empty()) {
+            if (engine_->tryForwardCandidateKey(VK_RETURN)) {
+                afterFcitxEngineKey(ec);
+            } else {
+                const auto t = engine_->highlightedCandidateText();
+                if (!t.empty()) {
+                    endCompositionCommit(ec, t);
+                }
+            }
+        } else if (!engine_->preedit().empty()) {
+            if (engine_->tryForwardPreeditCommit()) {
+                afterFcitxEngineKey(ec);
+            } else {
+                endCompositionCommit(ec, engine_->preedit());
+            }
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (vk == VK_SPACE && !engine_->candidates().empty()) {
+        if (engine_->tryForwardCandidateKey(VK_SPACE)) {
+            afterFcitxEngineKey(ec);
+        } else {
+            const auto t = engine_->highlightedCandidateText();
+            if (!t.empty()) {
+                endCompositionCommit(ec, t);
+            }
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (vk >= 'A' && vk <= 'Z') {
+        if (GetKeyState(VK_SHIFT) & 0x8000) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
+        wchar_t ch = static_cast<wchar_t>(vk - L'A' + L'a');
+        if (engine_->preedit().size() < 32) {
+            engine_->appendLatinLowercase(ch);
+            if (!ensureCompositionStarted(ec)) {
+                drainCommitsAfterEngine(ec);
+                return S_OK;
+            }
+            updatePreeditText(ec);
+            syncCandidateWindow(ec);
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    drainCommitsAfterEngine(ec);
     return S_OK;
 }
+
+STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
+    if (!engine_) {
+        return S_OK;
+    }
+    if (pendingMousePick_ >= 0) {
+        const int idx = pendingMousePick_;
+        pendingMousePick_ = -1;
+        if (!composition_ || !engine_->hasCandidate(static_cast<size_t>(idx))) {
+            return S_OK;
+        }
+        if (engine_->feedCandidatePick(static_cast<size_t>(idx))) {
+            afterFcitxEngineKey(ec);
+        } else {
+            endCompositionCommit(
+                ec, engine_->candidateText(static_cast<size_t>(idx)));
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+    return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_);
+}
+
 } // namespace fcitx

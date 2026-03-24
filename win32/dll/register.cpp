@@ -1,8 +1,8 @@
 #include "register.h"
 #include "util.h"
-#include <atlcomcli.h>
 #include <filesystem>
 #include <msctf.h>
+#include <wrl/client.h>
 
 namespace fs = std::filesystem;
 
@@ -66,13 +66,16 @@ BOOL RegisterProfiles() {
     GetModuleFileNameW(dllInstance, dllPath, MAX_PATH);
     fs::path path = dllPath;
     path = path.remove_filename().append("penguin.ico");
-    CComPtr<ITfInputProcessorProfileMgr> mgr;
-    mgr.CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_ALL);
+    Microsoft::WRL::ComPtr<ITfInputProcessorProfileMgr> mgr;
+    HRESULT hrCo = CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
+                                    CLSCTX_ALL, IID_PPV_ARGS(&mgr));
+    if (FAILED(hrCo)) {
+        return FALSE;
+    }
     auto hr = mgr->RegisterProfile(
         FCITX_CLSID, TEXTSERVICE_LANGID_HANS, PROFILE_GUID, pchDesc.c_str(),
         pchDesc.size() * sizeof(WCHAR), path.c_str(),
         path.wstring().size() * sizeof(WCHAR), 0, nullptr, 0, 1, 0);
-    mgr.Release();
     return hr == S_OK;
 }
 
