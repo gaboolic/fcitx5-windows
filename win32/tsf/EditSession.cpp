@@ -344,6 +344,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         }
         syncCandidateWindow(ec);
         drainCommitsAfterEngine(ec);
+        langBarNotifyIconUpdate();
         return S_OK;
     }
 
@@ -459,6 +460,11 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 }
 
 STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
+    if (pendingTrayToggleChinese_) {
+        pendingTrayToggleChinese_ = false;
+        trayToggleChineseInEditSession(ec);
+        return S_OK;
+    }
     if (!engine_) {
         return S_OK;
     }

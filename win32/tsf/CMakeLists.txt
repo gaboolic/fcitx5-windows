@@ -1,4 +1,5 @@
 add_library(tsf STATIC
+    LangBarTray.cpp
     tsf.cpp
     CandidateListUiElement.cpp
     TextInputProcessorEx.cpp

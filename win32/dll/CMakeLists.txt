@@ -8,7 +8,7 @@ if(NOT MSVC)
   target_compile_options(fcitx5-x86_64 PRIVATE "-Wno-dll-attribute-on-redeclaration")
 endif()
 
-target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32)
+target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32 shell32)
 if(WIN32 AND NOT MSVC)
   target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
 endif()

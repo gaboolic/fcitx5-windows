@@ -8,6 +8,7 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 STDAPI Tsf::Deactivate() {
     candidateWin_.hide();
     resetCompositionState();
+    uninitLangBarTrayItem();
     initTextEditSink(nullptr);
     uninitThreadMgrEventSink();
     uninitKeyEventSink();
@@ -33,6 +34,8 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     if (!initKeyEventSink()) {
         goto ActivateExError;
     }
+
+    initLangBarTrayItem();
 
     return S_OK;
 

@@ -21,6 +21,7 @@ endif()
 add_subdirectory(assets)
 add_subdirectory(tsf)
 add_subdirectory(dll)
+add_subdirectory(configui)
 
 enable_testing()
 add_subdirectory(tests)

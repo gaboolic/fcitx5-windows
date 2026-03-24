@@ -44,6 +44,7 @@ Name: "desktopuninstall"; Description: "Create desktop shortcut to uninstall"; G
 Source: "{#StageDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: ".git\*"
 
 [Icons]
+Name: "{autoprograms}\{#MyAppName}\Settings"; Filename: "{app}\bin\fcitx5-config-win32.exe"
 Name: "{autoprograms}\{#MyAppName}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{autoprograms}\{#MyAppName}\Fcitx5 user config"; Filename: "{win}\explorer.exe"; Parameters: """{userappdata}\Fcitx5"""
 Name: "{commondesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: desktopuninstall

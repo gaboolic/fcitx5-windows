@@ -18,14 +18,21 @@
 .PARAMETER EditGlobalConfig
   Open conf\fcitx5\config (global options incl. DefaultPageSize) in notepad.exe.
 
+.PARAMETER LaunchSettingsGui
+  Run fcitx5-config-win32.exe if found (same GUI as bin\ next to TSF IME). Tries
+  $env:FCITX5_BIN, $env:FCITX5_HOME\bin, PATH.
+
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\open-fcitx5-user-config.ps1
 .EXAMPLE
   powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\open-fcitx5-user-config.ps1 -EditProfile -EditGlobalConfig
+.EXAMPLE
+  $env:FCITX5_BIN = 'C:\Fcitx5Portable\bin'; .\scripts\open-fcitx5-user-config.ps1 -LaunchSettingsGui
 #>
 param(
     [switch] $EditProfile,
-    [switch] $EditGlobalConfig
+    [switch] $EditGlobalConfig,
+    [switch] $LaunchSettingsGui
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,4 +67,31 @@ if ($EditProfile) {
 if ($EditGlobalConfig) {
     $gc = Open-FirstExistingOrNew @('conf\fcitx5\config')
     Start-Process notepad.exe -ArgumentList "`"$gc`""
+}
+
+if ($LaunchSettingsGui) {
+    $name = 'fcitx5-config-win32.exe'
+    $dirs = @(
+        $env:FCITX5_BIN,
+        $(if ($env:FCITX5_HOME) { Join-Path $env:FCITX5_HOME 'bin' })
+    ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
+    $started = $false
+    foreach ($d in $dirs) {
+        $exe = Join-Path $d $name
+        if (Test-Path -LiteralPath $exe) {
+            Start-Process -FilePath $exe
+            $started = $true
+            break
+        }
+    }
+    if (-not $started) {
+        $cmd = Get-Command $name -ErrorAction SilentlyContinue
+        if ($cmd) {
+            Start-Process -FilePath $cmd.Source
+            $started = $true
+        }
+    }
+    if (-not $started) {
+        Write-Warning "fcitx5-config-win32.exe not found. Set FCITX5_BIN to your install ...\bin (portable layout), or add bin to PATH."
+    }
 }

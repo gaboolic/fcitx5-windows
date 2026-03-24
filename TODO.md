@@ -46,10 +46,9 @@
    - [x] **图形安装向导（Inno Setup 6）**：**`installer/Fcitx5Tsf.iss`** + **`installer/build-installer.ps1 -StageDir …`** → **`installer/dist/Fcitx5TSF-Setup.exe`**（可选安装目录、中英向导语言）；安装目录内 **`unins000.exe`** = 卸载程序，且登记到「应用和功能」；说明见 **`installer/README.txt`**
 
 6. **配置管理界面**
-   - [x] **入门**：**`scripts/open-fcitx5-user-config.ps1`** 打开 `%AppData%\Fcitx5`；**`-EditProfile`** / **`-EditGlobalConfig`** 用记事本打开 **profile** 或 **conf/fcitx5/config**（候选页大小见 **DefaultPageSize**）
-   - [ ] 图形设置程序（或捆绑 **fcitx5-config-qt**）
-   - [ ] 皮肤主题配置
-   - [ ] 快捷键图形化（当前靠 profile / 全局配置文本）
+   - [x] **入门**：**`scripts/open-fcitx5-user-config.ps1`** 打开 `%AppData%\Fcitx5`；**`-EditProfile`** / **`-EditGlobalConfig`** 记事本编辑；**`-LaunchSettingsGui`** 启动 **`fcitx5-config-win32.exe`**（需 **`FCITX5_BIN`** / PATH 指向 **`bin`**）
+   - [x] **简易图形设置（对齐 Linux `GlobalConfig` + `profile`）**：**`win32/configui/fcitx5-config-win32.exe`** — 读写 **`conf/fcitx5/config`**（`readAsIni` / `safeSaveAsIni`）与 **`profile`**；候选每页数量、常用 **Behavior/Hotkey** 开关与热键字符串（fcitx 可移植语法）；程序须在 **`bin/`** 下运行以便 **`mainInstanceHandle`** 与 TSF 布局一致；构建需 **`Fcitx5Core`**（与 IME 同盘CMake）；Inno 开始菜单 **Settings** 快捷方式已链到该 exe
+   - [x] 逐键录制快捷键：**`fcitx5-config-win32`** 各热键行 **Record** + **`WH_KEYBOARD_LL`**（追加 / 完成写回编辑框；Esc 取消）；仍可与手写 fcitx 可移植语法并用
 
 7. **输入法切换功能**
    - [x] **语言配置**：由 **`register.cpp`** 调用 **`ITfInputProcessorProfileMgr::RegisterProfile`** 注册 TIP；**由系统提供 `ITfInputProcessorProfile`**，IME 实现 **`ITfTextInputProcessor(Ex)`** 而非自实现 Profile 接口
@@ -59,17 +58,14 @@
 ### P2 - 增强功能
 
 8. **状态栏托盘图标**
-   - 显示当前输入法状态
-   - 右键菜单（切换输入法、退出）
-   - 点击切换功能
-   - 说明：已注册 **GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT**；完整托盘 UI 需在 **`ctfmon`** 内消息循环 / **ITfLangBarItem** 或独立进程，仍为后续工作
+   - [x] **实现**：**`ITfLangBarItemButton`** + **`TF_LBI_STYLE_SHOWNINTRAY`**（**`LangBarTray.cpp`**），激活时 **``ITfLangBarItemMgr::AddItem``**；图标为 **`penguin.ico`**（与 TIP 注册一致）；**左键**同步 **Ctrl+Space** 的中/英切换（**`langBarScheduleToggleChinese`** + **``RequestEditSession``**）；**右键**菜单：中文 / 英文、**Fcitx5 设置…**（启动 **`fcitx5-config-win32.exe`**）、打开 **`%AppData%\Fcitx5`**；**`MsctfMingwCompat`** 补全 MinGW 缺的 **`ITfLangBarItemButton`** / **`TF_LBI_*`**；链接 **``shell32``**（**`ShellExecute`** / **`SHGetFolderPath`**）
+
+### P3 - 优化功能
 
 9. **拼写纠错支持**
    - 集成 fcitx5 spell 模块
    - 单词拼写检查
    - 说明：依赖 **spell addon** 与同类词典部署，与桌面 fcitx5 一致；TSF 层无额外钩子
-
-### P3 - 优化功能
 
 10. **性能优化**
    - 减少 key event 延迟
@@ -84,5 +80,7 @@
     - 其他语言界面
 
 13. **皮肤主题系统**
+   - [ ] **完整 fcitx5-config-Qt**（各插件分页、主题预览等）
+   - [ ] 皮肤主题配置
     - 自定义候选窗口样式
     - 预设主题

@@ -15,6 +15,7 @@ namespace fcitx {
 
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
+class FcitxLangBarButton;
 class Tsf : public ITfTextInputProcessorEx,
             public ITfThreadMgrEventSink,
             public ITfTextEditSink,
@@ -72,12 +73,21 @@ class Tsf : public ITfTextInputProcessorEx,
     // ITfEditSession
     STDMETHODIMP DoEditSession(TfEditCookie ec) override;
 
+    void langBarScheduleToggleChinese();
+    void langBarNotifyIconUpdate();
+    bool langBarChineseMode() const { return chineseActive_; }
+
   private:
     friend class CandidateListUiElement;
 
     LONG refCount_ = 1;
 
     // ITfThreadMgrEventSink
+    bool initLangBarTrayItem();
+    void uninitLangBarTrayItem();
+    void trayToggleChineseInEditSession(TfEditCookie ec);
+    void trayToggleChineseWithoutContext();
+
     bool initThreadMgrEventSink();
     void uninitThreadMgrEventSink();
     ComPtr<ITfThreadMgr> threadMgr_;
@@ -101,6 +111,8 @@ class Tsf : public ITfTextInputProcessorEx,
     CandidateWindow candidateWin_;
     // Start in Chinese mode: letters go to fcitx; Ctrl+Space toggles to pass-through English.
     bool chineseActive_ = true;
+    FcitxLangBarButton *langBarItem_ = nullptr;
+    bool pendingTrayToggleChinese_ = false;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;
     DWORD candidateUiElementId_ = TF_INVALID_UIELEMENTID;
