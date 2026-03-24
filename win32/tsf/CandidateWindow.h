@@ -37,6 +37,7 @@ class CandidateWindow {
     HWND hwnd_ = nullptr;
     int popupW_ = 0;
     int popupH_ = 0;
+    UINT lastFontDpi_ = 0;
     std::vector<std::wstring> labels_;
     int highlight_ = 0;
     int lineHeight_ = 0;

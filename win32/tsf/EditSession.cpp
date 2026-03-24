@@ -4,6 +4,41 @@
 #include <cstdint>
 #include <string>
 
+namespace {
+
+/// Ctrl/Alt chords are host shortcuts (e.g. Ctrl+Back); must not go to IME.
+bool tsfChordHasCtrlOrAlt() {
+    return (GetKeyState(VK_CONTROL) & 0x8000) != 0 ||
+           (GetKeyState(VK_MENU) & 0x8000) != 0;
+}
+
+/// AltGr is LeftCtrl+RightAlt — not a Ctrl+Alt editor shortcut; Latin must reach IME.
+bool tsfIsAltGrPhysicalDown() {
+    return (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0 &&
+           (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
+}
+
+/// Latin A–Z: pass through on Ctrl/Alt/Shift chords.
+/// - Shift: GetKeyState only — GetAsyncKeyState(VK_SHIFT) is unreliable in some TSF
+///   stacks and can stay "down", which hid all pinyin.
+/// - Ctrl/Alt: require GetKeyState AND GetAsyncKeyState both high so a stale
+///   GetKeyState alone (e.g. after Ctrl+A) does not suppress IME.
+bool tsfLatinKeyShouldPassToApp() {
+    if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+        return true;
+    }
+    if (tsfIsAltGrPhysicalDown()) {
+        return false;
+    }
+    const bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) &&
+                          (GetAsyncKeyState(VK_CONTROL) & 0x8000);
+    const bool altDown = (GetKeyState(VK_MENU) & 0x8000) &&
+                         (GetAsyncKeyState(VK_MENU) & 0x8000);
+    return ctrlDown || altDown;
+}
+
+} // namespace
+
 namespace fcitx {
 
 bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
@@ -332,26 +367,35 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     // Do not eat Backspace/Enter/Escape when there is nothing to edit — let the
     // app handle lone Enter, etc.
     if (vk == VK_BACK) {
+        if (tsfChordHasCtrlOrAlt()) {
+            return false;
+        }
         return hasPanel && !engine_->preedit().empty();
     }
     if (vk == VK_RETURN) {
+        if (tsfChordHasCtrlOrAlt()) {
+            return false;
+        }
         return hasPanel;
     }
     if (vk == VK_ESCAPE) {
+        if (tsfChordHasCtrlOrAlt()) {
+            return false;
+        }
         return hasPanel || composing;
     }
     if (vk == VK_SPACE) {
+        if (tsfChordHasCtrlOrAlt()) {
+            return false;
+        }
         return !engine_->candidates().empty();
     }
-    if (!engine_->candidates().empty() &&
+    if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
         ((vk >= '0' && vk <= '9') || vk == VK_UP || vk == VK_DOWN)) {
         return true;
     }
     if (vk >= 'A' && vk <= 'Z') {
-        if (GetKeyState(VK_SHIFT) & 0x8000) {
-            return false;
-        }
-        return true;
+        return !tsfLatinKeyShouldPassToApp();
     }
     return false;
 }
@@ -406,12 +450,20 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     }
 
     if (vk == VK_ESCAPE) {
+        if (tsfChordHasCtrlOrAlt()) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
         endCompositionCancel(ec);
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
 
     if (vk == VK_BACK) {
+        if (tsfChordHasCtrlOrAlt()) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
         if (!engine_->preedit().empty()) {
             engine_->backspace();
             if (engine_->preedit().empty()) {
@@ -426,7 +478,8 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
 
-    if (!engine_->candidates().empty() && vk >= '0' && vk <= '9') {
+    if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
+        vk >= '0' && vk <= '9') {
         const int idx = (vk == '0') ? 9 : (static_cast<int>(vk - '1'));
         if (idx >= 0 && engine_->hasCandidate(static_cast<size_t>(idx))) {
             if (engine_->tryForwardCandidateKey(vk)) {
@@ -440,7 +493,8 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
 
-    if (!engine_->candidates().empty() && (vk == VK_UP || vk == VK_DOWN)) {
+    if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
+        (vk == VK_UP || vk == VK_DOWN)) {
         if (engine_->tryForwardCandidateKey(vk)) {
             afterFcitxEngineKey(ec);
         } else {
@@ -456,6 +510,10 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     }
 
     if (vk == VK_RETURN) {
+        if (tsfChordHasCtrlOrAlt()) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
         if (!engine_->candidates().empty()) {
             if (engine_->tryForwardCandidateKey(VK_RETURN)) {
                 afterFcitxEngineKey(ec);
@@ -476,7 +534,8 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
 
-    if (vk == VK_SPACE && !engine_->candidates().empty()) {
+    if (vk == VK_SPACE && !tsfChordHasCtrlOrAlt() &&
+        !engine_->candidates().empty()) {
         if (engine_->tryForwardCandidateKey(VK_SPACE)) {
             afterFcitxEngineKey(ec);
         } else {
@@ -490,7 +549,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     }
 
     if (vk >= 'A' && vk <= 'Z') {
-        if (GetKeyState(VK_SHIFT) & 0x8000) {
+        if (tsfLatinKeyShouldPassToApp()) {
             drainCommitsAfterEngine(ec);
             return S_OK;
         }

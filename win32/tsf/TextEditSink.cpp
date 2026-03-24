@@ -34,6 +34,8 @@ bool Tsf::initTextEditSink(ITfDocumentMgr *documentMgr) {
     }
     if (!ret) {
         textEditSinkContext_.Reset();
+    } else if (textEditSinkContext_) {
+        trayEditContextFallback_ = textEditSinkContext_;
     }
     return ret;
 }

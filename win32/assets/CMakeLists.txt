@@ -37,6 +37,10 @@ add_custom_command(
   COMMAND "${MAGICK_EXECUTABLE}" -background none "${PENGUIN_SVG}" "${PENGUIN_ICO}"
   DEPENDS "${PENGUIN_SVG}"
   VERBATIM)
+
+# Sibling win32/dll and LangBarTray use this path (not CMAKE_CURRENT_BINARY_DIR under dll/).
+set(FCITX_WIN32_PENGUIN_ICO "${PENGUIN_ICO}" PARENT_SCOPE)
+
 add_custom_target(GenerateIco ALL
     DEPENDS "${PENGUIN_ICO}"
 )

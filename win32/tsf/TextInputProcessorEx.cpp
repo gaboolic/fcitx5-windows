@@ -8,8 +8,10 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 STDAPI Tsf::Deactivate() {
     candidateWin_.hide();
     resetCompositionState();
+    resetShiftToggleGesture();
     uninitLangBarTrayItem();
     initTextEditSink(nullptr);
+    trayEditContextFallback_.Reset();
     uninitThreadMgrEventSink();
     uninitKeyEventSink();
     threadMgr_.Reset();

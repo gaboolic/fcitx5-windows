@@ -14,6 +14,12 @@
 #ifndef CONNECT_E_ADVISELIMIT
 #define CONNECT_E_ADVISELIMIT static_cast<HRESULT>(0x80040203L)
 #endif
+#ifndef NIF_GUID
+#define NIF_GUID 0x00000020
+#endif
+#ifndef NOTIFYICON_VERSION_4
+#define NOTIFYICON_VERSION_4 4U
+#endif
 
 extern void DllAddRef();
 extern void DllRelease();
@@ -26,6 +32,10 @@ namespace {
 const GUID kFcitxTrayLangBarItemId = {
     0xf7e8d9c0, 0xb1a2, 0x4e3f, {0x9d, 0x8c, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2d}};
 
+/** Stable id for Shell_NotifyIcon so Windows can persist tray visibility per user. */
+const GUID kFcitxShellTrayNotifyGuid = {
+    0x8b4d3a2f, 0x1e0c, 0x4a5b, {0x9c, 0x8d, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2e}};
+
 enum TrayMenuId : UINT {
     IDM_CHINESE = 0x4100,
     IDM_ENGLISH,
@@ -35,10 +45,55 @@ enum TrayMenuId : UINT {
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kShellTrayUid = 1;
+/** Win32 resource id in fcitx5-ime.rc (fcitx5-x86_64.dll); keep in sync with .rc.in */
+constexpr WORD kFcitxPenguinIconResId = 100;
 const wchar_t kShellTrayHostClass[] = L"Fcitx5ShellTrayHost";
 bool gShellTrayClassRegistered = false;
 
+void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
+    ZeroMemory(nid, sizeof(*nid));
+    nid->cbSize = sizeof(*nid);
+    nid->hWnd = hostHwnd;
+    nid->uID = kShellTrayUid;
+    nid->uFlags = NIF_GUID;
+    nid->guidItem = kFcitxShellTrayNotifyGuid;
+}
+
+bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode) {
+    NOTIFYICONDATAW nid = {};
+    fillShellTrayNidIdentity(&nid, hostHwnd);
+    nid.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = kShellTrayCallback;
+    nid.hIcon = icon;
+    if (chineseMode) {
+        wcsncpy_s(nid.szTip,
+                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                  _TRUNCATE);
+    } else {
+        wcsncpy_s(nid.szTip,
+                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                  _TRUNCATE);
+    }
+    if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
+        return false;
+    }
+    nid.uVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIconW(NIM_SETVERSION, &nid);
+    return true;
+}
+
 HICON loadPenguinIconNearDll(unsigned cx, unsigned cy) {
+    HICON embedded = reinterpret_cast<HICON>(LoadImageW(
+        dllInstance, MAKEINTRESOURCEW(kFcitxPenguinIconResId), IMAGE_ICON,
+        static_cast<int>(cx), static_cast<int>(cy), LR_DEFAULTCOLOR));
+    if (!embedded) {
+        embedded = reinterpret_cast<HICON>(LoadImageW(
+            dllInstance, MAKEINTRESOURCEW(kFcitxPenguinIconResId), IMAGE_ICON,
+            0, 0, LR_DEFAULTCOLOR));
+    }
+    if (embedded) {
+        return embedded;
+    }
     WCHAR dllPath[MAX_PATH];
     if (!GetModuleFileNameW(dllInstance, dllPath, MAX_PATH)) {
         return nullptr;
@@ -158,8 +213,9 @@ STDMETHODIMP FcitxLangBarButton::GetTooltipString(BSTR *pbstrToolTip) {
         return E_INVALIDARG;
     }
     const wchar_t *s =
-        tsf_ && tsf_->langBarChineseMode() ? L"Fcitx5 — 中文输入\n左键：中/英\n右键：菜单"
-                                            : L"Fcitx5 — English (pass-through)\n左键：中/英\n右键：菜单";
+        tsf_ && tsf_->langBarChineseMode()
+            ? L"Fcitx5 — 中文输入\nShift：中/英  Ctrl+Space：中/英\n右键：菜单"
+            : L"Fcitx5 — English (pass-through)\nShift：中/英  Ctrl+Space：中/英\n右键：菜单";
     *pbstrToolTip = SysAllocString(s);
     return *pbstrToolTip ? S_OK : E_OUTOFMEMORY;
 }
@@ -197,14 +253,10 @@ STDMETHODIMP FcitxLangBarButton::OnClick(TfLBIClick click, POINT pt,
         DestroyMenu(menu);
         switch (cmd) {
         case IDM_CHINESE:
-            if (!tsf_->langBarChineseMode()) {
-                tsf_->langBarScheduleToggleChinese();
-            }
+            tsf_->langBarScheduleSetChineseMode(true);
             break;
         case IDM_ENGLISH:
-            if (tsf_->langBarChineseMode()) {
-                tsf_->langBarScheduleToggleChinese();
-            }
+            tsf_->langBarScheduleSetChineseMode(false);
             break;
         case IDM_SETTINGS_GUI:
             launchSettingsGui();
@@ -322,15 +374,32 @@ void Tsf::uninitLangBarTrayItem() {
 void Tsf::langBarScheduleToggleChinese() {
     pendingTrayToggleChinese_ = true;
     HRESULT hr = E_FAIL;
-    if (textEditSinkContext_) {
-        textEditSinkContext_->RequestEditSession(clientId_, this,
-                                                  TF_ES_SYNC | TF_ES_READWRITE,
-                                                  &hr);
+    ComPtr<ITfContext> ctx = textEditSinkContext_;
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (!ctx) {
+        ctx = trayEditContextFallback_;
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
+                                &hr);
     }
     if (FAILED(hr)) {
         pendingTrayToggleChinese_ = false;
         trayToggleChineseWithoutContext();
     }
+}
+
+void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
+    if (chineseActive_ == wantChinese) {
+        langBarNotifyIconUpdate();
+        return;
+    }
+    langBarScheduleToggleChinese();
 }
 
 void Tsf::langBarNotifyIconUpdate() {
@@ -352,6 +421,11 @@ void Tsf::trayToggleChineseInEditSession(TfEditCookie ec) {
 
 void Tsf::trayToggleChineseWithoutContext() {
     chineseActive_ = !chineseActive_;
+    candidateWin_.hide();
+    endCandidateListUiElement();
+    if (engine_) {
+        engine_->clear();
+    }
     langBarNotifyIconUpdate();
 }
 
@@ -427,34 +501,15 @@ bool Tsf::initShellTrayIcon() {
     if (shellTrayAdded_) {
         return true;
     }
-    NOTIFYICONDATAW nid = {};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = shellTrayHostHwnd_;
-    nid.uID = kShellTrayUid;
-    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = kShellTrayCallback;
-    nid.hIcon = shellTrayIcon_;
-    if (langBarChineseMode()) {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 \x4e2d\x6587\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
-    } else {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 English\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
-    }
-    shellTrayAdded_ = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+    shellTrayAdded_ = shellTrayNotifyAdd(shellTrayHostHwnd_, shellTrayIcon_,
+                                        langBarChineseMode());
     return shellTrayAdded_;
 }
 
 void Tsf::uninitShellTrayIcon() {
     if (shellTrayAdded_ && shellTrayHostHwnd_) {
         NOTIFYICONDATAW nid = {};
-        nid.cbSize = sizeof(nid);
-        nid.hWnd = shellTrayHostHwnd_;
-        nid.uID = kShellTrayUid;
+        fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_);
         Shell_NotifyIconW(NIM_DELETE, &nid);
     }
     shellTrayAdded_ = false;
@@ -474,20 +529,16 @@ void Tsf::updateShellTrayTooltip() {
         return;
     }
     NOTIFYICONDATAW nid = {};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = shellTrayHostHwnd_;
-    nid.uID = kShellTrayUid;
-    nid.uFlags = NIF_TIP;
+    fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_);
+    nid.uFlags |= NIF_TIP;
     if (langBarChineseMode()) {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 \x4e2d\x6587\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
+        wcsncpy_s(nid.szTip,
+                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                  _TRUNCATE);
     } else {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 English\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
+        wcsncpy_s(nid.szTip,
+                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                  _TRUNCATE);
     }
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -498,31 +549,12 @@ void Tsf::recreateShellTrayIcon() {
     }
     if (shellTrayAdded_) {
         NOTIFYICONDATAW del = {};
-        del.cbSize = sizeof(del);
-        del.hWnd = shellTrayHostHwnd_;
-        del.uID = kShellTrayUid;
+        fillShellTrayNidIdentity(&del, shellTrayHostHwnd_);
         Shell_NotifyIconW(NIM_DELETE, &del);
         shellTrayAdded_ = false;
     }
-    NOTIFYICONDATAW nid = {};
-    nid.cbSize = sizeof(nid);
-    nid.hWnd = shellTrayHostHwnd_;
-    nid.uID = kShellTrayUid;
-    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
-    nid.uCallbackMessage = kShellTrayCallback;
-    nid.hIcon = shellTrayIcon_;
-    if (langBarChineseMode()) {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 \x4e2d\x6587\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
-    } else {
-        wcsncpy_s(
-            nid.szTip,
-            L"Fcitx5 \x2014 English\n\x5de6\x952e\x5207\x6362\x4e2d/\x82f1",
-            _TRUNCATE);
-    }
-    shellTrayAdded_ = Shell_NotifyIconW(NIM_ADD, &nid) != FALSE;
+    shellTrayAdded_ = shellTrayNotifyAdd(shellTrayHostHwnd_, shellTrayIcon_,
+                                        langBarChineseMode());
 }
 
 void Tsf::showShellTrayContextMenu() {
@@ -556,14 +588,10 @@ void Tsf::showShellTrayContextMenu() {
     PostMessageW(owner, WM_NULL, 0, 0);
     switch (cmd) {
     case IDM_CHINESE:
-        if (!langBarChineseMode()) {
-            langBarScheduleToggleChinese();
-        }
+        langBarScheduleSetChineseMode(true);
         break;
     case IDM_ENGLISH:
-        if (langBarChineseMode()) {
-            langBarScheduleToggleChinese();
-        }
+        langBarScheduleSetChineseMode(false);
         break;
     case IDM_SETTINGS_GUI:
         launchSettingsGui();

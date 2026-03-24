@@ -5,6 +5,10 @@
 #include <algorithm>
 #include <windowsx.h>
 
+#ifndef USER_DEFAULT_SCREEN_DPI
+#define USER_DEFAULT_SCREEN_DPI 96
+#endif
+
 namespace fcitx {
 
 namespace {
@@ -144,12 +148,15 @@ void CandidateWindow::layoutAndPaint() {
     if (!hwnd_) {
         return;
     }
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    padX_ = MulDiv(8, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    padY_ = MulDiv(6, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
     HDC hdc = GetDC(hwnd_);
     HFONT old = nullptr;
     if (font_) {
         old = (HFONT)SelectObject(hdc, font_);
     }
-    int maxW = 80;
+    int maxW = MulDiv(80, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
     for (const auto &s : labels_) {
         SIZE sz = {};
         GetTextExtentPoint32W(hdc, s.c_str(), static_cast<int>(s.size()), &sz);
@@ -182,16 +189,25 @@ void CandidateWindow::show(int screenX, int screenY,
         return;
     }
     ensureClass();
-    if (!font_) {
-        font_ = CreateFontW(-14, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    }
     if (!hwnd_) {
         hwnd_ =
             CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                             kClassName, L"", WS_POPUP | WS_BORDER, screenX, screenY,
                             100, 100, nullptr, nullptr, dllInstance, this);
+    }
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    if (!font_ || lastFontDpi_ != dpi) {
+        if (font_) {
+            DeleteObject(font_);
+            font_ = nullptr;
+        }
+        lastFontDpi_ = dpi;
+        const int fontPx =
+            MulDiv(14, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+        font_ = CreateFontW(-fontPx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
+                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
+                            L"Segoe UI");
     }
     layoutAndPaint();
     clampToWorkArea(&screenX, &screenY);

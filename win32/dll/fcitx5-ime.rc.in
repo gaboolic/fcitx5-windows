@@ -1,0 +1,2 @@
+/* Tray/LangBar icon; id 100 == kFcitxPenguinIconResId in LangBarTray.cpp */
+100 ICON @PENGUIN_ICO_FOR_RC@

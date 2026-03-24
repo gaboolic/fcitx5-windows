@@ -4,6 +4,29 @@ add_library(fcitx5-x86_64 SHARED
     util.cpp
 )
 
+if(WIN32)
+  if(NOT DEFINED FCITX_WIN32_PENGUIN_ICO)
+    message(
+      FATAL_ERROR
+        "FCITX_WIN32_PENGUIN_ICO unset: include win32/assets before win32/dll (add_subdirectory order).")
+  endif()
+  file(TO_CMAKE_PATH "${FCITX_WIN32_PENGUIN_ICO}" _fcitx_penguin_ico)
+  string(REPLACE "\\" "/" _fcitx_penguin_ico_slash "${_fcitx_penguin_ico}")
+  set(PENGUIN_ICO_FOR_RC "\"${_fcitx_penguin_ico_slash}\"")
+  configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/fcitx5-ime.rc.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/fcitx5-ime.rc"
+    @ONLY)
+  target_sources(fcitx5-x86_64 PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/fcitx5-ime.rc")
+  add_dependencies(fcitx5-x86_64 GenerateIco)
+  add_custom_command(
+    TARGET fcitx5-x86_64
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FCITX_WIN32_PENGUIN_ICO}"
+            $<TARGET_FILE_DIR:fcitx5-x86_64>
+    COMMENT "Copy penguin.ico next to IME DLL (TSF IconFile + file fallback)")
+endif()
+
 if(NOT MSVC)
   target_compile_options(fcitx5-x86_64 PRIVATE "-Wno-dll-attribute-on-redeclaration")
 endif()
@@ -34,7 +57,7 @@ if(TARGET Fcitx5Core AND TARGET Fcitx5Utils)
     FILES $<TARGET_FILE:Fcitx5Core> $<TARGET_FILE:Fcitx5Utils>
     DESTINATION "${CMAKE_INSTALL_BINDIR}")
   # TSF RegisterProfiles looks for penguin.ico next to the IME DLL (optional if not built).
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/penguin.ico"
+  install(FILES "${FCITX_WIN32_PENGUIN_ICO}"
           DESTINATION "${CMAKE_INSTALL_BINDIR}" OPTIONAL)
 
   # MinGW/Clang (e.g. MSYS2 CLANG64): libc++ and libFcitx5Utils deps are separate DLLs.

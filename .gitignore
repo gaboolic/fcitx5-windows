@@ -6,6 +6,7 @@ build-run
 build-kbd
 build-smoke
 build-portable
+build-win32-test
 stage-pinyin
 stage-test
 build-pinyin-fcitx

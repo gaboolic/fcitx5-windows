@@ -74,6 +74,8 @@ class Tsf : public ITfTextInputProcessorEx,
     STDMETHODIMP DoEditSession(TfEditCookie ec) override;
 
     void langBarScheduleToggleChinese();
+    /// Tray / LangBar menu: switch to Chinese (true) or English pass-through (false).
+    void langBarScheduleSetChineseMode(bool wantChinese);
     void langBarNotifyIconUpdate();
     bool langBarChineseMode() const { return chineseActive_; }
 
@@ -105,6 +107,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initTextEditSink(ITfDocumentMgr *documentMgr);
     DWORD textEditSinkCookie_ = TF_INVALID_COOKIE;
     ComPtr<ITfContext> textEditSinkContext_;
+    /// Kept when TSF sink clears on tray focus loss; used to run tray toggle edit session.
+    ComPtr<ITfContext> trayEditContextFallback_;
 
     // ITfKeyEventSink
     bool initKeyEventSink();
@@ -113,6 +117,9 @@ class Tsf : public ITfTextInputProcessorEx,
     BOOL processKeyUp(WPARAM wParam, LPARAM lParam);
     bool canProcessKeyDown(WPARAM wParam, LPARAM lParam);
     bool canProcessKeyUp(WPARAM wParam, LPARAM lParam) const;
+    void trackShiftToggleKeyDown(WPARAM wParam, LPARAM lParam);
+    void trackShiftToggleKeyUp(WPARAM wParam, LPARAM lParam);
+    void resetShiftToggleGesture();
 
     // Composition + candidates: logic in ImeEngine (default Stub).
     CandidateWindow candidateWin_;
@@ -134,6 +141,10 @@ class Tsf : public ITfTextInputProcessorEx,
     LPARAM pendingKeyLParam_ = 0;
     bool pendingKeyIsRelease_ = false;
     int pendingMousePick_ = -1;
+    /// Plain Shift tap toggles Chinese / English (Shift+letter cancels).
+    bool shiftTapTrack_ = false;
+    bool shiftTapInvalidated_ = false;
+    bool shiftTapTogglePending_ = false;
 
     bool keyWouldBeHandled(WPARAM wParam, LPARAM lParam);
     bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const;

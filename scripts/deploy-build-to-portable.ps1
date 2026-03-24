@@ -12,15 +12,22 @@
 .PARAMETER SkipRegsvr32
   Do not run regsvr32 /s after copy (default: run register so TIP stays valid).
 
+.PARAMETER UnregisterFirst
+  Before copying, run regsvr32 /u /s on DeployDir\bin\libfcitx5-x86_64.dll if it exists, then wait briefly.
+  Use this when Copy-Item fails with "being used by another process" (IME DLL still loaded).
+
 .EXAMPLE
   .\scripts\deploy-build-to-portable.ps1
 .EXAMPLE
   .\scripts\deploy-build-to-portable.ps1 -BuildDir D:\vscode\fcitx_projs\fcitx5-windows\build-portable -DeployDir C:\Fcitx5Portable
+.EXAMPLE
+  .\scripts\deploy-build-to-portable.ps1 -DeployDir C:\Fcitx5Portable -UnregisterFirst
 #>
 param(
     [string] $BuildDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build-portable'),
     [string] $DeployDir = 'C:\Fcitx5Portable',
-    [switch] $SkipRegsvr32
+    [switch] $SkipRegsvr32,
+    [switch] $UnregisterFirst
 )
 
 $ErrorActionPreference = 'Stop'
@@ -51,15 +58,41 @@ if (Test-Path -LiteralPath $config) {
     $copyList += @{ Src = $config; Name = 'libFcitx5Config.dll' }
 }
 
+$penguin = Join-Path $BuildDir 'win32\dll\penguin.ico'
+if (Test-Path -LiteralPath $penguin) {
+    $copyList += @{ Src = $penguin; Name = 'penguin.ico' }
+} else {
+    Write-Warning "Optional missing: $penguin (TSF IconFile / file icon fallback; embed may still work)."
+}
+
+$imeInBin = Join-Path $bin 'libfcitx5-x86_64.dll'
+if ($UnregisterFirst -and (Test-Path -LiteralPath $imeInBin)) {
+    Write-Host "regsvr32 /u /s $imeInBin (release IME DLL for overwrite)"
+    Start-Process -FilePath regsvr32.exe -ArgumentList @('/u', '/s', $imeInBin) -Wait
+    Start-Sleep -Seconds 2
+}
+
 Write-Host "Deploy: $BuildDir -> $bin"
 foreach ($item in $copyList) {
     $dest = Join-Path $bin $item.Name
     Write-Host "  $($item.Name)"
-    Copy-Item -LiteralPath $item.Src -Destination $dest -Force
+    $copied = $false
+    for ($i = 0; $i -lt 5; $i++) {
+        try {
+            Copy-Item -LiteralPath $item.Src -Destination $dest -Force -ErrorAction Stop
+            $copied = $true
+            break
+        } catch {
+            if ($i -eq 4) { throw }
+            Write-Warning "Copy retry $($i + 1)/5: $($_.Exception.Message)"
+            Start-Sleep -Seconds 2
+        }
+    }
 }
 
+# $imeInBin already defined above for UnregisterFirst
+
 if (-not $SkipRegsvr32) {
-    $imeInBin = Join-Path $bin 'libfcitx5-x86_64.dll'
     Write-Host "regsvr32 /s $imeInBin"
     Start-Process -FilePath regsvr32.exe -ArgumentList @('/s', $imeInBin) -Wait
 }
