@@ -21,3 +21,4 @@ fi
 
 echo "IME + Core built. Fcitx5Core/Fcitx5Utils are copied next to fcitx5-x86_64.dll (POST_BUILD)."
 echo "Portable layout: cmake --install \"$BUILD_DIR\" --prefix <prefix> (IME + Core/Utils go to CMAKE_INSTALL_BINDIR)."
+echo "Pinyin: see docs/PINYIN_WINDOWS.md (libime + fcitx5-chinese-addons into same prefix after install)."

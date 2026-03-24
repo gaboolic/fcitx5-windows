@@ -1,8 +1,15 @@
 build
+build-clang
+build-clang-msvc
 build-msvc
 build-run
 build-kbd
 build-smoke
+stage-pinyin
+stage-test
+build-pinyin-fcitx
+build-pinyin-libime
+build-pinyin-chinese
 dist
 install
 .cache

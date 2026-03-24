@@ -25,20 +25,23 @@
      - 热键：`GlobalConfig` 的「切换输入法 / 切换分组」经 `EditSession` → `imManagerHotkeyWouldEat` / `tryConsumeImManagerHotkey`，对应 `Instance::enumerate(ic, …)` 与 `InputMethodManager::enumerateGroup`；**Ctrl+Space** 仍仅用于 TSF 层中英切换
      - 与 `Fcitx5.exe` 共享策略：标准路径锚定 IME DLL（`mainInstanceHandle`），同安装根下共用 `config`/`data`；与独立 `Fcitx5.exe` 同时写 `profile` 时仍有竞态可能
 
-4. **拼音 / 中文输入引擎**（未集成 — **要测真实拼音必须先做**）
-   - [ ] 将 **libime** 与 **fcitx5-chinese-addons**（或等价）纳入本仓库 CMake：在 Windows 上编出 **pinyin（及所需 table）** 等 addon **`*.dll`**，并安装到便携布局的 **`lib/fcitx5`**，数据与 mo 等到 **`share/fcitx5`**
-   - [ ] 默认 **`profile` / 分组**：至少包含可用 **`pinyin`**（或明确文档化 `FCITX_TS_IM=pinyin`）；与现有激活顺序（经 `keyboard-us` 回退）一致且无「空分组」
-   - [ ] **`keyboard`（`keyboard-us`）回退**（可选但与 profile 常见配置强相关）：根目录 **`ENABLE_KEYBOARD=ON`** 时能在目标环境找到 **XKBCommon** 等依赖（MSYS2 需装对应包；MSVC 需可解析的 SDK/三方库）；或改为不依赖 XKB 的英文回退方案并写进文档
-   - [ ] **验证路径**：在 **记事本等** 中启用 **TSF IME**（非单独 `Fcitx5.exe`）→ Ctrl+Space 中文 → 拼音上屏与候选与 P0 候选 UI 一致；补充最短「构建 + 部署目录 + 注册」说明（可与 P1-5 安装脚本合并）
+4. **拼音 / 中文输入引擎**（脚本与部署链就绪；单树 CMake / CI 仍可选加强）
+   - [x] **文档与脚本**：`docs/PINYIN_WINDOWS.md`；`scripts/prepare-pinyin-deps.sh`；**`scripts/build-pinyin-stage.sh`**（fcitx5-windows `install` → libime → chinese-addons 至同一 **`STAGE`**）；`contrib/fcitx5/profile.pinyin.example` / **`profile.pinyin-only.example`**
+   - [x] **可重复构建（脚本级）**：见 **`build-pinyin-stage.sh`**；**`ExternalProject` / 单 CMake 树** 或 **CI job** 校验仍可选加强
+   - [x] **默认 profile 示例与文档化**：**`cmake --install`** 安装 **`share/fcitx5/profile*.example`**；**`FCITX_TS_IM=pinyin`** 已写入文档与引擎逻辑；**运行时自动写入用户 profile** 仍可选
+   - [x] **`keyboard-us` 回退路径**：无键盘引擎时用 **`profile.pinyin-only.example`**；需 **keyboard-us** 时 **`ENABLE_KEYBOARD` + XKB** 见 **`PINYIN_WINDOWS.md`**
+   - [x] **验证路径**：**`scripts/install-fcitx5-ime.ps1`** / **`scripts/uninstall-fcitx5-ime.ps1`**（**`deploy-ime-stage.ps1`** 兼容）；**`docs/PINYIN_WINDOWS.md` §6**；**`build-pinyin-stage.sh`** 末尾提示
 
-**工程说明（2025-03）**：`win32/tsf` 已改为 **WRL `ComPtr`**（`<wrl/client.h>`），不再依赖 ATL，便于 VS Build Tools 无 ATL 组件时编译；**仅 MSVC** 可构建独立 `win32/`（无 `Fcitx5Core`，IME 用 Stub）。**带 fcitx 核心的 IME**：在仓库根目录与 `fcitx5` 一起配置 CMake（`FCITX5_WINDOWS_BUILD_WIN32_IME=ON`），使 `tsf` 链接 `Fcitx5::Core` 并编译 `Fcitx5ImeEngine.cpp`。**MSYS/Clang 一键连编**：`scripts/build-msys-full.sh`（配置 + `ninja` + `ctest`；`SKIP_TEST=1` 可跳过测试）；构建后 **`win32/dll` POST_BUILD** 将 `Fcitx5Core` / `Fcitx5Utils` 复制到与 `fcitx5-x86_64.dll` 同目录；`cmake --install` 时上述 DLL 与 IME 一并安装到 `CMAKE_INSTALL_BINDIR`（便携布局与 `Fcitx5.exe` 同 `bin`）。
+**工程说明（2025-03）**：`win32/tsf` 已改为 **WRL `ComPtr`**（`<wrl/client.h>`），不再依赖 ATL，便于 VS Build Tools 无 ATL 组件时编译；**仅 MSVC** 可构建独立 `win32/`（无 `Fcitx5Core`，IME 用 Stub）。**带 fcitx 核心的 IME**：在仓库根目录与 `fcitx5` 一起配置 CMake（`FCITX5_WINDOWS_BUILD_WIN32_IME=ON`），使 `tsf` 链接 `Fcitx5::Core` 并编译 `Fcitx5ImeEngine.cpp`。**MSYS/Clang 一键连编**：`scripts/build-msys-full.sh`（配置 + `ninja` + `ctest`；`SKIP_TEST=1` 可跳过测试）；构建后 **`win32/dll` POST_BUILD** 将 `Fcitx5Core` / `Fcitx5Utils` 复制到与 `fcitx5-x86_64.dll` 同目录；`cmake --install` 时上述 DLL 与 IME 一并安装到 `CMAKE_INSTALL_BINDIR`（便携布局与 `Fcitx5.exe` 同 `bin`）。**拼音 + 部署**：**`build-pinyin-stage.sh`**、**`install-fcitx5-ime.ps1` / `uninstall-fcitx5-ime.ps1`**（**`deploy-ime-stage.ps1`** 兼容）、**`docs/PINYIN_WINDOWS.md`**；**`cmake install`** 附带 **`share/fcitx5/profile.pinyin*.example`** 与可选 **`bin/penguin.ico`**。
 
 ### P1 - 重要功能
 
-5. **安装/卸载脚本完善**（拼音实测强依赖「一次拷全」）
-   - 完整的注册表清理逻辑（含 **TSF / IME CLSID**）
-   - 依赖文件复制：**`fcitx5-x86_64.dll`**、**`Fcitx5Core` / `Fcitx5Utils`**、**`lib/fcitx5` 下全部 addon**、**`share/fcitx5`**、可选 **`Fcitx5.exe`**；与 CMake `install` / POST_BUILD 规则对齐并可在 CI 校验
-   - 多语言支持
+5. **安装/卸载脚本完善**（核心流程已具备；CI / 图形安装器仍可选）
+   - [x] **安装**：**`scripts/install-fcitx5-ime.ps1`**（**robocopy** + **`regsvr32 /s`**）；**`install-fcitx5-ime.sh`**
+   - [x] **卸载**：**`scripts/uninstall-fcitx5-ime.ps1`** — **`regsvr32 /u`** 后 **删除 `HKCR\CLSID\{FC3869BA-…}`** 与 **`HKLM\SOFTWARE\Microsoft\CTF\TIP\{…}`**（与 **`register.cpp`** 一致）；**`-PurgeRegistryOnly`**（无 DLL）；**`-RemoveFiles`** 删部署树；**`uninstall-fcitx5-ime.sh`**
+   - [x] **兼容**：**`deploy-ime-stage.ps1`** 转调上述脚本；**`-Unregister` / `-RemoveFiles` / `-Force`**
+   - [x] **多语言**：**`-UICulture zh|en|auto`**（提示语中英）
+   - [ ] **CI / 安装向导 / per-user HKCU 残留扫描** 仍可选
 
 6. **配置管理界面**
    - 输入法候选数量设置

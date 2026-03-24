@@ -27,7 +27,12 @@ if (CYGWIN)
     set(ECM_DIR /clang64/share/ECM/cmake)
     add_compile_definitions(-D_GNU_SOURCE)
 else()
-    set(CMAKE_INSTALL_PREFIX C:)
+    # Default to C: only when the user did not pass -DCMAKE_INSTALL_PREFIX. An unconditional
+    # assignment would override e.g. -DCMAKE_INSTALL_PREFIX=$STAGE from build-pinyin-stage.sh,
+    # breaking Fcitx5UtilsConfig.cmake (FCITX_INSTALL_CMAKECONFIG_DIR would become C:/lib/cmake).
+    if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+        set(CMAKE_INSTALL_PREFIX "C:" CACHE PATH "Install path prefix" FORCE)
+    endif()
     set(ENV{PKG_CONFIG_PATH} "${CMAKE_SYSROOT}/lib/pkgconfig")
     # For std::osyncstream
     add_compile_options(-fexperimental-library)
@@ -57,3 +62,9 @@ option(FCITX5_WINDOWS_BUILD_WIN32_IME
 if(FCITX5_WINDOWS_BUILD_WIN32_IME)
     add_subdirectory(win32)
 endif()
+
+# Example IME profiles (copy to user config/fcitx5/profile or set FCITX_TS_IM=pinyin)
+install(
+  FILES "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin.example"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin-only.example"
+  DESTINATION share/fcitx5)

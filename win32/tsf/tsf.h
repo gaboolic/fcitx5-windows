@@ -4,6 +4,7 @@
 #include "ImeEngine.h"
 
 #include <msctf.h>
+#include "MsctfMingwCompat.h"
 #include <wrl/client.h>
 
 #include <memory>

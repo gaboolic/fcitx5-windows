@@ -1,0 +1,21 @@
+# 示例：默认分组含拼音 + 美式键盘（需已安装 pinyin 与 keyboard 对应 addon）
+# 保存为 fcitx5 配置目录下的 profile（如 …/config/fcitx5/profile）
+# 若启动报错或项被剔除，请用官方配置工具生成一份 profile 再对照修改
+
+[Groups/0]
+# Group Name
+Name=Default
+# Layout
+Default Layout=us
+DefaultIM=pinyin
+
+[Groups/0/Items/0]
+Name=pinyin
+Layout=
+
+[Groups/0/Items/1]
+Name=keyboard-us
+Layout=
+
+[GroupOrder]
+0=Default

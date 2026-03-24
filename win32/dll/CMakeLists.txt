@@ -9,6 +9,9 @@ if(NOT MSVC)
 endif()
 
 target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32)
+if(WIN32 AND NOT MSVC)
+  target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
+endif()
 
 # When built from repo root with Fcitx5Core, stage runtime DLLs next to the IME
 # (same directory as Fcitx5.exe portable layout expects under bin/).
@@ -26,4 +29,37 @@ if(TARGET Fcitx5Core AND TARGET Fcitx5Utils)
   install(
     FILES $<TARGET_FILE:Fcitx5Core> $<TARGET_FILE:Fcitx5Utils>
     DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  # TSF RegisterProfiles looks for penguin.ico next to the IME DLL (optional if not built).
+  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/penguin.ico"
+          DESTINATION "${CMAKE_INSTALL_BINDIR}" OPTIONAL)
+
+  # MinGW/Clang (e.g. MSYS2 CLANG64): libc++ and libFcitx5Utils deps are separate DLLs.
+  # regsvr32 loads the IME from deploy bin — those must sit next to libfcitx5-x86_64.dll.
+  if(NOT MSVC)
+    get_filename_component(_IME_COMPILER_BINDIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    set(_IME_RUNTIME_DLLS
+      libc++.dll
+      libwinpthread-1.dll
+      libintl-8.dll
+      libiconv-2.dll
+      libuv-1.dll
+      libdl.dll
+    )
+    set(_ime_runtime_post_cmds)
+    foreach(_dll IN LISTS _IME_RUNTIME_DLLS)
+      set(_src "${_IME_COMPILER_BINDIR}/${_dll}")
+      if(EXISTS "${_src}")
+        install(FILES "${_src}" DESTINATION "${CMAKE_INSTALL_BINDIR}")
+        list(APPEND _ime_runtime_post_cmds
+          COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_src}" $<TARGET_FILE_DIR:fcitx5-x86_64>)
+      endif()
+    endforeach()
+    if(_ime_runtime_post_cmds)
+      add_custom_command(
+        TARGET fcitx5-x86_64 POST_BUILD
+        ${_ime_runtime_post_cmds}
+        COMMENT "Copy MinGW/Clang runtime DLLs next to IME DLL")
+    endif()
+  endif()
 endif()

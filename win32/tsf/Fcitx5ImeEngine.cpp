@@ -6,17 +6,26 @@
 #include <fcitx-utils/key.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/event.h>
-#include <fcitx/eventdispatcher.h>
+#include <fcitx-utils/eventdispatcher.h>
 #include <fcitx/globalconfig.h>
 #include <fcitx/instance.h>
 #include <fcitx/inputmethodentry.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
 
+#include <fcitx-utils/log.h>
+
 #include <Windows.h>
 
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <memory>
+#include <ostream>
+#include <streambuf>
+#include <string>
 
 namespace fcitx {
 
@@ -168,6 +177,132 @@ bool isChineseToggleVk(unsigned vk) {
     return vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000);
 }
 
+bool envTruthy(const char *v) {
+    return v && v[0] && std::strcmp(v, "0") != 0;
+}
+
+/// Optional TSF IME logging: `Log::setLogStream` is process-global; refcount when
+/// multiple engines exist. Lines are UTF-8; converted for OutputDebugStringW.
+class FcitxTsfLogBuf final : public std::streambuf {
+public:
+    explicit FcitxTsfLogBuf(bool mirrorDebug) : mirrorDebug_(mirrorDebug) {}
+
+    void openFileUtf8(const char *utf8Path) {
+        const std::u8string u8(reinterpret_cast<const char8_t *>(utf8Path),
+                               reinterpret_cast<const char8_t *>(utf8Path) +
+                                   std::strlen(utf8Path));
+        const std::filesystem::path p(u8);
+        file_.open(p, std::ios::out | std::ios::app);
+        fileOpen_ = file_.is_open();
+    }
+
+    bool isUsable() const { return fileOpen_ || mirrorDebug_; }
+
+    ~FcitxTsfLogBuf() override {
+        sync();
+        if (fileOpen_) {
+            file_.close();
+        }
+    }
+
+    FcitxTsfLogBuf(const FcitxTsfLogBuf &) = delete;
+    FcitxTsfLogBuf &operator=(const FcitxTsfLogBuf &) = delete;
+
+protected:
+    int_type overflow(int_type ch) override {
+        if (ch == traits_type::eof()) {
+            return traits_type::not_eof(ch);
+        }
+        const char c = traits_type::to_char_type(ch);
+        pending_.push_back(c);
+        if (c == '\n') {
+            flushPending();
+        }
+        return ch;
+    }
+
+    int sync() override {
+        flushPending();
+        if (fileOpen_) {
+            file_.pubsync();
+        }
+        return 0;
+    }
+
+private:
+    void flushPending() {
+        if (pending_.empty()) {
+            return;
+        }
+        if (fileOpen_) {
+            file_.sputn(pending_.data(),
+                         static_cast<std::streamsize>(pending_.size()));
+        }
+        if (mirrorDebug_) {
+            std::wstring w = utf8ToWide(pending_);
+            if (!w.empty()) {
+                OutputDebugStringW(w.c_str());
+            } else {
+                OutputDebugStringA(pending_.c_str());
+            }
+        }
+        pending_.clear();
+    }
+
+    std::filebuf file_;
+    bool fileOpen_ = false;
+    const bool mirrorDebug_;
+    std::string pending_;
+};
+
+int gTsImeLogRef = 0;
+std::unique_ptr<FcitxTsfLogBuf> gTsImeLogBuf;
+std::unique_ptr<std::ostream> gTsImeLogOStream;
+
+bool tsImeTryAttachLogging() {
+    const char *path = std::getenv("FCITX_TS_LOG");
+    const bool debugOut = envTruthy(std::getenv("FCITX_TS_LOG_DEBUGOUT"));
+    if ((!path || !path[0]) && !debugOut) {
+        return false;
+    }
+    if (gTsImeLogRef > 0) {
+        ++gTsImeLogRef;
+        return true;
+    }
+
+    const char *rule = std::getenv("FCITX_TS_LOG_RULE");
+    if (rule && rule[0]) {
+        Log::setLogRule(rule);
+    }
+
+    gTsImeLogBuf = std::make_unique<FcitxTsfLogBuf>(debugOut);
+    if (path && path[0]) {
+        gTsImeLogBuf->openFileUtf8(path);
+    }
+    if (!gTsImeLogBuf->isUsable()) {
+        gTsImeLogBuf.reset();
+        return false;
+    }
+
+    ++gTsImeLogRef;
+    gTsImeLogOStream = std::make_unique<std::ostream>(gTsImeLogBuf.get());
+    Log::setLogStream(*gTsImeLogOStream);
+    return true;
+}
+
+void tsImeDetachLogging() {
+    if (gTsImeLogRef <= 0) {
+        return;
+    }
+    --gTsImeLogRef;
+    if (gTsImeLogRef > 0) {
+        return;
+    }
+    Log::setLogStream(std::cerr);
+    gTsImeLogOStream.reset();
+    gTsImeLogBuf.reset();
+}
+
 } // namespace
 
 std::unique_ptr<ImeEngine> makeFcitx5ImeEngineAttempt() {
@@ -187,12 +322,18 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
     ic_.reset();
     dispatcher_.reset();
     instance_.reset();
+    if (loggingAttached_) {
+        tsImeDetachLogging();
+        loggingAttached_ = false;
+    }
 }
 
 bool Fcitx5ImeEngine::init() {
+    loggingAttached_ = false;
     try {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
+        loggingAttached_ = tsImeTryAttachLogging();
         instance_ = std::make_unique<Instance>(0, nullptr);
         instance_->addonManager().registerDefaultLoader(nullptr);
         instance_->initialize();
@@ -202,15 +343,19 @@ bool Fcitx5ImeEngine::init() {
 
         ic_ = std::make_unique<TsfInputContext>(this,
                                                 instance_->inputContextManager());
-        ic_->setCapabilityFlags(CapabilityFlag::Preedit |
-                                CapabilityFlag::FormattedPreedit |
-                                CapabilityFlag::ClientSideInputPanel);
+        ic_->setCapabilityFlags(
+            CapabilityFlags{CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
+                            CapabilityFlag::ClientSideInputPanel});
         ic_->focusIn();
 
         activatePreferredInputMethod();
         syncUiFromIc();
         return true;
     } catch (...) {
+        if (loggingAttached_) {
+            tsImeDetachLogging();
+            loggingAttached_ = false;
+        }
         ic_.reset();
         dispatcher_.reset();
         instance_.reset();
@@ -423,7 +568,10 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
         if (!rule.check(k)) {
             continue;
         }
-        if (instance_->enumerate(ic_.get(), true)) {
+        ic_->focusIn();
+        const std::string before = instance_->inputMethod(ic_.get());
+        instance_->enumerate(true);
+        if (instance_->inputMethod(ic_.get()) != before) {
             instance_->save();
             syncUiFromIc();
             return true;
@@ -434,7 +582,10 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
         if (!rule.check(k)) {
             continue;
         }
-        if (instance_->enumerate(ic_.get(), false)) {
+        ic_->focusIn();
+        const std::string before = instance_->inputMethod(ic_.get());
+        instance_->enumerate(false);
+        if (instance_->inputMethod(ic_.get()) != before) {
             instance_->save();
             syncUiFromIc();
             return true;

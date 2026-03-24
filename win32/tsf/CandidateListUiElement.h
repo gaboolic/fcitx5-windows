@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <msctf.h>
+#include "MsctfMingwCompat.h"
 
 namespace fcitx {
 

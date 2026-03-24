@@ -1,0 +1,14 @@
+# 仅拼音（无 keyboard-us）— 在未安装 keyboard 引擎 / 无 XKB 时使用
+# 保存为 config/fcitx5/profile 前请确认 pinyin addon 已就绪
+
+[Groups/0]
+Name=Default
+Default Layout=us
+DefaultIM=pinyin
+
+[Groups/0/Items/0]
+Name=pinyin
+Layout=
+
+[GroupOrder]
+0=Default

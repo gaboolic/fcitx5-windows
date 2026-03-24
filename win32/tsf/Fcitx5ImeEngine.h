@@ -2,7 +2,7 @@
 
 #include "ImeEngine.h"
 
-#include <fcitx-utils/keysym.h>
+#include <fcitx-utils/key.h>
 
 #include <deque>
 #include <memory>
@@ -56,6 +56,8 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool sendKeySym(KeySym sym);
     void syncUiFromIc();
     void activatePreferredInputMethod();
+
+    bool loggingAttached_ = false;
 
     std::unique_ptr<Instance> instance_;
     std::unique_ptr<EventDispatcher> dispatcher_;
