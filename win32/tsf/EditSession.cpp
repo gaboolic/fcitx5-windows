@@ -37,6 +37,43 @@ bool tsfLatinKeyShouldPassToApp() {
     return ctrlDown || altDown;
 }
 
+/// Caret in client coords of hwndCaret → screen. Many hosts return empty
+/// ITfContextView::GetTextExt; GUI thread caret matches the real insertion point.
+/// US-keyboard punctuation keys: must reach fcitx (punctuation addon) instead of the host.
+bool tsfIsChineseModePunctuationVk(unsigned vk) {
+    switch (vk) {
+    case VK_OEM_1:   // ; :
+    case VK_OEM_2:   // / ?
+    case VK_OEM_3:   // ` ~
+    case VK_OEM_4:   // [ {
+    case VK_OEM_5:   // \ |
+    case VK_OEM_6:   // ] }
+    case VK_OEM_7:   // ' "
+    case VK_OEM_PLUS:
+    case VK_OEM_COMMA:
+    case VK_OEM_MINUS:
+    case VK_OEM_PERIOD:
+    case VK_OEM_102: // extra key on some layouts
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
+    if (!out || threadId == 0) {
+        return false;
+    }
+    GUITHREADINFO gti = {};
+    gti.cbSize = sizeof(GUITHREADINFO);
+    if (!GetGUIThreadInfo(threadId, &gti) || !gti.hwndCaret) {
+        return false;
+    }
+    out->x = gti.rcCaret.left;
+    out->y = gti.rcCaret.bottom;
+    return ClientToScreen(gti.hwndCaret, out) != FALSE;
+}
+
 } // namespace
 
 namespace fcitx {
@@ -67,27 +104,41 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         !enumViews) {
         return false;
     }
-    ITfContextView *viewRaw = nullptr;
-    ULONG fetched = 0;
-    if (FAILED(enumViews->Next(1, &viewRaw, &fetched)) || fetched == 0 ||
-        !viewRaw) {
-        return false;
+    DWORD caretThread = 0;
+    for (;;) {
+        ITfContextView *viewRaw = nullptr;
+        ULONG fetched = 0;
+        if (FAILED(enumViews->Next(1, &viewRaw, &fetched)) || fetched == 0 ||
+            !viewRaw) {
+            break;
+        }
+        ComPtr<ITfContextView> view;
+        view.Attach(viewRaw);
+        HWND w = nullptr;
+        if (FAILED(view->GetWnd(&w)) || !w) {
+            continue;
+        }
+        if (caretThread == 0) {
+            caretThread = GetWindowThreadProcessId(w, nullptr);
+        }
+        RECT rc {};
+        BOOL clipped = FALSE;
+        const HRESULT hrExt =
+            view->GetTextExt(ec, range.Get(), &rc, &clipped);
+        const int rw = rc.right - rc.left;
+        const int rh = rc.bottom - rc.top;
+        if (SUCCEEDED(hrExt) && rw > 0 && rh > 0) {
+            screenPt->x = rc.left;
+            screenPt->y = rc.bottom;
+            if (ClientToScreen(w, screenPt)) {
+                return true;
+            }
+        }
     }
-    ComPtr<ITfContextView> view;
-    view.Attach(viewRaw);
-    HWND w = nullptr;
-    if (FAILED(view->GetWnd(&w)) || !w) {
-        return false;
+    if (caretThread != 0) {
+        return tsfScreenPtFromCaretGuiThread(caretThread, screenPt);
     }
-    RECT rc {};
-    BOOL clipped = FALSE;
-    if (FAILED(view->GetTextExt(ec, range.Get(), &rc, &clipped))) {
-        return false;
-    }
-    screenPt->x = rc.left;
-    screenPt->y = rc.bottom;
-    ClientToScreen(w, screenPt);
-    return true;
+    return false;
 }
 
 void Tsf::resetCompositionState() {
@@ -330,7 +381,19 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
     }
     POINT pt = {100, 100};
     if (!queryCandidateAnchor(ec, &pt)) {
-        if (GetCaretPos(&pt)) {
+        bool anchored = false;
+        const HWND tryAnchors[] = {GetForegroundWindow(), GetFocus()};
+        for (HWND anchor : tryAnchors) {
+            if (!anchor) {
+                continue;
+            }
+            const DWORD tid = GetWindowThreadProcessId(anchor, nullptr);
+            if (tid && tsfScreenPtFromCaretGuiThread(tid, &pt)) {
+                anchored = true;
+                break;
+            }
+        }
+        if (!anchored && GetCaretPos(&pt)) {
             HWND focus = GetFocus();
             if (focus) {
                 ClientToScreen(focus, &pt);
@@ -396,6 +459,9 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     }
     if (vk >= 'A' && vk <= 'Z') {
         return !tsfLatinKeyShouldPassToApp();
+    }
+    if (!tsfChordHasCtrlOrAlt() && tsfIsChineseModePunctuationVk(vk)) {
+        return true;
     }
     return false;
 }
@@ -563,6 +629,18 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             updatePreeditText(ec);
             syncCandidateWindow(ec);
         }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
+    if (tsfIsChineseModePunctuationVk(vk)) {
+        if (tsfChordHasCtrlOrAlt()) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
+        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
+                                         false);
+        afterFcitxEngineKey(ec);
         drainCommitsAfterEngine(ec);
         return S_OK;
     }

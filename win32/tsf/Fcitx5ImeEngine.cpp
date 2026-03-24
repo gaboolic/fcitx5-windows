@@ -237,6 +237,45 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         }
         return Key(static_cast<KeySym>(FcitxKey_a + (c - L'a')), st);
     }
+    // US QWERTY OEM keys → keysyms so punctuation / libime see real symbols (not
+    // raw VK with FcitxKey_None).
+    {
+        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        KeyStates stOut = st;
+        if (shiftDown && (stOut & KeyState::Shift)) {
+            stOut ^= KeyState::Shift;
+        }
+        switch (vk) {
+        case VK_OEM_1:
+            return Key(shiftDown ? FcitxKey_colon : FcitxKey_semicolon, stOut);
+        case VK_OEM_2:
+            return Key(shiftDown ? FcitxKey_question : FcitxKey_slash, stOut);
+        case VK_OEM_3:
+            return Key(shiftDown ? FcitxKey_asciitilde : FcitxKey_grave, stOut);
+        case VK_OEM_4:
+            return Key(shiftDown ? FcitxKey_braceleft : FcitxKey_bracketleft,
+                       stOut);
+        case VK_OEM_5:
+            return Key(shiftDown ? FcitxKey_bar : FcitxKey_backslash, stOut);
+        case VK_OEM_6:
+            return Key(shiftDown ? FcitxKey_braceright : FcitxKey_bracketright,
+                       stOut);
+        case VK_OEM_7:
+            return Key(shiftDown ? FcitxKey_quotedbl : FcitxKey_apostrophe, stOut);
+        case VK_OEM_PLUS:
+            return Key(shiftDown ? FcitxKey_plus : FcitxKey_equal, stOut);
+        case VK_OEM_COMMA:
+            return Key(shiftDown ? FcitxKey_less : FcitxKey_comma, stOut);
+        case VK_OEM_MINUS:
+            return Key(shiftDown ? FcitxKey_underscore : FcitxKey_minus, stOut);
+        case VK_OEM_PERIOD:
+            return Key(shiftDown ? FcitxKey_greater : FcitxKey_period, stOut);
+        case VK_OEM_102:
+            return Key(shiftDown ? FcitxKey_bar : FcitxKey_backslash, stOut);
+        default:
+            break;
+        }
+    }
     return Key::fromKeyCode(static_cast<int>(vk), st);
 }
 
@@ -534,18 +573,40 @@ void Fcitx5ImeEngine::syncUiFromIc() {
     // (e.g. pinyin when Preedit capability is off). TSF draws one composition line.
     const auto &clientTxt = ic_->inputPanel().clientPreedit();
     const auto &serverTxt = ic_->inputPanel().preedit();
-    std::string preU8 = clientTxt.toString();
-    const fcitx::Text *cursorSource = &clientTxt;
-    if (preU8.empty()) {
-        preU8 = serverTxt.toString();
-        cursorSource = &serverTxt;
+    std::string clientU8 = clientTxt.toString();
+    std::string serverU8 = serverTxt.toString();
+    std::string preU8;
+    int cursorBytes = -1;
+    if (!clientU8.empty() && !serverU8.empty()) {
+        // Pinyin CommitPreview (and similar): client = preview Chinese, server =
+        // composing pinyin. Kimpanel can show both; merge for a single TSF string.
+        preU8 = std::move(clientU8) + serverU8;
+        const int sc = serverTxt.cursor();
+        const int maxB = static_cast<int>(preU8.size());
+        if (sc < 0) {
+            cursorBytes = maxB;
+        } else {
+            const int base = maxB - static_cast<int>(serverU8.size());
+            cursorBytes = base + sc;
+            if (cursorBytes > maxB) {
+                cursorBytes = maxB;
+            }
+            if (cursorBytes < 0) {
+                cursorBytes = 0;
+            }
+        }
+    } else if (!clientU8.empty()) {
+        preU8 = std::move(clientU8);
+        cursorBytes = clientTxt.cursor();
+    } else {
+        preU8 = std::move(serverU8);
+        cursorBytes = serverTxt.cursor();
     }
     preeditWide_ = utf8ToWide(preU8);
-    const int cbytes = cursorSource->cursor();
-    if (cbytes < 0) {
+    if (cursorBytes < 0) {
         preeditCaretWide_ = static_cast<int>(preeditWide_.size());
     } else {
-        preeditCaretWide_ = utf8PrefixToWideLen(preU8, cbytes);
+        preeditCaretWide_ = utf8PrefixToWideLen(preU8, cursorBytes);
         const int maxC = static_cast<int>(preeditWide_.size());
         if (preeditCaretWide_ > maxC) {
             preeditCaretWide_ = maxC;
