@@ -1,22 +1,48 @@
-name: ci
+name: CI
 
 on:
   push:
     branches:
-      - master
+      - '*'
+    tags:
+      - '[0-9]+.*'
   pull_request:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format 18
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        run: |
+          wget https://apt.llvm.org/llvm-snapshot.gpg.key
+          sudo gpg --dearmor < llvm-snapshot.gpg.key > /usr/share/keyrings/llvm-archive-keyring.gpg
+          echo "deb [signed-by=/usr/share/keyrings/llvm-archive-keyring.gpg] http://apt.llvm.org/jammy/ llvm-toolchain-jammy-18 main" | sudo tee /etc/apt/sources.list.d/llvm-toolchain-jammy-18.list
+          sudo apt-get update
+          sudo apt-get install -y clang-format-18
+          sudo ln -sf /usr/bin/clang-format-18 /usr/local/bin/clang-format
+          clang-format --version
+
+      - name: Code style lint
+        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        shell: bash
+        run: |
+          set -e
+          git ls-files -- '*.cpp' '*.h' | while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            clang-format -Werror --dry-run "$f"
+          done
+
   build-fcitx5-msys:
+    needs: lint
     runs-on: windows-2025
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: recursive
-
-      - name: Lint
-        run: ./win32/scripts/lint.ps1
 
       - name: Install dependencies
         run: |
@@ -43,6 +69,7 @@ jobs:
         uses: mxschmitt/action-tmate@v3
 
   build-fcitx5-clang:
+    needs: lint
     runs-on: windows-2025
     strategy:
       fail-fast: false
@@ -102,6 +129,7 @@ jobs:
         uses: mxschmitt/action-tmate@v3
 
   build-win32:
+    needs: lint
     runs-on: windows-2025
     defaults:
       run:
