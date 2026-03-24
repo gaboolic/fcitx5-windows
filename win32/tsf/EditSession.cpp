@@ -110,6 +110,33 @@ void Tsf::updatePreeditText(TfEditCookie ec) {
     }
     const auto &p = engine_->preedit();
     compositionRange_->SetText(ec, 0, p.c_str(), static_cast<LONG>(p.size()));
+    // After SetText the caret is at the start; align with fcitx Text::cursor().
+    if (!textEditSinkContext_ || p.empty()) {
+        return;
+    }
+    ComPtr<ITfRange> caretRange;
+    if (FAILED(compositionRange_->Clone(caretRange.ReleaseAndGetAddressOf())) ||
+        !caretRange) {
+        return;
+    }
+    if (FAILED(caretRange->Collapse(ec, TF_ANCHOR_START))) {
+        return;
+    }
+    const int caretUtf16 = engine_->preeditCaretUtf16();
+    if (caretUtf16 > 0) {
+        LONG moved = 0;
+        if (FAILED(caretRange->ShiftEnd(ec, caretUtf16, &moved, nullptr))) {
+            return;
+        }
+    }
+    if (FAILED(caretRange->Collapse(ec, TF_ANCHOR_END))) {
+        return;
+    }
+    TF_SELECTION sel{};
+    sel.range = caretRange.Get();
+    sel.style.ase = TF_AE_NONE;
+    sel.style.fInterimChar = FALSE;
+    textEditSinkContext_->SetSelection(ec, 1, &sel);
 }
 
 void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
@@ -118,6 +145,19 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
     if (compositionRange_) {
         compositionRange_->SetText(ec, 0, text.c_str(),
                                   static_cast<LONG>(text.size()));
+        if (textEditSinkContext_ && !text.empty()) {
+            ComPtr<ITfRange> caretAfter;
+            if (SUCCEEDED(compositionRange_->Clone(
+                    caretAfter.ReleaseAndGetAddressOf())) &&
+                caretAfter &&
+                SUCCEEDED(caretAfter->Collapse(ec, TF_ANCHOR_END))) {
+                TF_SELECTION sel{};
+                sel.range = caretAfter.Get();
+                sel.style.ase = TF_AE_NONE;
+                sel.style.fInterimChar = FALSE;
+                textEditSinkContext_->SetSelection(ec, 1, &sel);
+            }
+        }
     }
     if (composition_) {
         composition_->EndComposition(ec);
@@ -284,8 +324,21 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     if (!chineseActive_) {
         return false;
     }
-    if (vk == VK_ESCAPE || vk == VK_BACK || vk == VK_RETURN) {
-        return true;
+    if (vk == VK_RETURN || vk == VK_BACK || vk == VK_ESCAPE) {
+        engine_->syncInputPanelFromIme();
+    }
+    const bool hasPanel = !engine_->preedit().empty() || !engine_->candidates().empty();
+    const bool composing = composition_ != nullptr;
+    // Do not eat Backspace/Enter/Escape when there is nothing to edit — let the
+    // app handle lone Enter, etc.
+    if (vk == VK_BACK) {
+        return hasPanel && !engine_->preedit().empty();
+    }
+    if (vk == VK_RETURN) {
+        return hasPanel;
+    }
+    if (vk == VK_ESCAPE) {
+        return hasPanel || composing;
     }
     if (vk == VK_SPACE) {
         return !engine_->candidates().empty();
@@ -303,7 +356,7 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     return false;
 }
 
-bool Tsf::keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) {
+bool Tsf::keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const {
     if (!textEditSinkContext_ || !engine_) {
         return false;
     }

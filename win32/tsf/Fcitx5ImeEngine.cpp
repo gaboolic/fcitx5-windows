@@ -21,6 +21,7 @@
 
 #include <Windows.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
@@ -60,12 +61,29 @@ extern HINSTANCE mainInstanceHandle;
 
 namespace {
 
+int utf8PrefixToWideLen(const std::string &utf8, int byteCount) {
+    if (byteCount <= 0 || utf8.empty()) {
+        return 0;
+    }
+    const int nBytes =
+        std::min(byteCount, static_cast<int>(static_cast<int>(utf8.size())));
+    const int w =
+        MultiByteToWideChar(CP_UTF8, 0, utf8.data(), nBytes, nullptr, 0);
+    return w > 0 ? w : 0;
+}
+
 std::wstring utf8ToWide(const std::string &utf8) {
     if (utf8.empty()) {
         return {};
     }
     int n = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8.data(),
                                 static_cast<int>(utf8.size()), nullptr, 0);
+    // Invalid UTF-8 sequences (e.g. rare addon output) would make strict
+    // conversion fail and leave inline preedit empty; fall back to lenient.
+    if (n <= 0) {
+        n = MultiByteToWideChar(CP_UTF8, 0, utf8.data(),
+                                static_cast<int>(utf8.size()), nullptr, 0);
+    }
     if (n <= 0) {
         return {};
     }
@@ -250,8 +268,17 @@ public:
                                reinterpret_cast<const char8_t *>(utf8Path) +
                                    std::strlen(utf8Path));
         const std::filesystem::path p(u8);
+        std::error_code ec;
+        bool needBom = true;
+        if (std::filesystem::exists(p, ec)) {
+            needBom = (std::filesystem::file_size(p, ec) == 0);
+        }
         file_.open(p, std::ios::out | std::ios::app);
         fileOpen_ = file_.is_open();
+        if (fileOpen_ && needBom) {
+            static constexpr char bom[] = "\xEF\xBB\xBF";
+            file_.sputn(bom, 3);
+        }
     }
 
     bool isUsable() const { return fileOpen_ || mirrorDebug_; }
@@ -403,6 +430,7 @@ bool Fcitx5ImeEngine::init() {
 
         ic_ = std::make_unique<TsfInputContext>(this,
                                                 instance_->inputContextManager());
+        ic_->setEnablePreedit(true);
         ic_->setCapabilityFlags(
             CapabilityFlags{CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
                             CapabilityFlag::ClientSideInputPanel});
@@ -472,6 +500,8 @@ void Fcitx5ImeEngine::clear() {
 
 const std::wstring &Fcitx5ImeEngine::preedit() const { return preeditWide_; }
 
+int Fcitx5ImeEngine::preeditCaretUtf16() const { return preeditCaretWide_; }
+
 const std::vector<std::wstring> &Fcitx5ImeEngine::candidates() const {
     return candidatesWide_;
 }
@@ -481,6 +511,8 @@ int Fcitx5ImeEngine::highlightIndex() const { return highlightIndex_; }
 void Fcitx5ImeEngine::setHighlightIndex(int /*index*/) {
     // Selection is owned by fcitx; use arrow keys via tryForwardCandidateKey.
 }
+
+void Fcitx5ImeEngine::syncInputPanelFromIme() { syncUiFromIc(); }
 
 void Fcitx5ImeEngine::syncUiFromIc() {
     if (instance_) {
@@ -492,19 +524,33 @@ void Fcitx5ImeEngine::syncUiFromIc() {
         flushLibuvLoopForIme(instance_->eventLoop());
     }
     preeditWide_.clear();
+    preeditCaretWide_ = 0;
     candidatesWide_.clear();
     highlightIndex_ = 0;
     if (!ic_) {
         return;
     }
     // Addons may set only clientPreedit (keyboard, quickphrase) or only preedit()
-    // (e.g. pinyin when not using client-side string). TSF draws the composition
-    // from preeditWide_; fall back so keys are not swallowed with an empty display.
-    std::string preU8 = ic_->inputPanel().clientPreedit().toString();
+    // (e.g. pinyin when Preedit capability is off). TSF draws one composition line.
+    const auto &clientTxt = ic_->inputPanel().clientPreedit();
+    const auto &serverTxt = ic_->inputPanel().preedit();
+    std::string preU8 = clientTxt.toString();
+    const fcitx::Text *cursorSource = &clientTxt;
     if (preU8.empty()) {
-        preU8 = ic_->inputPanel().preedit().toString();
+        preU8 = serverTxt.toString();
+        cursorSource = &serverTxt;
     }
     preeditWide_ = utf8ToWide(preU8);
+    const int cbytes = cursorSource->cursor();
+    if (cbytes < 0) {
+        preeditCaretWide_ = static_cast<int>(preeditWide_.size());
+    } else {
+        preeditCaretWide_ = utf8PrefixToWideLen(preU8, cbytes);
+        const int maxC = static_cast<int>(preeditWide_.size());
+        if (preeditCaretWide_ > maxC) {
+            preeditCaretWide_ = maxC;
+        }
+    }
     auto list = ic_->inputPanel().candidateList();
     if (!list || list->empty()) {
         return;
@@ -585,13 +631,22 @@ std::wstring Fcitx5ImeEngine::drainNextCommit() {
 }
 
 bool Fcitx5ImeEngine::feedCandidatePick(size_t index) {
-    if (!hasCandidate(index)) {
+    if (!ic_) {
         return false;
     }
-    const KeySym sym =
-        (index == 9) ? FcitxKey_0
-                     : static_cast<KeySym>(FcitxKey_1 + static_cast<KeySym>(index));
-    sendKeySym(sym);
+    if (!ic_->hasFocus()) {
+        ic_->focusIn();
+    }
+    if (instance_) {
+        instance_->eventDispatcher().dispatchPending();
+        flushLibuvLoopForIme(instance_->eventLoop());
+    }
+    auto list = ic_->inputPanel().candidateList();
+    if (!list || list->empty() || static_cast<int>(index) >= list->size()) {
+        return false;
+    }
+    list->candidate(static_cast<int>(index)).select(ic_.get());
+    syncUiFromIc();
     return true;
 }
 

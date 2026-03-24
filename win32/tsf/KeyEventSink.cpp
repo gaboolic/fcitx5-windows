@@ -52,47 +52,53 @@ BOOL Tsf::processKeyUp(WPARAM wParam, LPARAM lParam) {
     return SUCCEEDED(hr) ? TRUE : FALSE;
 }
 
+bool Tsf::canProcessKeyDown(WPARAM wParam, LPARAM lParam) {
+    return textEditSinkContext_ != nullptr && engine_ != nullptr &&
+           keyWouldBeHandled(wParam, lParam);
+}
+
+bool Tsf::canProcessKeyUp(WPARAM wParam, LPARAM lParam) const {
+    return textEditSinkContext_ != nullptr && engine_ != nullptr &&
+           keyUpWouldBeHandled(wParam, lParam);
+}
+
 STDMETHODIMP Tsf::OnSetFocus(BOOL fForeground) { return S_OK; }
 
 STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
                                 LPARAM lParam, BOOL *pfEaten) {
-    if (keyDownHandled_) {
-        *pfEaten = TRUE;
-    } else {
-        *pfEaten = keyDownHandled_ = processKey(wParam, lParam);
-    }
+    (void)pContext;
+    // Peek only: must not run edit session here. Running processKey in both
+    // OnTestKeyDown and OnKeyDown doubles input on some hosts (nii -> ni).
+    *pfEaten = canProcessKeyDown(wParam, lParam) ? TRUE : FALSE;
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                             BOOL *pfEaten) {
-    if (keyDownHandled_) {
-        keyDownHandled_ = FALSE;
-        *pfEaten = TRUE;
-    } else {
-        *pfEaten = keyDownHandled_ = processKey(wParam, lParam);
+    (void)pContext;
+    if (!canProcessKeyDown(wParam, lParam)) {
+        *pfEaten = FALSE;
+        return S_OK;
     }
+    *pfEaten = processKey(wParam, lParam);
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnTestKeyUp(ITfContext *pContext, WPARAM wParam,
                               LPARAM lParam, BOOL *pfEaten) {
-    if (keyUpHandled_) {
-        *pfEaten = TRUE;
-    } else {
-        *pfEaten = keyUpHandled_ = processKeyUp(wParam, lParam);
-    }
+    (void)pContext;
+    *pfEaten = canProcessKeyUp(wParam, lParam) ? TRUE : FALSE;
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                           BOOL *pfEaten) {
-    if (keyUpHandled_) {
-        keyUpHandled_ = FALSE;
-        *pfEaten = TRUE;
-    } else {
-        *pfEaten = keyUpHandled_ = processKeyUp(wParam, lParam);
+    (void)pContext;
+    if (!canProcessKeyUp(wParam, lParam)) {
+        *pfEaten = FALSE;
+        return S_OK;
     }
+    *pfEaten = processKeyUp(wParam, lParam);
     return S_OK;
 }
 

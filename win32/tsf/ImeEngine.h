@@ -13,9 +13,14 @@ class ImeEngine {
   public:
     virtual ~ImeEngine() = default;
 
+    /// Refresh cached preedit/candidates from IME (fcitx InputPanel); no-op for stub.
+    virtual void syncInputPanelFromIme() {}
+
     virtual void clear() = 0;
 
     virtual const std::wstring &preedit() const = 0;
+    /// Caret offset in UTF-16 code units within `preedit()` (TSF composition).
+    virtual int preeditCaretUtf16() const { return static_cast<int>(preedit().size()); }
     virtual const std::vector<std::wstring> &candidates() const = 0;
     virtual int highlightIndex() const = 0;
     virtual void setHighlightIndex(int index) = 0;

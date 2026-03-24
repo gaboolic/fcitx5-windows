@@ -87,6 +87,13 @@ class Tsf : public ITfTextInputProcessorEx,
     void uninitLangBarTrayItem();
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
+    bool initShellTrayIcon();
+    void uninitShellTrayIcon();
+    void updateShellTrayTooltip();
+    void recreateShellTrayIcon();
+    void showShellTrayContextMenu();
+    static LRESULT CALLBACK shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
+                                                 LPARAM lp);
 
     bool initThreadMgrEventSink();
     void uninitThreadMgrEventSink();
@@ -104,14 +111,19 @@ class Tsf : public ITfTextInputProcessorEx,
     void uninitKeyEventSink();
     BOOL processKey(WPARAM wParam, LPARAM lParam);
     BOOL processKeyUp(WPARAM wParam, LPARAM lParam);
-    BOOL keyDownHandled_ = false;
-    BOOL keyUpHandled_ = false;
+    bool canProcessKeyDown(WPARAM wParam, LPARAM lParam);
+    bool canProcessKeyUp(WPARAM wParam, LPARAM lParam) const;
 
     // Composition + candidates: logic in ImeEngine (default Stub).
     CandidateWindow candidateWin_;
     // Start in Chinese mode: letters go to fcitx; Ctrl+Space toggles to pass-through English.
     bool chineseActive_ = true;
     FcitxLangBarButton *langBarItem_ = nullptr;
+    HWND shellTrayHostHwnd_ = nullptr;
+    HICON shellTrayIcon_ = nullptr;
+    bool shellTrayIconOwned_ = false;
+    bool shellTrayAdded_ = false;
+    static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;
@@ -124,7 +136,7 @@ class Tsf : public ITfTextInputProcessorEx,
     int pendingMousePick_ = -1;
 
     bool keyWouldBeHandled(WPARAM wParam, LPARAM lParam);
-    bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam);
+    bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const;
     HRESULT runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
                               bool isRelease);
     void endCompositionCommit(TfEditCookie ec, const std::wstring &text);

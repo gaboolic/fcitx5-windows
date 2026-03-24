@@ -28,7 +28,9 @@ class Fcitx5ImeEngine : public ImeEngine {
     void enqueueCommitUtf8(std::string text);
 
     void clear() override;
+    void syncInputPanelFromIme() override;
     const std::wstring &preedit() const override;
+    int preeditCaretUtf16() const override;
     const std::vector<std::wstring> &candidates() const override;
     int highlightIndex() const override;
     void setHighlightIndex(int index) override;
@@ -70,6 +72,7 @@ class Fcitx5ImeEngine : public ImeEngine {
     std::wstring preeditWide_;
     std::vector<std::wstring> candidatesWide_;
     int highlightIndex_ = 0;
+    int preeditCaretWide_ = 0;
 };
 
 } // namespace fcitx
