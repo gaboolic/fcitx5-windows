@@ -14,6 +14,8 @@
 #include <fcitx/inputpanel.h>
 
 #include <fcitx-utils/log.h>
+#include <fcitx-utils/keysym.h>
+#include <fcitx/event.h>
 
 #include <uv.h>
 
@@ -176,6 +178,22 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         return Key(FcitxKey_BackSpace, st);
     case VK_ESCAPE:
         return Key(FcitxKey_Escape, st);
+    case VK_LSHIFT:
+        return Key(FcitxKey_Shift_L, st);
+    case VK_RSHIFT:
+        return Key(FcitxKey_Shift_R, st);
+    case VK_LCONTROL:
+        return Key(FcitxKey_Control_L, st);
+    case VK_RCONTROL:
+        return Key(FcitxKey_Control_R, st);
+    case VK_LMENU:
+        return Key(FcitxKey_Alt_L, st);
+    case VK_RMENU:
+        return Key(FcitxKey_Alt_R, st);
+    case VK_LWIN:
+        return Key(FcitxKey_Super_L, st);
+    case VK_RWIN:
+        return Key(FcitxKey_Super_R, st);
     case VK_PRIOR:
         return Key(FcitxKey_Page_Up, st);
     case VK_NEXT:
@@ -688,6 +706,41 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
         return true;
     }
     return false;
+}
+
+bool Fcitx5ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
+    if (!instance_) {
+        return false;
+    }
+    switch (vk) {
+    case VK_LSHIFT:
+    case VK_RSHIFT:
+    case VK_LCONTROL:
+    case VK_RCONTROL:
+    case VK_LMENU:
+    case VK_RMENU:
+    case VK_LWIN:
+    case VK_RWIN:
+        return true;
+    default:
+        return false;
+    }
+}
+
+bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
+                                              std::uintptr_t lParam,
+                                              bool isRelease) {
+    if (!ic_) {
+        return false;
+    }
+    if (!ic_->hasFocus()) {
+        ic_->focusIn();
+    }
+    const Key k = keyFromWindowsVk(vk, lParam);
+    KeyEvent ev(ic_.get(), k, isRelease);
+    ic_->keyEvent(ev);
+    syncUiFromIc();
+    return ev.accepted();
 }
 
 } // namespace fcitx

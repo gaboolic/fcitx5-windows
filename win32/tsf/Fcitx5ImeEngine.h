@@ -51,6 +51,10 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool tryConsumeImManagerHotkey(unsigned vk,
                                    std::uintptr_t lParam) override;
 
+    bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
+    bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
+                                 bool isRelease) override;
+
   private:
     bool sendKeySym(KeySym sym);
     void syncUiFromIc();

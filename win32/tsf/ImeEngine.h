@@ -46,6 +46,13 @@ class ImeEngine {
     virtual bool imManagerHotkeyWouldEat(unsigned vk, std::uintptr_t lParam) const;
     /// Apply hotkey if it matches `GlobalConfig`; returns true if the key was consumed.
     virtual bool tryConsumeImManagerHotkey(unsigned vk, std::uintptr_t lParam);
+
+    /// Modifier-only shortcuts (`triggerKeys` / `altTriggerKeys` / …) need KeyDown+KeyUp
+    /// delivered as `fcitx::KeyEvent`; TSF otherwise never calls `OnKeyUp`. Stub: false.
+    virtual bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const;
+    /// Forward one key to fcitx `Instance` key watcher; returns KeyEvent::accepted().
+    virtual bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
+                                         bool isRelease);
 };
 
 std::unique_ptr<ImeEngine> makeStubImeEngine();

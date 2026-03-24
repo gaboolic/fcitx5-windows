@@ -12,6 +12,7 @@ build-pinyin-fcitx
 build-pinyin-libime
 build-pinyin-chinese
 dist
+installer/dist
 install
 .cache
 

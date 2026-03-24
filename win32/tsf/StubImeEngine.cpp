@@ -20,6 +20,16 @@ bool ImeEngine::tryConsumeImManagerHotkey(unsigned /*vk*/,
     return false;
 }
 
+bool ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned /*vk*/) const {
+    return false;
+}
+
+bool ImeEngine::deliverFcitxRawKeyEvent(unsigned /*vk*/,
+                                        std::uintptr_t /*lParam*/,
+                                        bool /*isRelease*/) {
+    return false;
+}
+
 namespace {
 
 class StubImeEngine : public ImeEngine {

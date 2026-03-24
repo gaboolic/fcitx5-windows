@@ -9,6 +9,10 @@
 .PARAMETER RemoveFiles
   After unregister, delete the entire DeployDir tree (requires confirmation unless -Force).
 
+.PARAMETER PurgeHkcu
+  Also remove HKCU\...\CTF\TIP\{CLSID} and HKCU\...\Classes\CLSID\{CLSID} if present
+  (safe for current user; may fix stale language bar entries after uninstall).
+
 .PARAMETER UICulture
   en | zh | auto
 
@@ -17,10 +21,14 @@
 
 .EXAMPLE
   .\uninstall-fcitx5-ime.ps1 -PurgeRegistryOnly
+
+.EXAMPLE
+  .\uninstall-fcitx5-ime.ps1 -DeployDir C:\Fcitx5Portable -PurgeHkcu
 #>
 param(
     [string] $DeployDir,
     [switch] $PurgeRegistryOnly,
+    [switch] $PurgeHkcu,
     [switch] $RemoveFiles,
     [switch] $Force,
     [ValidateSet('auto', 'en', 'zh')]
@@ -45,6 +53,15 @@ if ($PurgeRegistryOnly) {
         Write-Warning "Registry: $($_.Exception.Message)"
     }
     Write-Host $S.PurgeDone
+    if ($PurgeHkcu) {
+        Write-Host $S.HkcuPurge
+        try {
+            Remove-FcitxImeHkcuResidualRegistry
+        } catch {
+            Write-Warning "HKCU: $($_.Exception.Message)"
+        }
+        Write-Host $S.HkcuDone
+    }
     exit 0
 }
 
@@ -76,6 +93,16 @@ try {
     Write-Warning "Registry purge: $($_.Exception.Message)"
 }
 Write-Host $S.PurgeDone
+
+if ($PurgeHkcu) {
+    Write-Host $S.HkcuPurge
+    try {
+        Remove-FcitxImeHkcuResidualRegistry
+    } catch {
+        Write-Warning "HKCU purge: $($_.Exception.Message)"
+    }
+    Write-Host $S.HkcuDone
+}
 
 if ($RemoveFiles) {
     if (-not (Test-Path -LiteralPath $DeployDir)) {

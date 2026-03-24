@@ -36,22 +36,25 @@
 
 ### P1 - 重要功能
 
-5. **安装/卸载脚本完善**（核心流程已具备；CI / 图形安装器仍可选）
+5. **安装/卸载脚本完善**（便携脚本 + 图形安装包）
    - [x] **安装**：**`scripts/install-fcitx5-ime.ps1`**（**robocopy** + **`regsvr32 /s`**）；**`install-fcitx5-ime.sh`**
    - [x] **卸载**：**`scripts/uninstall-fcitx5-ime.ps1`** — **`regsvr32 /u`** 后 **删除 `HKCR\CLSID\{FC3869BA-…}`** 与 **`HKLM\SOFTWARE\Microsoft\CTF\TIP\{…}`**（与 **`register.cpp`** 一致）；**`-PurgeRegistryOnly`**（无 DLL）；**`-RemoveFiles`** 删部署树；**`uninstall-fcitx5-ime.sh`**
    - [x] **兼容**：**`deploy-ime-stage.ps1`** 转调上述脚本；**`-Unregister` / `-RemoveFiles` / `-Force`**
    - [x] **多语言**：**`-UICulture zh|en|auto`**（提示语中英）
-   - [ ] **CI / 安装向导 / per-user HKCU 残留扫描** 仍可选
+   - [x] **HKCU 残留**：**`scripts/scan-fcitx5-hkcu-residual.ps1`** 列出 **`HKCU\…\CTF\TIP\{CLSID}`** / **`HKCU\…\Classes\CLSID\{CLSID}`**；**`uninstall-fcitx5-ime.ps1 -PurgeHkcu`** 删除（可与 **`-PurgeRegistryOnly`** 联用）；**`Fcitx5-Ime.Common.ps1`**：`Get-FcitxImeHkcuResidualRegistryPaths` / `Remove-FcitxImeHkcuResidualRegistry`
+   - [x] **CI**：**`win32` job** 运行 **`scripts/validate-powershell-scripts.ps1`**（语法解析，不执行）
+   - [x] **图形安装向导（Inno Setup 6）**：**`installer/Fcitx5Tsf.iss`** + **`installer/build-installer.ps1 -StageDir …`** → **`installer/dist/Fcitx5TSF-Setup.exe`**（可选安装目录、中英向导语言）；安装目录内 **`unins000.exe`** = 卸载程序，且登记到「应用和功能」；说明见 **`installer/README.txt`**
 
 6. **配置管理界面**
-   - 输入法候选数量设置
-   - 皮肤主题配置
-   - 快捷键配置
+   - [x] **入门**：**`scripts/open-fcitx5-user-config.ps1`** 打开 `%AppData%\Fcitx5`；**`-EditProfile`** / **`-EditGlobalConfig`** 用记事本打开 **profile** 或 **conf/fcitx5/config**（候选页大小见 **DefaultPageSize**）
+   - [ ] 图形设置程序（或捆绑 **fcitx5-config-qt**）
+   - [ ] 皮肤主题配置
+   - [ ] 快捷键图形化（当前靠 profile / 全局配置文本）
 
 7. **输入法切换功能**
-   - 实现 ITfInputProcessorProfile
-   - 支持 Ctrl+Space 切换中英文（TSF 层已有，可与系统语言栏行为对齐）
-   - 支持 Shift 切换输入法
+   - [x] **语言配置**：由 **`register.cpp`** 调用 **`ITfInputProcessorProfileMgr::RegisterProfile`** 注册 TIP；**由系统提供 `ITfInputProcessorProfile`**，IME 实现 **`ITfTextInputProcessor(Ex)`** 而非自实现 Profile 接口
+   - [x] **Ctrl+Space**：TSF 层中英切换（**`EditSession.cpp`**）；与 fcitx **`GlobalConfig` 热键**并行（**`Fcitx5ImeEngine`**）
+   - [x] **修饰键热键（含默认 Shift_L / Super+space 等）**：向 **`Instance` 投递 `KeyEvent` 的按下与抬起**（**`KeyEventSink` + `deliverFcitxRawKeyEvent`**），以支持 **`altTriggerKeys` / `enumerateGroup*`** 等需 **KeyUp** 的逻辑
 
 ### P2 - 增强功能
 
@@ -59,10 +62,12 @@
    - 显示当前输入法状态
    - 右键菜单（切换输入法、退出）
    - 点击切换功能
+   - 说明：已注册 **GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT**；完整托盘 UI 需在 **`ctfmon`** 内消息循环 / **ITfLangBarItem** 或独立进程，仍为后续工作
 
 9. **拼写纠错支持**
    - 集成 fcitx5 spell 模块
    - 单词拼写检查
+   - 说明：依赖 **spell addon** 与同类词典部署，与桌面 fcitx5 一致；TSF 层无额外钩子
 
 ### P3 - 优化功能
 

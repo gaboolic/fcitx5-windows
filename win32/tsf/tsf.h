@@ -93,7 +93,9 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initKeyEventSink();
     void uninitKeyEventSink();
     BOOL processKey(WPARAM wParam, LPARAM lParam);
+    BOOL processKeyUp(WPARAM wParam, LPARAM lParam);
     BOOL keyDownHandled_ = false;
+    BOOL keyUpHandled_ = false;
 
     // Composition + candidates: logic in ImeEngine (default Stub).
     CandidateWindow candidateWin_;
@@ -106,10 +108,13 @@ class Tsf : public ITfTextInputProcessorEx,
     ComPtr<ITfRange> compositionRange_;
     WPARAM pendingKeyWParam_ = 0;
     LPARAM pendingKeyLParam_ = 0;
+    bool pendingKeyIsRelease_ = false;
     int pendingMousePick_ = -1;
 
     bool keyWouldBeHandled(WPARAM wParam, LPARAM lParam);
-    HRESULT runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp);
+    bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam);
+    HRESULT runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
+                              bool isRelease);
     void endCompositionCommit(TfEditCookie ec, const std::wstring &text);
     void endCompositionCancel(TfEditCookie ec);
     bool ensureCompositionStarted(TfEditCookie ec);

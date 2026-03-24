@@ -271,6 +271,9 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
         return false;
     }
     const UINT vk = static_cast<UINT>(wParam);
+    if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
+        return true;
+    }
     if (engine_->imManagerHotkeyWouldEat(
             vk, static_cast<std::uintptr_t>(lParam))) {
         return true;
@@ -300,11 +303,32 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     return false;
 }
 
-HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp) {
+bool Tsf::keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) {
+    if (!textEditSinkContext_ || !engine_) {
+        return false;
+    }
+    (void)lParam;
+    return engine_->fcitxModifierHotkeyUsesFullKeyEvent(
+        static_cast<unsigned>(wParam));
+}
+
+HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
+                               bool isRelease) {
     if (!engine_) {
         return S_OK;
     }
     const UINT vk = static_cast<UINT>(wp);
+    if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
+        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
+                                        isRelease);
+        afterFcitxEngineKey(ec);
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+    if (isRelease) {
+        // Non-modifier keys use KeyDown-only path today.
+        return S_OK;
+    }
 
     if (engine_->tryConsumeImManagerHotkey(vk,
                                            static_cast<std::uintptr_t>(lp))) {
@@ -453,7 +477,9 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
-    return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_);
+    const bool isRelease = pendingKeyIsRelease_;
+    pendingKeyIsRelease_ = false;
+    return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_, isRelease);
 }
 
 } // namespace fcitx

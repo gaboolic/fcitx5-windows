@@ -26,6 +26,22 @@ BOOL Tsf::processKey(WPARAM wParam, LPARAM lParam) {
     if (!textEditSinkContext_ || !keyWouldBeHandled(wParam, lParam)) {
         return FALSE;
     }
+    pendingKeyIsRelease_ = false;
+    pendingKeyWParam_ = wParam;
+    pendingKeyLParam_ = lParam;
+    HRESULT hr = E_FAIL;
+    if (FAILED(textEditSinkContext_->RequestEditSession(
+            clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr))) {
+        return FALSE;
+    }
+    return SUCCEEDED(hr) ? TRUE : FALSE;
+}
+
+BOOL Tsf::processKeyUp(WPARAM wParam, LPARAM lParam) {
+    if (!textEditSinkContext_ || !keyUpWouldBeHandled(wParam, lParam)) {
+        return FALSE;
+    }
+    pendingKeyIsRelease_ = true;
     pendingKeyWParam_ = wParam;
     pendingKeyLParam_ = lParam;
     HRESULT hr = E_FAIL;
@@ -61,11 +77,22 @@ STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
 
 STDMETHODIMP Tsf::OnTestKeyUp(ITfContext *pContext, WPARAM wParam,
                               LPARAM lParam, BOOL *pfEaten) {
+    if (keyUpHandled_) {
+        *pfEaten = TRUE;
+    } else {
+        *pfEaten = keyUpHandled_ = processKeyUp(wParam, lParam);
+    }
     return S_OK;
 }
 
 STDMETHODIMP Tsf::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                           BOOL *pfEaten) {
+    if (keyUpHandled_) {
+        keyUpHandled_ = FALSE;
+        *pfEaten = TRUE;
+    } else {
+        *pfEaten = keyUpHandled_ = processKeyUp(wParam, lParam);
+    }
     return S_OK;
 }
 

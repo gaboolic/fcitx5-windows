@@ -36,6 +36,8 @@ function Get-FcitxImeStrings {
         ProfileHint      = 'Copy share\fcitx5\profile.pinyin*.example to config\fcitx5\profile or set FCITX_TS_IM=pinyin.'
         DeployRoot       = 'Deploy root:'
         DeployAbsent     = 'Deploy directory already absent.'
+        HkcuPurge        = 'Removing per-user registry keys (HKCU CTF TIP / CLSID) referencing this IME...'
+        HkcuDone         = 'Per-user (HKCU) registry cleanup finished.'
     }
     $zh = @{
         AdminWarn        = '当前未以管理员身份运行。注册通常需要提升权限（HKCR）。'
@@ -57,6 +59,8 @@ function Get-FcitxImeStrings {
         ProfileHint      = '将 share\fcitx5\profile.pinyin*.example 复制到 config\fcitx5\profile 或设置 FCITX_TS_IM=pinyin。'
         DeployRoot       = '部署根目录:'
         DeployAbsent     = '部署目录已不存在。'
+        HkcuPurge        = '正在删除当前用户下引用本 IME 的注册表项（HKCU CTF TIP / CLSID）...'
+        HkcuDone         = '当前用户（HKCU）注册表清理完成。'
     }
     if ($Lang -eq 'zh') { return $zh }
     return $en
@@ -138,6 +142,29 @@ function Remove-FcitxImeRegistryTree {
         if (Test-Path -LiteralPath $p) {
             Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop
         }
+    }
+}
+
+function Get-FcitxImeHkcuResidualRegistryPaths {
+    <#
+    .SYNOPSIS
+      Paths under HKCU that sometimes remain after HKCR/HKLM purge (CTF tip cache, WOW CLSID mirror).
+    #>
+    $g = $script:FcitxImeClsid
+    $list = @(
+        "HKCU:\Software\Microsoft\CTF\TIP\$g",
+        "HKCU:\Software\Classes\CLSID\$g"
+    )
+    foreach ($p in $list) {
+        if (Test-Path -LiteralPath $p) {
+            $p
+        }
+    }
+}
+
+function Remove-FcitxImeHkcuResidualRegistry {
+    foreach ($p in Get-FcitxImeHkcuResidualRegistryPaths) {
+        Remove-Item -LiteralPath $p -Recurse -Force -ErrorAction Stop
     }
 }
 
