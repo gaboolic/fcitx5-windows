@@ -6,7 +6,7 @@
 #include <fcitx-utils/key.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/event.h>
-#include <fcitx-utils/eventdispatcher.h>
+#include <fcitx-utils/event.h>
 #include <fcitx/globalconfig.h>
 #include <fcitx/instance.h>
 #include <fcitx/inputmethodentry.h>
@@ -14,6 +14,8 @@
 #include <fcitx/inputpanel.h>
 
 #include <fcitx-utils/log.h>
+
+#include <uv.h>
 
 #include <Windows.h>
 
@@ -26,6 +28,27 @@
 #include <ostream>
 #include <streambuf>
 #include <string>
+
+namespace {
+
+// Fcitx5.exe runs eventLoop().exec(); the TSF DLL never does, so libuv async
+// (used by EventDispatcher for UI/input-panel updates) would never run. Pump a
+// few non-blocking iterations before reading InputPanel in syncUiFromIc().
+void flushLibuvLoopForIme(fcitx::EventLoop &loop) {
+    if (std::strcmp(loop.implementation(), "libuv") != 0) {
+        return;
+    }
+    void *native = loop.nativeHandle();
+    if (!native) {
+        return;
+    }
+    auto *uvloop = static_cast<uv_loop_t *>(native);
+    for (int i = 0; i < 24; ++i) {
+        uv_run(uvloop, UV_RUN_NOWAIT);
+    }
+}
+
+} // namespace
 
 namespace fcitx {
 
@@ -76,9 +99,26 @@ void setupImeFcitxEnvironment() {
     if (root.empty()) {
         return;
     }
-    auto addon = root / "lib" / "fcitx5";
+    auto bin = (root / "bin").lexically_normal();
+    auto addon = (root / "lib" / "fcitx5").lexically_normal();
     auto share = root / "share";
     auto fcitxdata = share / "fcitx5";
+    // TSF runs inside the host process (Notepad, etc.). Windows does not search
+    // the portable bin/ for DLLs loaded as dependencies of lib/fcitx5/*.dll,
+    // so libpinyin fails with ERROR_MOD_NOT_FOUND unless PATH includes bin.
+    {
+        std::string pathHead = bin.string() + ";" + addon.string();
+        if (auto oldPath = getEnvironment("PATH")) {
+            setEnvironment("PATH", (pathHead + ";" + *oldPath).c_str());
+        } else {
+            setEnvironment("PATH", pathHead.c_str());
+        }
+    }
+    // MinGW dlopen/LoadLibrary dependency search often ignores PATH for indirect
+    // deps; SetDllDirectory adds portable bin/ to the process DLL search order.
+    if (!SetDllDirectoryW(bin.wstring().c_str())) {
+        // non-fatal; PATH may still help in some cases
+    }
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
     setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
@@ -273,6 +313,9 @@ bool tsImeTryAttachLogging() {
     const char *rule = std::getenv("FCITX_TS_LOG_RULE");
     if (rule && rule[0]) {
         Log::setLogRule(rule);
+    } else {
+        // key_trace / addons use Debug; without this, FCITX_TS_LOG alone shows almost nothing.
+        Log::setLogRule("*=5");
     }
 
     gTsImeLogBuf = std::make_unique<FcitxTsfLogBuf>(debugOut);
@@ -316,12 +359,9 @@ std::unique_ptr<ImeEngine> makeFcitx5ImeEngineAttempt() {
 Fcitx5ImeEngine::Fcitx5ImeEngine() = default;
 
 Fcitx5ImeEngine::~Fcitx5ImeEngine() {
-    if (dispatcher_) {
-        dispatcher_->detach();
-    }
     ic_.reset();
-    dispatcher_.reset();
     instance_.reset();
+    SetDllDirectoryW(nullptr);
     if (loggingAttached_) {
         tsImeDetachLogging();
         loggingAttached_ = false;
@@ -334,12 +374,14 @@ bool Fcitx5ImeEngine::init() {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
         loggingAttached_ = tsImeTryAttachLogging();
+        if (loggingAttached_) {
+            if (const char *lp = std::getenv("FCITX_TS_LOG"); lp && lp[0]) {
+                FCITX_INFO() << "Fcitx5 TSF log file (FCITX_TS_LOG): " << lp;
+            }
+        }
         instance_ = std::make_unique<Instance>(0, nullptr);
         instance_->addonManager().registerDefaultLoader(nullptr);
         instance_->initialize();
-
-        dispatcher_ = std::make_unique<EventDispatcher>();
-        dispatcher_->attach(&instance_->eventLoop());
 
         ic_ = std::make_unique<TsfInputContext>(this,
                                                 instance_->inputContextManager());
@@ -357,7 +399,6 @@ bool Fcitx5ImeEngine::init() {
             loggingAttached_ = false;
         }
         ic_.reset();
-        dispatcher_.reset();
         instance_.reset();
         return false;
     }
@@ -424,13 +465,28 @@ void Fcitx5ImeEngine::setHighlightIndex(int /*index*/) {
 }
 
 void Fcitx5ImeEngine::syncUiFromIc() {
+    if (instance_) {
+        // InputPanel updates are queued on Instance::eventDispatcher(); TSF has
+        // no exec() so drain that queue before reading the panel. (A second
+        // EventDispatcher attached in this class was never used — core uses
+        // Instance's dispatcher only.)
+        instance_->eventDispatcher().dispatchPending();
+        flushLibuvLoopForIme(instance_->eventLoop());
+    }
     preeditWide_.clear();
     candidatesWide_.clear();
     highlightIndex_ = 0;
     if (!ic_) {
         return;
     }
-    preeditWide_ = utf8ToWide(ic_->inputPanel().clientPreedit().toString());
+    // Addons may set only clientPreedit (keyboard, quickphrase) or only preedit()
+    // (e.g. pinyin when not using client-side string). TSF draws the composition
+    // from preeditWide_; fall back so keys are not swallowed with an empty display.
+    std::string preU8 = ic_->inputPanel().clientPreedit().toString();
+    if (preU8.empty()) {
+        preU8 = ic_->inputPanel().preedit().toString();
+    }
+    preeditWide_ = utf8ToWide(preU8);
     auto list = ic_->inputPanel().candidateList();
     if (!list || list->empty()) {
         return;
@@ -456,8 +512,18 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
         ic_->focusIn();
     }
     KeyEvent ev(ic_.get(), Key(sym), false);
-    ic_->keyEvent(ev);
+    const bool keyOk = ic_->keyEvent(ev);
     syncUiFromIc();
+    if (loggingAttached_ && instance_) {
+        const auto &panel = ic_->inputPanel();
+        FCITX_INFO() << "tsf sendKeySym sym=" << static_cast<unsigned>(sym)
+                     << " keyEventRet=" << keyOk << " icFocus=" << ic_->hasFocus()
+                     << " im=" << instance_->inputMethod(ic_.get())
+                     << " clientPreU8=" << panel.clientPreedit().toString().size()
+                     << " preeditU8=" << panel.preedit().toString().size()
+                     << " syncWidePre=" << preeditWide_.size()
+                     << " syncCands=" << candidatesWide_.size();
+    }
     return true;
 }
 
@@ -535,7 +601,11 @@ bool Fcitx5ImeEngine::tryForwardCandidateKey(unsigned vk) {
 }
 
 bool Fcitx5ImeEngine::tryForwardPreeditCommit() {
-    if (!ic_ || ic_->inputPanel().clientPreedit().empty()) {
+    if (!ic_) {
+        return false;
+    }
+    if (ic_->inputPanel().clientPreedit().empty() &&
+        ic_->inputPanel().preedit().empty()) {
         return false;
     }
     return sendKeySym(FcitxKey_Return);

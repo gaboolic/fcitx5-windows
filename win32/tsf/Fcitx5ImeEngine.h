@@ -12,7 +12,6 @@
 namespace fcitx {
 
 class Instance;
-class EventDispatcher;
 class TsfInputContext;
 
 /// Try to create an engine backed by in-process `fcitx::Instance` + dynamic addons.
@@ -60,7 +59,6 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool loggingAttached_ = false;
 
     std::unique_ptr<Instance> instance_;
-    std::unique_ptr<EventDispatcher> dispatcher_;
     std::unique_ptr<TsfInputContext> ic_;
 
     std::deque<std::string> commitQueueUtf8_;

@@ -1,0 +1,67 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+  Copy freshly built IME + Fcitx5Core/Utils DLLs from a CMake build tree to the portable deploy dir (e.g. C:\Fcitx5Portable\bin).
+
+.PARAMETER BuildDir
+  Path to the CMake build directory (contains win32\dll and bin).
+
+.PARAMETER DeployDir
+  Portable root (DLLs go to DeployDir\bin).
+
+.PARAMETER SkipRegsvr32
+  Do not run regsvr32 /s after copy (default: run register so TIP stays valid).
+
+.EXAMPLE
+  .\scripts\deploy-build-to-portable.ps1
+.EXAMPLE
+  .\scripts\deploy-build-to-portable.ps1 -BuildDir D:\vscode\fcitx_projs\fcitx5-windows\build-portable -DeployDir C:\Fcitx5Portable
+#>
+param(
+    [string] $BuildDir = (Join-Path (Split-Path $PSScriptRoot -Parent) 'build-portable'),
+    [string] $DeployDir = 'C:\Fcitx5Portable',
+    [switch] $SkipRegsvr32
+)
+
+$ErrorActionPreference = 'Stop'
+$DeployDir = $DeployDir.TrimEnd('\', '/')
+$bin = Join-Path $DeployDir 'bin'
+
+$imeDll = Join-Path $BuildDir 'win32\dll\libfcitx5-x86_64.dll'
+$core = Join-Path $BuildDir 'bin\libFcitx5Core.dll'
+$utils = Join-Path $BuildDir 'bin\libFcitx5Utils.dll'
+$config = Join-Path $BuildDir 'bin\libFcitx5Config.dll'
+
+foreach ($p in @($BuildDir, $imeDll, $core, $utils)) {
+    if (-not (Test-Path -LiteralPath $p)) {
+        Write-Error "Missing: $p (configure and build first, or pass -BuildDir)"
+    }
+}
+
+if (-not (Test-Path -LiteralPath $bin)) {
+    New-Item -ItemType Directory -Path $bin -Force | Out-Null
+}
+
+$copyList = @(
+    @{ Src = $imeDll;  Name = 'libfcitx5-x86_64.dll' }
+    @{ Src = $core;   Name = 'libFcitx5Core.dll' }
+    @{ Src = $utils;  Name = 'libFcitx5Utils.dll' }
+)
+if (Test-Path -LiteralPath $config) {
+    $copyList += @{ Src = $config; Name = 'libFcitx5Config.dll' }
+}
+
+Write-Host "Deploy: $BuildDir -> $bin"
+foreach ($item in $copyList) {
+    $dest = Join-Path $bin $item.Name
+    Write-Host "  $($item.Name)"
+    Copy-Item -LiteralPath $item.Src -Destination $dest -Force
+}
+
+if (-not $SkipRegsvr32) {
+    $imeInBin = Join-Path $bin 'libfcitx5-x86_64.dll'
+    Write-Host "regsvr32 /s $imeInBin"
+    Start-Process -FilePath regsvr32.exe -ArgumentList @('/s', $imeInBin) -Wait
+}
+
+Write-Host 'Done. Switch to Fcitx5 in Win+Space and test in Notepad.'

@@ -97,7 +97,8 @@ class Tsf : public ITfTextInputProcessorEx,
 
     // Composition + candidates: logic in ImeEngine (default Stub).
     CandidateWindow candidateWin_;
-    bool chineseActive_ = false;
+    // Start in Chinese mode: letters go to fcitx; Ctrl+Space toggles to pass-through English.
+    bool chineseActive_ = true;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;
     DWORD candidateUiElementId_ = TF_INVALID_UIELEMENTID;
