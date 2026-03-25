@@ -222,6 +222,8 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         return Key(FcitxKey_End, st);
     case VK_DELETE:
         return Key(FcitxKey_Delete, st);
+    case VK_DECIMAL:
+        return Key(FcitxKey_KP_Decimal, st);
     default:
         break;
     }

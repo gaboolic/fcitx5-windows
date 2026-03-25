@@ -54,6 +54,7 @@ bool tsfIsChineseModePunctuationVk(unsigned vk) {
     case VK_OEM_MINUS:
     case VK_OEM_PERIOD:
     case VK_OEM_102: // extra key on some layouts
+    case VK_DECIMAL: // numpad .
         return true;
     default:
         return false;
@@ -239,6 +240,24 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
                 SUCCEEDED(caretAfter->Collapse(ec, TF_ANCHOR_END))) {
                 TF_SELECTION sel{};
                 sel.range = caretAfter.Get();
+                sel.style.ase = TF_AE_NONE;
+                sel.style.fInterimChar = FALSE;
+                textEditSinkContext_->SetSelection(ec, 1, &sel);
+            }
+        }
+    } else if (!text.empty() && textEditSinkContext_) {
+        ComPtr<ITfInsertAtSelection> ias;
+        if (SUCCEEDED(textEditSinkContext_->QueryInterface(
+                IID_ITfInsertAtSelection,
+                reinterpret_cast<void **>(ias.ReleaseAndGetAddressOf())))) {
+            ComPtr<ITfRange> inserted;
+            if (SUCCEEDED(ias->InsertTextAtSelection(
+                    ec, 0, text.c_str(), static_cast<LONG>(text.size()),
+                    inserted.ReleaseAndGetAddressOf())) &&
+                inserted &&
+                SUCCEEDED(inserted->Collapse(ec, TF_ANCHOR_END))) {
+                TF_SELECTION sel{};
+                sel.range = inserted.Get();
                 sel.style.ase = TF_AE_NONE;
                 sel.style.fInterimChar = FALSE;
                 textEditSinkContext_->SetSelection(ec, 1, &sel);
