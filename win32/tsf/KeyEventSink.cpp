@@ -37,6 +37,10 @@ bool otherShiftStillHeld(WPARAM vk, LPARAM lp) {
     return false;
 }
 
+unsigned shiftScanCode(LPARAM lp) {
+    return (static_cast<unsigned>(lp) >> 16) & 0xFFu;
+}
+
 } // namespace
 
 namespace fcitx {
@@ -45,33 +49,44 @@ void Tsf::resetShiftToggleGesture() {
     shiftTapTrack_ = false;
     shiftTapInvalidated_ = false;
     shiftTapTogglePending_ = false;
+    shiftTapTrackedWParam_ = 0;
+    shiftTapTrackedScanCode_ = 0;
 }
 
 void Tsf::trackShiftToggleKeyDown(WPARAM wParam, LPARAM lParam) {
     if (vkIsPhysicalShift(wParam, lParam)) {
         if (chordCtrlOrAltDown()) {
-            shiftTapTrack_ = false;
+            resetShiftToggleGesture();
             return;
         }
         const bool isRepeat =
             (static_cast<unsigned>(lParam) & 0x40000000u) != 0;
         if (isRepeat) {
-            shiftTapInvalidated_ = true;
+            // Ignore keyboard auto-repeat on Shift so a single tap can still
+            // toggle after the OS delivers repeat KeyDowns before KeyUp.
             return;
         }
+        const unsigned sc = shiftScanCode(lParam);
         if (shiftTapTrack_) {
+            if (shiftTapTrackedWParam_ == wParam &&
+                shiftTapTrackedScanCode_ == sc) {
+                // Some TSF hosts call both OnTestKeyDown and OnKeyDown for the
+                // same physical Shift press; keep the tap gesture valid.
+                return;
+            }
             shiftTapInvalidated_ = true;
             return;
         }
         shiftTapTrack_ = true;
         shiftTapInvalidated_ = false;
+        shiftTapTrackedWParam_ = wParam;
+        shiftTapTrackedScanCode_ = sc;
         return;
     }
     // Lost Shift KeyUp (unrecognized vk/sc) would leave shiftTapTrack_ stuck and
     // break later gestures — clear when Shift is no longer held.
     if (shiftTapTrack_ && !(GetKeyState(VK_SHIFT) & 0x8000)) {
-        shiftTapTrack_ = false;
-        shiftTapInvalidated_ = false;
+        resetShiftToggleGesture();
     } else if (shiftTapTrack_ && (GetKeyState(VK_SHIFT) & 0x8000)) {
         shiftTapInvalidated_ = true;
     }
@@ -85,6 +100,8 @@ void Tsf::trackShiftToggleKeyUp(WPARAM wParam, LPARAM lParam) {
                           !chordCtrlOrAltDown() && !otherShiftStillHeld(wParam, lParam);
     shiftTapTrack_ = false;
     shiftTapInvalidated_ = false;
+    shiftTapTrackedWParam_ = 0;
+    shiftTapTrackedScanCode_ = 0;
     shiftTapTogglePending_ = doToggle;
 }
 bool Tsf::initKeyEventSink() {
@@ -163,6 +180,7 @@ STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
 STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                             BOOL *pfEaten) {
     (void)pContext;
+    trackShiftToggleKeyDown(wParam, lParam);
     if (!canProcessKeyDown(wParam, lParam)) {
         *pfEaten = FALSE;
         return S_OK;
@@ -184,6 +202,7 @@ STDMETHODIMP Tsf::OnTestKeyUp(ITfContext *pContext, WPARAM wParam,
 STDMETHODIMP Tsf::OnKeyUp(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
                           BOOL *pfEaten) {
     (void)pContext;
+    trackShiftToggleKeyUp(wParam, lParam);
     if (shiftTapTogglePending_) {
         shiftTapTogglePending_ = false;
         if (engine_) {

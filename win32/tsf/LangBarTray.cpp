@@ -17,8 +17,17 @@
 #ifndef NIF_GUID
 #define NIF_GUID 0x00000020
 #endif
+#ifndef NIF_SHOWTIP
+#define NIF_SHOWTIP 0x00000080
+#endif
 #ifndef NOTIFYICON_VERSION_4
 #define NOTIFYICON_VERSION_4 4U
+#endif
+#ifndef NIN_SELECT
+#define NIN_SELECT (WM_USER + 0)
+#endif
+#ifndef NIN_KEYSELECT
+#define NIN_KEYSELECT (WM_USER + 1)
 #endif
 
 extern void DllAddRef();
@@ -62,7 +71,7 @@ void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
 bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode) {
     NOTIFYICONDATAW nid = {};
     fillShellTrayNidIdentity(&nid, hostHwnd);
-    nid.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
     nid.uCallbackMessage = kShellTrayCallback;
     nid.hIcon = icon;
     if (chineseMode) {
@@ -180,9 +189,10 @@ STDMETHODIMP FcitxLangBarButton::GetInfo(TF_LANGBARITEMINFO *pInfo) {
     }
     pInfo->clsidService = FCITX_CLSID;
     pInfo->guidItem = kFcitxTrayLangBarItemId;
-    // TF_LBI_STYLE_SHOWNINTRAY is unreliable on Win10/11; shell notification
-    // icon (initShellTrayIcon) provides the taskbar entry.
-    pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU;
+    // SHOWNINTRAY helps some hosts surface the lang bar item; shell icon still
+    // provides a taskbar entry when the lang bar is hidden.
+    pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU |
+                     TF_LBI_STYLE_SHOWNINTRAY;
     pInfo->ulSort = 0;
     wcsncpy_s(pInfo->szDescription, TF_LBI_DESC_MAXLEN, L"Fcitx5",
               _TRUNCATE);
@@ -444,9 +454,11 @@ LRESULT CALLBACK Tsf::shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
     if (msg == kShellTrayCallback) {
-        if (lp == WM_LBUTTONUP) {
+        const UINT code = LOWORD(static_cast<DWORD_PTR>(lp));
+        if (code == WM_LBUTTONUP || code == NIN_SELECT ||
+            code == NIN_KEYSELECT) {
             self->langBarScheduleToggleChinese();
-        } else if (lp == WM_RBUTTONUP) {
+        } else if (code == WM_RBUTTONUP || code == WM_CONTEXTMENU) {
             self->showShellTrayContextMenu();
         }
         return 0;
@@ -530,7 +542,7 @@ void Tsf::updateShellTrayTooltip() {
     }
     NOTIFYICONDATAW nid = {};
     fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_);
-    nid.uFlags |= NIF_TIP;
+    nid.uFlags |= NIF_TIP | NIF_SHOWTIP;
     if (langBarChineseMode()) {
         wcsncpy_s(nid.szTip,
                   L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",

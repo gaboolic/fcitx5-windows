@@ -145,6 +145,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool shiftTapTrack_ = false;
     bool shiftTapInvalidated_ = false;
     bool shiftTapTogglePending_ = false;
+    WPARAM shiftTapTrackedWParam_ = 0;
+    unsigned shiftTapTrackedScanCode_ = 0;
 
     bool keyWouldBeHandled(WPARAM wParam, LPARAM lParam);
     bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const;

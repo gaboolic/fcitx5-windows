@@ -55,10 +55,17 @@
    - [x] **Ctrl+Space**：TSF 层中英切换（**`EditSession.cpp`**）；与 fcitx **`GlobalConfig` 热键**并行（**`Fcitx5ImeEngine`**）
    - [x] **修饰键热键（含默认 Shift_L / Super+space 等）**：向 **`Instance` 投递 `KeyEvent` 的按下与抬起**（**`KeyEventSink` + `deliverFcitxRawKeyEvent`**），以支持 **`altTriggerKeys` / `enumerateGroup*`** 等需 **KeyUp** 的逻辑
 
+**已处理（用户反馈）**
+
+- [x] **中文模式下逗号、句号无效果**：根因是无 composition 时 **`endCompositionCommit`** 仅在 **`compositionRange_`** 上 `SetText`，提交被丢弃。已在 **`EditSession.cpp`** 对无组合范围路径使用 **`ITfInsertAtSelection::InsertTextAtSelection`** 插入；**`VK_DECIMAL`**（小键盘 `.`）纳入标点转发；**`keyFromWindowsVk`** 映射 **`FcitxKey_KP_Decimal`**
+- [x] **Shift 无法切换中/英文**：**`KeyEventSink.cpp`** 中单次 **Shift** 点按会在 **KeyUp** 触发 **`langBarScheduleToggleChinese`**；除忽略 **Shift 自动重复** 外，也兼容只调用 **`OnKeyDown/Up`**、不稳定调用 **`OnTestKey*`** 的 TSF 宿主，并对同一次按键的 **`OnTest*`/`OnKey*`** 双回调去重
+- [x] **托盘进「隐藏的图标」**：**`LangBarTray.cpp`** — **`GetInfo`** 重新启用 **`TF_LBI_STYLE_SHOWNINTRAY`**；**`Shell_NotifyIcon`** 增加 **`NIF_SHOWTIP`**（与 **`NIF_GUID` + `NIM_SETVERSION`** 并用）。Win11 仍可能默认进溢出区，需用户 **拖拽图标到任务栏** 固定 behavior 与多数 TIP 一致
+
 ### P2 - 增强功能
 
 8. **状态栏托盘图标**
    - [x] **实现**：**`ITfLangBarItemButton`** + **`TF_LBI_STYLE_SHOWNINTRAY`**（**`LangBarTray.cpp`**），激活时 **``ITfLangBarItemMgr::AddItem``**；图标为 **`penguin.ico`**（与 TIP 注册一致）；**左键**同步 **Ctrl+Space** 的中/英切换（**`langBarScheduleToggleChinese`** + **``RequestEditSession``**）；**右键**菜单：中文 / 英文、**Fcitx5 设置…**（启动 **`fcitx5-config-win32.exe`**）、打开 **`%AppData%\Fcitx5`**；**`MsctfMingwCompat`** 补全 MinGW 缺的 **`ITfLangBarItemButton`** / **`TF_LBI_*`**；链接 **``shell32``**（**`ShellExecute`** / **`SHGetFolderPath`**）
+   - [x] **默认可见性**：已加强 **`TF_LBI_STYLE_SHOWNINTRAY`** + **`NIF_SHOWTIP`**；若系统仍将新图标放入溢出区，由用户在任务栏 **「显示隐藏的图标」→ 拖到主栏** 固定（与 Weasel 等一致）
 
 ### P3 - 优化功能
 
