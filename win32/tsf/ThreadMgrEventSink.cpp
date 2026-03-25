@@ -35,7 +35,9 @@ STDMETHODIMP Tsf::OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr) { return S_OK; }
 
 STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
+    tsfTrace("OnSetFocus document manager focus changed");
     initTextEditSink(pDocMgrFocus);
+    scheduleSharedTrayInputMethodRequest();
     return S_OK;
 }
 

@@ -1,6 +1,7 @@
 #include "CandidateListUiElement.h"
 #include "tsf.h"
 
+#include <fcitx-utils/log.h>
 #include <cstdint>
 #include <string>
 
@@ -675,6 +676,42 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         return S_OK;
     }
     if (!engine_) {
+        return S_OK;
+    }
+    if (!pendingTrayInputMethod_.empty()) {
+        const auto uniqueName = std::move(pendingTrayInputMethod_);
+        pendingTrayInputMethod_.clear();
+        const bool fromSharedRequest = pendingTrayInputMethodFromSharedRequest_;
+        pendingTrayInputMethodFromSharedRequest_ = false;
+        tsfTrace("DoEditSession pending tray target=" + uniqueName +
+                 " fromShared=" + std::string(fromSharedRequest ? "true" : "false"));
+        FCITX_INFO() << "DoEditSession pending tray input method target="
+                     << uniqueName << " fromShared=" << fromSharedRequest
+                     << " pid=" << GetCurrentProcessId();
+        chineseActive_ = true;
+        if (composition_) {
+            endCompositionCancel(ec);
+        } else {
+            candidateWin_.hide();
+            endCandidateListUiElement();
+            engine_->clear();
+        }
+        const bool activated = engine_->activateProfileInputMethod(uniqueName);
+        tsfTrace("DoEditSession activateProfileInputMethod result=" +
+                 std::string(activated ? "true" : "false") +
+                 " target=" + uniqueName);
+        FCITX_INFO() << "DoEditSession activateProfileInputMethod result="
+                     << activated << " target=" << uniqueName
+                     << " pid=" << GetCurrentProcessId();
+        if (fromSharedRequest && activated) {
+            clearSharedTrayInputMethodRequest();
+            tsfTrace("DoEditSession cleared shared tray request target=" + uniqueName);
+            FCITX_INFO() << "DoEditSession cleared shared tray request target="
+                         << uniqueName << " pid=" << GetCurrentProcessId();
+        }
+        syncCandidateWindow(ec);
+        drainCommitsAfterEngine(ec);
+        langBarNotifyIconUpdate();
         return S_OK;
     }
     if (pendingMousePick_ >= 0) {

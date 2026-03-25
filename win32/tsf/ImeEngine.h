@@ -7,6 +7,12 @@
 
 namespace fcitx {
 
+struct ProfileInputMethodItem {
+    std::string uniqueName;
+    std::wstring displayName;
+    bool isCurrent = false;
+};
+
 // Pluggable input logic (pinyin → preedit/candidates). TSF layer only displays
 // and commits strings; replace Stub with fcitx5/libime-backed engine later.
 class ImeEngine {
@@ -58,6 +64,16 @@ class ImeEngine {
     /// Forward one key to fcitx `Instance` key watcher; returns KeyEvent::accepted().
     virtual bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
                                          bool isRelease);
+
+    /// List input methods in the current profile group for tray menus.
+    virtual std::vector<ProfileInputMethodItem> profileInputMethods() const;
+    /// Activate one input method from the current profile group.
+    virtual bool activateProfileInputMethod(const std::string &uniqueName);
+    /// Query the current active input method unique name.
+    virtual std::string currentInputMethod() const;
+    /// Invoke addon sub-config action for a specific input method engine.
+    virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
+                                            const std::string &subPath);
 };
 
 std::unique_ptr<ImeEngine> makeStubImeEngine();

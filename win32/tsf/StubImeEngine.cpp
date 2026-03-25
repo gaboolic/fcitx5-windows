@@ -30,6 +30,21 @@ bool ImeEngine::deliverFcitxRawKeyEvent(unsigned /*vk*/,
     return false;
 }
 
+std::vector<ProfileInputMethodItem> ImeEngine::profileInputMethods() const {
+    return {};
+}
+
+bool ImeEngine::activateProfileInputMethod(const std::string & /*uniqueName*/) {
+    return false;
+}
+
+std::string ImeEngine::currentInputMethod() const { return {}; }
+
+bool ImeEngine::invokeInputMethodSubConfig(const std::string & /*uniqueName*/,
+                                           const std::string & /*subPath*/) {
+    return false;
+}
+
 namespace {
 
 class StubImeEngine : public ImeEngine {

@@ -2,10 +2,13 @@
 #include "LangBarTray.h"
 #include "../dll/util.h"
 
+#include <fcitx-utils/log.h>
 #include <filesystem>
+#include <fstream>
 #include <oleauto.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <string_view>
 #include <windows.h>
 
 #ifndef CONNECT_E_NOCONNECTION
@@ -50,6 +53,10 @@ enum TrayMenuId : UINT {
     IDM_ENGLISH,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
+    IDM_RIME_DEPLOY,
+    IDM_RIME_SYNC,
+    IDM_RIME_OPEN_USER_DIR,
+    IDM_INPUT_METHOD_BASE = 0x4300,
 };
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
@@ -58,6 +65,46 @@ constexpr UINT kShellTrayUid = 1;
 constexpr WORD kFcitxPenguinIconResId = 100;
 const wchar_t kShellTrayHostClass[] = L"Fcitx5ShellTrayHost";
 bool gShellTrayClassRegistered = false;
+
+bool currentProcessIsExplorer() {
+    WCHAR exePath[MAX_PATH];
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        return false;
+    }
+    const std::wstring_view path(exePath);
+    const size_t pos = path.find_last_of(L"\\/");
+    const std::wstring_view file =
+        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
+    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+}
+
+std::filesystem::path sharedTrayInputMethodRequestFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"pending-tray-input-method.txt";
+}
+
+std::string readSharedTrayInputMethodRequestFile() {
+    const auto path = sharedTrayInputMethodRequestFile();
+    if (path.empty()) {
+        return {};
+    }
+    std::ifstream in(path, std::ios::binary);
+    if (!in.is_open()) {
+        return {};
+    }
+    std::string value;
+    std::getline(in, value);
+    while (!value.empty() &&
+           (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' ||
+            value.back() == '\t')) {
+        value.pop_back();
+    }
+    return value;
+}
 
 void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
     ZeroMemory(nid, sizeof(*nid));
@@ -134,6 +181,40 @@ void exploreUserFcitxConfig() {
     dir += L"\\Fcitx5";
     ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
                   SW_SHOWNORMAL);
+}
+
+void exploreUserRimeConfig() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return;
+    }
+    std::wstring dir = appData;
+    dir += L"\\Fcitx5\\rime";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
+                  SW_SHOWNORMAL);
+}
+
+std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
+    if (item.uniqueName == "pinyin") {
+        return L"拼音";
+    }
+    if (item.uniqueName == "wbx") {
+        return L"五笔字型";
+    }
+    if (item.uniqueName == "wubi98") {
+        return L"五笔98";
+    }
+    if (item.uniqueName == "chewing") {
+        return L"新酷音";
+    }
+    if (item.uniqueName == "rime") {
+        return L"中州韵";
+    }
+    if (!item.displayName.empty()) {
+        return item.displayName;
+    }
+    return std::wstring(item.uniqueName.begin(), item.uniqueName.end());
 }
 
 } // namespace
@@ -245,38 +326,7 @@ STDMETHODIMP FcitxLangBarButton::OnClick(TfLBIClick click, POINT pt,
         if (!owner) {
             owner = GetDesktopWindow();
         }
-        HMENU menu = CreatePopupMenu();
-        if (!menu) {
-            return S_OK;
-        }
-        AppendMenuW(menu, MF_STRING | (tsf_->langBarChineseMode() ? MF_CHECKED : 0),
-                    IDM_CHINESE, L"中文输入");
-        AppendMenuW(menu, MF_STRING | (!tsf_->langBarChineseMode() ? MF_CHECKED : 0),
-                    IDM_ENGLISH, L"英文输入（直接键入）");
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 设置…");
-        AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR, L"打开用户配置文件夹");
-        const UINT cmd = TrackPopupMenu(menu,
-                                        TPM_LEFTALIGN | TPM_TOPALIGN |
-                                            TPM_RETURNCMD | TPM_NONOTIFY,
-                                        pt.x, pt.y, 0, owner, nullptr);
-        DestroyMenu(menu);
-        switch (cmd) {
-        case IDM_CHINESE:
-            tsf_->langBarScheduleSetChineseMode(true);
-            break;
-        case IDM_ENGLISH:
-            tsf_->langBarScheduleSetChineseMode(false);
-            break;
-        case IDM_SETTINGS_GUI:
-            launchSettingsGui();
-            break;
-        case IDM_OPEN_CONFIG_DIR:
-            exploreUserFcitxConfig();
-            break;
-        default:
-            break;
-        }
+        tsf_->showShellTrayContextMenuAt(pt, owner);
     }
     return S_OK;
 }
@@ -410,6 +460,132 @@ void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
         return;
     }
     langBarScheduleToggleChinese();
+}
+
+void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
+    if (uniqueName.empty() || !engine_) {
+        return;
+    }
+    persistSharedTrayInputMethodRequest(uniqueName);
+    pendingTrayInputMethod_ = uniqueName;
+    pendingTrayInputMethodFromSharedRequest_ = false;
+    HRESULT hr = E_FAIL;
+    ComPtr<ITfContext> ctx = textEditSinkContext_;
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (!ctx) {
+        ctx = trayEditContextFallback_;
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
+                                &hr);
+    }
+    if (FAILED(hr)) {
+        const auto im = pendingTrayInputMethod_;
+        pendingTrayInputMethod_.clear();
+        chineseActive_ = true;
+        candidateWin_.hide();
+        endCandidateListUiElement();
+        engine_->clear();
+        engine_->activateProfileInputMethod(im);
+        langBarNotifyIconUpdate();
+    }
+}
+
+void Tsf::persistSharedTrayInputMethodRequest(
+    const std::string &uniqueName) const {
+    const auto path = sharedTrayInputMethodRequestFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return;
+    }
+    out << uniqueName;
+}
+
+void Tsf::clearSharedTrayInputMethodRequest() const {
+    const auto path = sharedTrayInputMethodRequestFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+bool Tsf::sharedTrayInputMethodRequestPending() const {
+    return !readSharedTrayInputMethodRequestFile().empty();
+}
+
+bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
+    if (!engine_ || !pendingTrayInputMethod_.empty()) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest skipped engine/pending");
+        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest skipped"
+                      << " engine=" << (engine_ != nullptr)
+                      << " pending=" << pendingTrayInputMethod_
+                      << " pid=" << GetCurrentProcessId();
+        return false;
+    }
+    if (currentProcessIsExplorer()) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest skipped in explorer");
+        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest skipped in explorer"
+                      << " pid=" << GetCurrentProcessId();
+        return false;
+    }
+    const auto uniqueName = readSharedTrayInputMethodRequestFile();
+    if (uniqueName.empty()) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest no shared request");
+        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest no shared request"
+                      << " pid=" << GetCurrentProcessId();
+        return false;
+    }
+    tsfTrace("scheduleSharedTrayInputMethodRequest consume target=" + uniqueName +
+             " current=" + engine_->currentInputMethod());
+    FCITX_INFO() << "scheduleSharedTrayInputMethodRequest consume request target="
+                 << uniqueName << " current=" << engine_->currentInputMethod()
+                 << " pid=" << GetCurrentProcessId();
+    pendingTrayInputMethod_ = uniqueName;
+    pendingTrayInputMethodFromSharedRequest_ = true;
+    HRESULT hr = E_FAIL;
+    ComPtr<ITfContext> ctx;
+    if (preferredContext) {
+        ctx = preferredContext;
+    } else {
+        ctx = textEditSinkContext_;
+    }
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
+                                &hr);
+    }
+    if (FAILED(hr)) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest RequestEditSession failed target=" +
+                 uniqueName);
+        FCITX_WARN() << "scheduleSharedTrayInputMethodRequest edit session failed target="
+                     << uniqueName << " hr=0x" << std::hex
+                     << static_cast<unsigned long>(hr) << std::dec
+                     << " pid=" << GetCurrentProcessId();
+        pendingTrayInputMethod_.clear();
+        pendingTrayInputMethodFromSharedRequest_ = false;
+        return false;
+    }
+    tsfTrace("scheduleSharedTrayInputMethodRequest RequestEditSession success target=" +
+             uniqueName);
+    FCITX_INFO() << "scheduleSharedTrayInputMethodRequest edit session scheduled target="
+                 << uniqueName << " pid=" << GetCurrentProcessId();
+    return true;
 }
 
 void Tsf::langBarNotifyIconUpdate() {
@@ -576,21 +752,51 @@ void Tsf::showShellTrayContextMenu() {
     }
     POINT pt;
     GetCursorPos(&pt);
+    showShellTrayContextMenuAt(pt, owner);
+}
+
+void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
     HMENU menu = CreatePopupMenu();
     if (!menu) {
         return;
     }
-    AppendMenuW(
-        menu, MF_STRING | (langBarChineseMode() ? MF_CHECKED : 0), IDM_CHINESE,
-        L"\x4e2d\x6587\x8f93\x5165");
-    AppendMenuW(
-        menu,
-        MF_STRING | (!langBarChineseMode() ? MF_CHECKED : 0), IDM_ENGLISH,
-        L"\x82f1\x6587\x8f93\x5165\xFF08\x76f4\x63a5\x952e\x5165\xFF09");
+    const auto profileItems =
+        engine_ ? engine_->profileInputMethods() : std::vector<ProfileInputMethodItem>{};
+    const bool currentIsRime =
+        engine_ && engine_->currentInputMethod() == "rime";
+    AppendMenuW(menu, MF_STRING | (langBarChineseMode() ? MF_CHECKED : 0),
+                IDM_CHINESE, L"中文模式");
+    AppendMenuW(menu,
+                MF_STRING | (!langBarChineseMode() ? MF_CHECKED : 0),
+                IDM_ENGLISH, L"英文模式（直接键入）");
+    HMENU imMenu = CreatePopupMenu();
+    if (imMenu) {
+        if (profileItems.empty()) {
+            AppendMenuW(imMenu, MF_STRING | MF_GRAYED, IDM_INPUT_METHOD_BASE,
+                        L"当前 profile 中没有可切换输入法");
+        } else {
+            for (size_t i = 0; i < profileItems.size(); ++i) {
+                AppendMenuW(
+                    imMenu,
+                    MF_STRING |
+                        (profileItems[i].isCurrent ? MF_CHECKED : 0),
+                    IDM_INPUT_METHOD_BASE + static_cast<UINT>(i),
+                    trayInputMethodMenuText(profileItems[i]).c_str());
+            }
+        }
+        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(imMenu),
+                    L"切换输入法");
+    }
+    if (currentIsRime) {
+        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, IDM_RIME_DEPLOY, L"重新部署中州韵");
+        AppendMenuW(menu, MF_STRING, IDM_RIME_SYNC, L"同步中州韵用户数据");
+        AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_USER_DIR,
+                    L"打开中州韵配置目录");
+    }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 \x8BBE\x7F6E\x2026");
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR,
-                L"\x6253\x5F00\x7528\x6237\x914D\x7F6E\x6587\x4EF6\x5939");
+    AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI, L"打开设置界面…");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR, L"打开配置文件夹");
     SetForegroundWindow(owner);
     const UINT cmd =
         TrackPopupMenu(menu,
@@ -611,7 +817,25 @@ void Tsf::showShellTrayContextMenu() {
     case IDM_OPEN_CONFIG_DIR:
         exploreUserFcitxConfig();
         break;
+    case IDM_RIME_DEPLOY:
+        if (engine_) {
+            engine_->invokeInputMethodSubConfig("rime", "deploy");
+        }
+        break;
+    case IDM_RIME_SYNC:
+        if (engine_) {
+            engine_->invokeInputMethodSubConfig("rime", "sync");
+        }
+        break;
+    case IDM_RIME_OPEN_USER_DIR:
+        exploreUserRimeConfig();
+        break;
     default:
+        if (cmd >= IDM_INPUT_METHOD_BASE &&
+            cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
+            langBarScheduleActivateInputMethod(
+                profileItems[cmd - IDM_INPUT_METHOD_BASE].uniqueName);
+        }
         break;
     }
 }

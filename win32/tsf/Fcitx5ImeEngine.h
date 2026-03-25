@@ -56,6 +56,11 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
                                  bool isRelease) override;
+    std::vector<ProfileInputMethodItem> profileInputMethods() const override;
+    bool activateProfileInputMethod(const std::string &uniqueName) override;
+    std::string currentInputMethod() const override;
+    bool invokeInputMethodSubConfig(const std::string &uniqueName,
+                                    const std::string &subPath) override;
 
   private:
     bool sendKeySym(KeySym sym);

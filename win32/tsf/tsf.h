@@ -7,11 +7,51 @@
 #include "MsctfMingwCompat.h"
 #include <wrl/client.h>
 
+#include <Windows.h>
+#include <filesystem>
+#include <sstream>
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace fcitx {
+
+inline std::filesystem::path tsfTraceLogPath() {
+    wchar_t appData[MAX_PATH] = {};
+    DWORD len = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+    std::filesystem::path dir;
+    if (len > 0 && len < MAX_PATH) {
+        dir = std::filesystem::path(appData) / "Fcitx5";
+    } else {
+        wchar_t tempPath[MAX_PATH] = {};
+        len = GetTempPathW(MAX_PATH, tempPath);
+        if (len > 0 && len < MAX_PATH) {
+            dir = std::filesystem::path(tempPath);
+        } else {
+            dir = std::filesystem::temp_directory_path();
+        }
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    return dir / "tsf-trace.log";
+}
+
+inline void tsfTrace(const std::string &message) {
+    const auto path = tsfTraceLogPath();
+    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (file == INVALID_HANDLE_VALUE) {
+        return;
+    }
+    std::ostringstream ss;
+    ss << "[pid=" << GetCurrentProcessId() << "] " << message << "\r\n";
+    const std::string line = ss.str();
+    DWORD written = 0;
+    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
+              nullptr);
+    CloseHandle(file);
+}
 
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
@@ -76,11 +116,15 @@ class Tsf : public ITfTextInputProcessorEx,
     void langBarScheduleToggleChinese();
     /// Tray / LangBar menu: switch to Chinese (true) or English pass-through (false).
     void langBarScheduleSetChineseMode(bool wantChinese);
+    void langBarScheduleActivateInputMethod(const std::string &uniqueName);
     void langBarNotifyIconUpdate();
     bool langBarChineseMode() const { return chineseActive_; }
+    bool sharedTrayInputMethodRequestPending() const;
+    bool scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext = nullptr);
 
   private:
     friend class CandidateListUiElement;
+    friend class FcitxLangBarButton;
 
     LONG refCount_ = 1;
 
@@ -94,6 +138,9 @@ class Tsf : public ITfTextInputProcessorEx,
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
     void showShellTrayContextMenu();
+    void showShellTrayContextMenuAt(POINT pt, HWND owner);
+    void persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
+    void clearSharedTrayInputMethodRequest() const;
     static LRESULT CALLBACK shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
                                                  LPARAM lp);
 
@@ -132,6 +179,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool shellTrayAdded_ = false;
     static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
+    std::string pendingTrayInputMethod_;
+    bool pendingTrayInputMethodFromSharedRequest_ = false;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;
     DWORD candidateUiElementId_ = TF_INVALID_UIELEMENTID;
