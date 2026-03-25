@@ -62,6 +62,13 @@ bool tsfIsChineseModePunctuationVk(unsigned vk) {
     }
 }
 
+bool tsfIsChineseModeShiftNumberSymbolVk(unsigned vk) {
+    if ((GetKeyState(VK_SHIFT) & 0x8000) == 0) {
+        return false;
+    }
+    return vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9');
+}
+
 bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
     if (!out || threadId == 0) {
         return false;
@@ -474,13 +481,18 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
         return !engine_->candidates().empty();
     }
     if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
-        ((vk >= '0' && vk <= '9') || vk == VK_UP || vk == VK_DOWN)) {
+        ((((vk >= '0' && vk <= '9') &&
+           (GetKeyState(VK_SHIFT) & 0x8000) == 0)) ||
+          vk == VK_UP || vk == VK_DOWN)) {
         return true;
     }
     if (vk >= 'A' && vk <= 'Z') {
         return !tsfLatinKeyShouldPassToApp();
     }
     if (!tsfChordHasCtrlOrAlt() && tsfIsChineseModePunctuationVk(vk)) {
+        return true;
+    }
+    if (!tsfChordHasCtrlOrAlt() && tsfIsChineseModeShiftNumberSymbolVk(vk)) {
         return true;
     }
     return false;

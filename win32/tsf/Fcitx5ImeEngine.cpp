@@ -248,6 +248,37 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         break;
     }
     if (vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9')) {
+        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        if (shiftDown) {
+            KeyStates stOut = st;
+            if (stOut & KeyState::Shift) {
+                stOut ^= KeyState::Shift;
+            }
+            switch (vk) {
+            case '1':
+                return Key(FcitxKey_exclam, stOut);
+            case '2':
+                return Key(FcitxKey_at, stOut);
+            case '3':
+                return Key(FcitxKey_numbersign, stOut);
+            case '4':
+                return Key(FcitxKey_dollar, stOut);
+            case '5':
+                return Key(FcitxKey_percent, stOut);
+            case '6':
+                return Key(FcitxKey_asciicircum, stOut);
+            case '7':
+                return Key(FcitxKey_ampersand, stOut);
+            case '8':
+                return Key(FcitxKey_asterisk, stOut);
+            case '9':
+                return Key(FcitxKey_parenleft, stOut);
+            case '0':
+                return Key(FcitxKey_parenright, stOut);
+            default:
+                break;
+            }
+        }
         return Key(static_cast<KeySym>(FcitxKey_0 + (vk - '0')), st);
     }
     if (vk >= static_cast<unsigned>('A') && vk <= static_cast<unsigned>('Z')) {
@@ -865,6 +896,12 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
 bool Fcitx5ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
     if (!instance_) {
         return false;
+    }
+    // Rime uses Ctrl+` to open its schema / option menu. This must be delivered
+    // as a full fcitx KeyEvent instead of being treated as an app Ctrl chord.
+    if (vk == VK_OEM_3 && (GetKeyState(VK_CONTROL) & 0x8000) &&
+        (GetKeyState(VK_MENU) & 0x8000) == 0) {
+        return true;
     }
     switch (vk) {
     case VK_LSHIFT:

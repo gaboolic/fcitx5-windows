@@ -8,6 +8,7 @@
 #include <oleauto.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <vector>
 #include <string_view>
 #include <windows.h>
 
@@ -76,6 +77,121 @@ bool currentProcessIsExplorer() {
     const std::wstring_view file =
         pos == std::wstring_view::npos ? path : path.substr(pos + 1);
     return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+}
+
+bool launchDetachedProcess(const std::wstring &application,
+                           const std::wstring &arguments,
+                           const std::wstring &workingDirectory = {}) {
+    std::wstring commandLine = L"\"" + application + L"\"";
+    if (!arguments.empty()) {
+        commandLine += L" ";
+        commandLine += arguments;
+    }
+    std::vector<wchar_t> buffer(commandLine.begin(), commandLine.end());
+    buffer.push_back(L'\0');
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    const wchar_t *cwd =
+        workingDirectory.empty() ? nullptr : workingDirectory.c_str();
+    const BOOL ok = CreateProcessW(application.c_str(), buffer.data(), nullptr,
+                                   nullptr, FALSE, DETACHED_PROCESS, nullptr,
+                                   cwd, &si, &pi);
+    if (!ok) {
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+std::vector<wchar_t> buildEnvironmentWithPathPrefix(
+    const std::wstring &pathPrefix) {
+    if (pathPrefix.empty()) {
+        return {};
+    }
+    LPWCH envBlock = GetEnvironmentStringsW();
+    if (!envBlock) {
+        return {};
+    }
+    std::vector<std::wstring> entries;
+    std::wstring existingPath;
+    for (const wchar_t *cursor = envBlock; *cursor;) {
+        std::wstring entry(cursor);
+        cursor += entry.size() + 1;
+        if (entry.rfind(L"PATH=", 0) == 0 || entry.rfind(L"Path=", 0) == 0) {
+            const size_t eq = entry.find(L'=');
+            existingPath = eq == std::wstring::npos ? L"" : entry.substr(eq + 1);
+            continue;
+        }
+        entries.push_back(std::move(entry));
+    }
+    FreeEnvironmentStringsW(envBlock);
+
+    std::wstring mergedPath = pathPrefix;
+    if (!existingPath.empty()) {
+        if (!mergedPath.empty() && mergedPath.back() != L';') {
+            mergedPath += L';';
+        }
+        mergedPath += existingPath;
+    }
+    entries.push_back(L"PATH=" + mergedPath);
+
+    size_t totalChars = 1;
+    for (const auto &entry : entries) {
+        totalChars += entry.size() + 1;
+    }
+    std::vector<wchar_t> block;
+    block.reserve(totalChars);
+    for (const auto &entry : entries) {
+        block.insert(block.end(), entry.begin(), entry.end());
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
+}
+
+bool launchDetachedProcessWithPathPrefix(const std::wstring &application,
+                                         const std::wstring &arguments,
+                                         const std::wstring &workingDirectory,
+                                         const std::wstring &pathPrefix) {
+    std::wstring commandLine = L"\"" + application + L"\"";
+    if (!arguments.empty()) {
+        commandLine += L" ";
+        commandLine += arguments;
+    }
+    std::vector<wchar_t> buffer(commandLine.begin(), commandLine.end());
+    buffer.push_back(L'\0');
+    auto env = buildEnvironmentWithPathPrefix(pathPrefix);
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+    const wchar_t *cwd =
+        workingDirectory.empty() ? nullptr : workingDirectory.c_str();
+    const DWORD flags =
+        DETACHED_PROCESS | (env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
+    const BOOL ok = CreateProcessW(application.c_str(), buffer.data(), nullptr,
+                                   nullptr, FALSE, flags,
+                                   env.empty() ? nullptr : env.data(), cwd, &si,
+                                   &pi);
+    if (!ok) {
+        return false;
+    }
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    return true;
+}
+
+void openDirectoryInDetachedExplorer(const std::wstring &dir) {
+    if (dir.empty()) {
+        return;
+    }
+    if (currentProcessIsExplorer()) {
+        launchDetachedProcess(L"C:\\Windows\\explorer.exe", L"\"" + dir + L"\"");
+        return;
+    }
+    ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
+                  SW_SHOWNORMAL);
 }
 
 std::filesystem::path sharedTrayInputMethodRequestFile() {
@@ -168,8 +284,82 @@ void launchSettingsGui() {
     }
     std::filesystem::path exe(dllPath);
     exe = exe.parent_path() / L"fcitx5-config-win32.exe";
-    ShellExecuteW(nullptr, L"open", exe.c_str(), nullptr,
+    const std::wstring exeStr = exe.wstring();
+    if (currentProcessIsExplorer()) {
+        launchDetachedProcess(exeStr, L"", exe.parent_path().wstring());
+        return;
+    }
+    ShellExecuteW(nullptr, L"open", exeStr.c_str(), nullptr,
                   exe.parent_path().c_str(), SW_SHOWNORMAL);
+}
+
+std::filesystem::path fcitxPortableRoot() {
+    WCHAR dllPath[MAX_PATH];
+    if (!GetModuleFileNameW(dllInstance, dllPath, MAX_PATH)) {
+        return {};
+    }
+    std::filesystem::path dll(dllPath);
+    return dll.parent_path().parent_path();
+}
+
+std::filesystem::path userRimeConfigPath() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" / L"rime";
+}
+
+std::filesystem::path locateRimeDeployer() {
+    const auto portableRoot = fcitxPortableRoot();
+    const std::filesystem::path candidates[] = {
+        portableRoot / L"bin" / L"rime_deployer.exe",
+        portableRoot / L"rime_deployer.exe",
+        L"C:\\msys64\\clang64\\bin\\rime_deployer.exe",
+    };
+    for (const auto &candidate : candidates) {
+        std::error_code ec;
+        if (!candidate.empty() && std::filesystem::exists(candidate, ec)) {
+            return candidate;
+        }
+    }
+    return {};
+}
+
+bool launchRimeDeploy() {
+    const auto deployer = locateRimeDeployer();
+    if (deployer.empty()) {
+        tsfTrace("rime deploy tool not found");
+        FCITX_WARN() << "Rime deploy tool not found.";
+        return false;
+    }
+    const auto portableRoot = fcitxPortableRoot();
+    const auto userDir = userRimeConfigPath();
+    if (portableRoot.empty() || userDir.empty()) {
+        tsfTrace("rime deploy aborted missing root/user dir");
+        FCITX_WARN() << "Rime deploy aborted: missing portable root or user dir.";
+        return false;
+    }
+    const auto sharedDir = portableRoot / L"share" / L"rime-data";
+    const auto stagingDir = userDir / L"build";
+    std::error_code ec;
+    std::filesystem::create_directories(userDir, ec);
+    ec.clear();
+    std::filesystem::create_directories(stagingDir, ec);
+    const std::wstring args = L"--build \"" + userDir.wstring() + L"\" \"" +
+                              sharedDir.wstring() + L"\" \"" +
+                              stagingDir.wstring() + L"\"";
+    tsfTrace("launch rime deployer exe=" + deployer.string());
+    const auto portableBin = (portableRoot / L"bin").wstring();
+    const bool ok = launchDetachedProcessWithPathPrefix(
+        deployer.wstring(), args, deployer.parent_path().wstring(), portableBin);
+    if (!ok) {
+        tsfTrace("launch rime deployer failed");
+        FCITX_WARN() << "Failed to launch Rime deployer: " << deployer.string();
+        return false;
+    }
+    FCITX_INFO() << "Launched Rime deployer: " << deployer.string();
+    return true;
 }
 
 void exploreUserFcitxConfig() {
@@ -179,8 +369,7 @@ void exploreUserFcitxConfig() {
     }
     std::wstring dir = appData;
     dir += L"\\Fcitx5";
-    ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
-                  SW_SHOWNORMAL);
+    openDirectoryInDetachedExplorer(dir);
 }
 
 void exploreUserRimeConfig() {
@@ -191,8 +380,7 @@ void exploreUserRimeConfig() {
     std::wstring dir = appData;
     dir += L"\\Fcitx5\\rime";
     CreateDirectoryW(dir.c_str(), nullptr);
-    ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
-                  SW_SHOWNORMAL);
+    openDirectoryInDetachedExplorer(dir);
 }
 
 std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
@@ -818,7 +1006,7 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         exploreUserFcitxConfig();
         break;
     case IDM_RIME_DEPLOY:
-        if (engine_) {
+        if (!launchRimeDeploy() && engine_) {
             engine_->invokeInputMethodSubConfig("rime", "deploy");
         }
         break;
