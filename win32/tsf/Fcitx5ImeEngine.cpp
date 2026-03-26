@@ -117,16 +117,68 @@ std::filesystem::path dllInstallRootFromAddress(const void *addr) {
 }
 
 bool currentProcessIsExplorerForTsf() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return false;
-    }
-    const std::wstring_view path(exePath);
-    const size_t pos = path.find_last_of(L"\\/");
-    const std::wstring_view file =
-        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
-    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+    return currentProcessExeBaseNameEquals(L"explorer.exe");
 }
+
+bool currentProcessIsQQForTsf() {
+    return currentProcessExeBaseNameEquals(L"QQ.exe");
+}
+
+bool currentProcessIsCursorForTsf() {
+    return currentProcessExeBaseNameEquals(L"Cursor.exe") ||
+           currentProcessExeBaseNameEquals(L"Code.exe");
+}
+
+struct InstanceArgv {
+    std::vector<std::string> storage;
+    std::vector<char *> argv;
+
+    explicit InstanceArgv(bool disableRimeForHost) {
+        storage.emplace_back("fcitx5");
+        if (disableRimeForHost) {
+            storage.emplace_back("--disable=rime");
+        }
+        argv.reserve(storage.size());
+        for (auto &arg : storage) {
+            argv.push_back(arg.data());
+        }
+    }
+
+    int argc() const { return static_cast<int>(argv.size()); }
+    char **data() { return argv.empty() ? nullptr : argv.data(); }
+};
+
+bool shouldDisableRimeForCurrentHost() {
+    return currentProcessIsQQForTsf() || currentProcessIsCursorForTsf();
+}
+
+std::filesystem::path imeBinDir() {
+    auto root = dllInstallRootFromAddress(
+        reinterpret_cast<const void *>(&utf8ToWide));
+    if (root.empty()) {
+        return {};
+    }
+    return (root / "bin").lexically_normal();
+}
+
+class ScopedDllDirectory {
+  public:
+    explicit ScopedDllDirectory(const std::filesystem::path &dir) {
+        if (dir.empty()) {
+            return;
+        }
+        active_ = SetDllDirectoryW(dir.wstring().c_str()) != 0;
+    }
+
+    ~ScopedDllDirectory() {
+        if (active_) {
+            SetDllDirectoryW(nullptr);
+        }
+    }
+
+  private:
+    bool active_ = false;
+};
 
 void setupDefaultTsLogPath() {
     // TSF runs inside arbitrary host processes. Do not set up FCITX_TS_LOG here:
@@ -139,18 +191,14 @@ void setupImeFcitxEnvironment() {
     if (root.empty()) {
         return;
     }
-    auto bin = (root / "bin").lexically_normal();
     auto addon = (root / "lib" / "fcitx5").lexically_normal();
     auto share = root / "share";
     auto fcitxdata = share / "fcitx5";
     // TSF runs inside arbitrary host processes such as QQ. Do not prepend the
     // portable bin/ to PATH here: child processes (e.g. crashpad_handler.exe)
-    // inherit PATH and may accidentally load our libglog-2.dll. Keep the
-    // addon/data env vars, but limit DLL search changes to the current host.
-    if (!SetDllDirectoryW(bin.wstring().c_str())) {
-        // non-fatal; addon loads may still work if the host already has the
-        // required runtime DLLs available.
-    }
+    // inherit PATH and may accidentally load our libglog-2.dll. Keep only the
+    // addon/data env vars here; DLL directory changes are scoped narrowly around
+    // addon initialization in `Fcitx5ImeEngine::init()`.
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
     setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
@@ -491,7 +539,6 @@ Fcitx5ImeEngine::Fcitx5ImeEngine() = default;
 Fcitx5ImeEngine::~Fcitx5ImeEngine() {
     ic_.reset();
     instance_.reset();
-    SetDllDirectoryW(nullptr);
     if (loggingAttached_) {
         tsImeDetachLogging();
         loggingAttached_ = false;
@@ -503,6 +550,12 @@ bool Fcitx5ImeEngine::init() {
     try {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
+        const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
+        if (disableRimeForHost) {
+            tsfTrace("Fcitx5ImeEngine::init disabling rime addon for risky host");
+        }
+        InstanceArgv instanceArgv(disableRimeForHost);
+        ScopedDllDirectory scopedDllDirectory(imeBinDir());
         tsfTrace(std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
                  (std::getenv("FCITX_TS_LOG") ? std::getenv("FCITX_TS_LOG") : ""));
         tsfTrace("Fcitx5ImeEngine::init skip FCITX_TS_LOG in TSF host");
@@ -513,7 +566,7 @@ bool Fcitx5ImeEngine::init() {
                 FCITX_INFO() << "Fcitx5 TSF log file (FCITX_TS_LOG): " << lp;
             }
         }
-        instance_ = std::make_unique<Instance>(0, nullptr);
+        instance_ = std::make_unique<Instance>(instanceArgv.argc(), instanceArgv.data());
         instance_->addonManager().registerDefaultLoader(nullptr);
         instance_->initialize();
         tsfTrace("Fcitx5ImeEngine::init instance initialized");

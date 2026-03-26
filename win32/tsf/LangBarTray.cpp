@@ -847,11 +847,16 @@ void exploreFcitx5LogDir() {
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
         return;
     }
-    std::wstring dir = appData;
-    dir += L"\\Fcitx5\\log";
+    std::filesystem::path dir = std::filesystem::path(appData) / L"Fcitx5" / L"log";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    openDirectoryInDetachedExplorer(dir);
+    const auto tsfTraceFile =
+        std::filesystem::path(appData) / L"Fcitx5" / L"tsf-trace.log";
+    if (std::filesystem::exists(tsfTraceFile, ec)) {
+        dir = std::filesystem::path(appData) / L"Fcitx5";
+    }
+    tsfTrace("exploreFcitx5LogDir path=" + dir.string());
+    openDirectoryInDetachedExplorer(dir.wstring());
 }
 
 void exploreRimeLogDir() {
@@ -1604,9 +1609,8 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                     L"打开中州韵日志目录");
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI, L"打开设置界面…");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR, L"打开配置文件夹");
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR, L"打开日志文件夹");
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR, L"打开 Fcitx5 日志目录");
 
     if (owner && owner != GetDesktopWindow()) {
         SetForegroundWindow(owner);
@@ -1624,9 +1628,6 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         break;
     case IDM_ENGLISH:
         langBarScheduleSetChineseMode(false);
-        break;
-    case IDM_SETTINGS_GUI:
-        launchSettingsGui();
         break;
     case IDM_OPEN_CONFIG_DIR:
         exploreUserFcitxConfig();

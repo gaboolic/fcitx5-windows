@@ -16,15 +16,7 @@ namespace {
 LONG gExplorerProcessLifetimeDllPinned = 0;
 
 bool currentProcessIsExplorerForDefaultEngine() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return false;
-    }
-    const std::wstring_view path(exePath);
-    const size_t pos = path.find_last_of(L"\\/");
-    const std::wstring_view file =
-        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
-    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+    return currentProcessExeBaseNameEquals(L"explorer.exe");
 }
 
 std::unique_ptr<ImeEngine> makeDefaultImeEngine() {

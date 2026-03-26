@@ -53,6 +53,20 @@ inline void tsfTrace(const std::string &message) {
     CloseHandle(file);
 }
 
+inline std::wstring currentProcessExeBaseName() {
+    WCHAR exePath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        return {};
+    }
+    return std::filesystem::path(exePath).filename().wstring();
+}
+
+inline bool currentProcessExeBaseNameEquals(const wchar_t *expected) {
+    const std::wstring baseName = currentProcessExeBaseName();
+    return !baseName.empty() && expected &&
+           _wcsicmp(baseName.c_str(), expected) == 0;
+}
+
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 class FcitxLangBarButton;

@@ -412,9 +412,14 @@ void exploreUserRimeConfig() {
 }
 
 void exploreFcitx5LogDir() {
-    const auto dir = appDataRoot() / L"log";
+    auto dir = appDataRoot() / L"log";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+    const auto tsfTrace = appDataRoot() / L"tsf-trace.log";
+    if (std::filesystem::exists(tsfTrace, ec)) {
+        dir = appDataRoot();
+    }
+    trayHelperTrace("exploreFcitx5LogDir path=" + dir.string());
     openDirectoryInDetachedExplorer(dir.wstring());
 }
 
@@ -422,6 +427,7 @@ void exploreRimeLogDir() {
     const auto dir = appDataRoot() / L"rime";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+    trayHelperTrace("exploreRimeLogDir path=" + dir.string());
     openDirectoryInDetachedExplorer(dir.wstring());
 }
 
@@ -723,12 +729,10 @@ void showContextMenu() {
     }
 
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI,
-                L"\x6253\x5f00\x8bbe\x7f6e\x754c\x9762...");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR,
                 L"\x6253\x5f00\x914d\x7f6e\x6587\x4ef6\x5939");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR,
-                L"\x6253\x5f00\x65e5\x5fd7\x6587\x4ef6\x5939");
+                L"\x6253\x5f00 Fcitx5 \x65e5\x5fd7\x76ee\x5f55");
 
     POINT pt = {};
     GetCursorPos(&pt);
@@ -750,9 +754,6 @@ void showContextMenu() {
         persistSharedTrayChineseModeRequest(false);
         persistSharedTrayChineseModeState(false);
         refreshTrayState();
-        break;
-    case IDM_SETTINGS_GUI:
-        launchSettingsGui();
         break;
     case IDM_OPEN_CONFIG_DIR:
         exploreUserFcitxConfig();
@@ -819,6 +820,13 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         break;
+    case WM_SETTINGCHANGE:
+    case WM_DISPLAYCHANGE:
+    case WM_THEMECHANGED:
+        if (!g_trayAdded) {
+            refreshTrayState();
+        }
+        return 0;
     case WM_DESTROY:
         KillTimer(hwnd, kRefreshTimerId);
         KillTimer(hwnd, kRetryTimerId);

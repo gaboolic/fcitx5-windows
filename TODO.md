@@ -66,6 +66,10 @@
 8. **状态栏托盘图标**
    - [x] **实现**：**`ITfLangBarItemButton`** + **`TF_LBI_STYLE_SHOWNINTRAY`**（**`LangBarTray.cpp`**），激活时 **``ITfLangBarItemMgr::AddItem``**；图标为 **`penguin.ico`**（与 TIP 注册一致）；**左键**同步 **Ctrl+Space** 的中/英切换（**`langBarScheduleToggleChinese`** + **``RequestEditSession``**）；**右键**菜单：中文 / 英文、**Fcitx5 设置…**（启动 **`fcitx5-config-win32.exe`**）、打开 **`%AppData%\Fcitx5`**；**`MsctfMingwCompat`** 补全 MinGW 缺的 **`ITfLangBarItemButton`** / **`TF_LBI_*`**；链接 **``shell32``**（**`ShellExecute`** / **`SHGetFolderPath`**）
    - [x] **默认可见性**：已加强 **`TF_LBI_STYLE_SHOWNINTRAY`** + **`NIF_SHOWTIP`**；若系统仍将新图标放入溢出区，由用户在任务栏 **「显示隐藏的图标」→ 拖到主栏** 固定（与 Weasel 等一致）
+   - [ ] **默认仍进“隐藏的图标”**：独立 **`fcitx5-tray-helper.exe`** 启动后，图标默认不在任务栏主栏，需要点 **「显示隐藏的图标」** 才能看到；继续确认 Win11 托盘固定策略与 helper 图标身份/首次显示行为
+   - [ ] **QQ 录屏保存时崩溃**：场景为 **QQ 录屏 + 记事本内用 Fcitx5 打字 + 最后保存**；继续定位 **`libglog-2.dll` / Rime / TSF 宿主** 在 QQ 进程内的崩溃链
+   - [ ] **右键菜单日志路径确认**：补齐并验证 **Fcitx5 日志目录**、**Rime 日志目录** 实际打开路径，确保与当前便携/用户目录布局一致
+   - [ ] **右键菜单文案中文化**：将 **“修改配置”** 等相关入口统一改成中文命名，和现有托盘菜单中文项保持一致
 
 ### P3 - 优化功能
 
