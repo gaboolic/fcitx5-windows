@@ -85,8 +85,11 @@ inline bool currentProcessUsesMinimalTsfMode() {
 
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
+bool queryActiveFcitxTipForExplorer(bool *active);
 class FcitxLangBarButton;
 class Tsf : public ITfTextInputProcessorEx,
+            public ITfActiveLanguageProfileNotifySink,
+            public ITfInputProcessorProfileActivationSink,
             public ITfThreadMgrEventSink,
             public ITfTextEditSink,
             public ITfKeyEventSink,
@@ -110,6 +113,15 @@ class Tsf : public ITfTextInputProcessorEx,
     // ITfTextInputProcessorEx
     STDMETHODIMP ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
                             DWORD dwFlags) override;
+
+    // ITfInputProcessorProfileActivationSink
+    STDMETHODIMP OnActivated(DWORD dwProfileType, LANGID langid, REFCLSID clsid,
+                             REFGUID catid, REFGUID guidProfile, HKL hkl,
+                             DWORD dwFlags) override;
+
+    // ITfActiveLanguageProfileNotifySink
+    STDMETHODIMP OnActivated(REFCLSID clsid, REFGUID guidProfile,
+                             BOOL fActivated) override;
 
     // ITfThreadMgrEventSink
     STDMETHODIMP OnInitDocumentMgr(ITfDocumentMgr *pDocMgr) override;
@@ -166,11 +178,18 @@ class Tsf : public ITfTextInputProcessorEx,
     // ITfThreadMgrEventSink
     bool initLangBarTrayItem();
     void uninitLangBarTrayItem();
+    bool initProfileActivationSink();
+    bool initActiveLanguageProfileNotifySink();
+    void uninitProfileActivationSink();
+    void uninitActiveLanguageProfileNotifySink();
     void traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese);
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
     void uninitShellTrayIcon();
+    void pushTrayServiceStateSnapshot(bool visible = true) const;
+    void pushTrayServiceExplorerRefreshHint(bool visible,
+                                            UINT delayMs = 0) const;
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
     void scheduleShellTrayRetry(UINT delayMs = 1000);
@@ -187,7 +206,10 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initThreadMgrEventSink();
     void uninitThreadMgrEventSink();
     ComPtr<ITfThreadMgr> threadMgr_;
+    ComPtr<ITfInputProcessorProfileMgr> profileMgr_;
     TfClientId clientId_ = TF_CLIENTID_NULL;
+    DWORD activeLanguageProfileNotifySinkCookie_ = TF_INVALID_COOKIE;
+    DWORD profileActivationSinkCookie_ = TF_INVALID_COOKIE;
     DWORD threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
 
     // ITfTextEditSink

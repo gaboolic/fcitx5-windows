@@ -81,6 +81,10 @@ STDAPI Tsf::QueryInterface(REFIID riid, void **ppvObject) {
         *ppvObject = (ITfTextInputProcessor *)this;
     else if (IsEqualIID(riid, IID_ITfTextInputProcessorEx))
         *ppvObject = (ITfTextInputProcessorEx *)this;
+    else if (IsEqualIID(riid, IID_ITfActiveLanguageProfileNotifySink))
+        *ppvObject = (ITfActiveLanguageProfileNotifySink *)this;
+    else if (IsEqualIID(riid, IID_ITfInputProcessorProfileActivationSink))
+        *ppvObject = (ITfInputProcessorProfileActivationSink *)this;
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
         *ppvObject = (ITfThreadMgrEventSink *)this;
     else if (IsEqualIID(riid, IID_ITfTextEditSink))

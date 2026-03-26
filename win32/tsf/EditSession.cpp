@@ -19,15 +19,10 @@ bool tsfIsAltGrPhysicalDown() {
            (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
 }
 
-/// Latin A–Z: pass through on Ctrl/Alt/Shift chords.
-/// - Shift: GetKeyState only — GetAsyncKeyState(VK_SHIFT) is unreliable in some TSF
-///   stacks and can stay "down", which hid all pinyin.
+/// Latin A–Z: pass through on Ctrl/Alt chords.
 /// - Ctrl/Alt: require GetKeyState AND GetAsyncKeyState both high so a stale
 ///   GetKeyState alone (e.g. after Ctrl+A) does not suppress IME.
 bool tsfLatinKeyShouldPassToApp() {
-    if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
-        return true;
-    }
     if (tsfIsAltGrPhysicalDown()) {
         return false;
     }
@@ -121,6 +116,12 @@ bool tsfCanAttemptRawImeKey(unsigned vk) {
     }
 }
 
+bool tsfCandidateAnchorShouldPreferCaretFallback() {
+    return fcitx::currentProcessExeBaseNameEquals(L"QQ.exe") ||
+           fcitx::currentProcessExeBaseNameEquals(L"Cursor.exe") ||
+           fcitx::currentProcessExeBaseNameEquals(L"Code.exe");
+}
+
 bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
     if (!out || threadId == 0) {
         return false;
@@ -166,6 +167,7 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         return false;
     }
     DWORD caretThread = 0;
+    const bool preferCaretFallback = tsfCandidateAnchorShouldPreferCaretFallback();
     for (;;) {
         ITfContextView *viewRaw = nullptr;
         ULONG fetched = 0;
@@ -182,6 +184,9 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         if (caretThread == 0) {
             caretThread = GetWindowThreadProcessId(w, nullptr);
         }
+        if (preferCaretFallback) {
+            continue;
+        }
         RECT rc {};
         BOOL clipped = FALSE;
         const HRESULT hrExt =
@@ -189,15 +194,19 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         const int rw = rc.right - rc.left;
         const int rh = rc.bottom - rc.top;
         if (SUCCEEDED(hrExt) && rw > 0 && rh > 0) {
+            // ITfContextView::GetTextExt already reports screen coordinates.
             screenPt->x = rc.left;
             screenPt->y = rc.bottom;
-            if (ClientToScreen(w, screenPt)) {
-                return true;
-            }
+            return true;
         }
     }
     if (caretThread != 0) {
-        return tsfScreenPtFromCaretGuiThread(caretThread, screenPt);
+        if (tsfScreenPtFromCaretGuiThread(caretThread, screenPt)) {
+            return true;
+        }
+    }
+    if (preferCaretFallback) {
+        return GetCursorPos(screenPt) != FALSE;
     }
     return false;
 }
@@ -458,7 +467,8 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
             labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
         }
     }
-    POINT pt = {100, 100};
+    POINT pt = {};
+    GetCursorPos(&pt);
     if (!queryCandidateAnchor(ec, &pt)) {
         bool anchored = false;
         const HWND tryAnchors[] = {GetForegroundWindow(), GetFocus()};
@@ -476,7 +486,11 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
             HWND focus = GetFocus();
             if (focus) {
                 ClientToScreen(focus, &pt);
+                anchored = true;
             }
+        }
+        if (!anchored) {
+            GetCursorPos(&pt);
         }
     }
     candidateWin_.show(pt.x, pt.y, labels, engine_->highlightIndex());

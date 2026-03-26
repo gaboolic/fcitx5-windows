@@ -1,20 +1,7 @@
 #include "tsf.h"
+#include "TrayServiceIpc.h"
 
 namespace fcitx {
-namespace {
-bool currentProcessIsExplorerForThreadMgr() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return false;
-    }
-    const std::wstring_view path(exePath);
-    const size_t pos = path.find_last_of(L"\\/");
-    const std::wstring_view file =
-        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
-    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
-}
-} // namespace
-
 bool Tsf::initThreadMgrEventSink() {
     ComPtr<ITfSource> source;
     if (FAILED(threadMgr_->QueryInterface(
@@ -50,12 +37,18 @@ STDMETHODIMP Tsf::OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr) { return S_OK; }
 STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
     tsfTrace("OnSetFocus document manager focus changed");
-    initTextEditSink(pDocMgrFocus);
-    if (currentProcessIsExplorerForThreadMgr() && !shellTrayHostHwnd_) {
-        const bool trayReady = initShellTrayIcon();
-        tsfTrace(std::string("OnSetFocus recreated explorer tray host=") +
-                 (trayReady ? "true" : "false"));
+    if (currentProcessExeBaseNameEquals(L"explorer.exe")) {
+        bool active = false;
+        if (queryActiveFcitxTipForExplorer(&active)) {
+            pushTrayServiceExplorerRefreshHint(
+                active, fcitx::kTrayServiceExplorerRefreshDelayMs);
+            tsfTrace(std::string("OnSetFocus explorer queried active profile visible=") +
+                     (active ? "true" : "false"));
+        } else {
+            tsfTrace("OnSetFocus explorer queryActiveFcitxTipForExplorer failed");
+        }
     }
+    initTextEditSink(pDocMgrFocus);
     deferredSharedTrayInputMethod_.clear();
     scheduleSharedTrayChineseModeRequest();
     scheduleSharedTrayStatusActionRequest();

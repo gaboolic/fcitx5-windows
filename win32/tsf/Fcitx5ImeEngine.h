@@ -65,9 +65,11 @@ class Fcitx5ImeEngine : public ImeEngine {
                                     const std::string &subPath) override;
 
   private:
+    bool initWithInputMethod(const std::string &preferredInputMethod);
+    bool rebuildForInputMethod(const std::string &preferredInputMethod);
     bool sendKeySym(KeySym sym);
     void syncUiFromIc();
-    void activatePreferredInputMethod();
+    void activatePreferredInputMethod(const std::string &preferredInputMethod = {});
 
     bool loggingAttached_ = false;
 

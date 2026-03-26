@@ -1,5 +1,6 @@
 #include "tsf.h"
 #include "LangBarTray.h"
+#include "TrayServiceIpc.h"
 #include "../dll/util.h"
 
 #include <fcitx-utils/log.h>
@@ -159,6 +160,21 @@ bool ensureStandaloneTrayHelperRunning() {
     tsfTrace(std::string("ensureStandaloneTrayHelperRunning launched=") +
              (launched ? "true" : "false") + " path=" + exe.string());
     return launched || standaloneTrayHelperWindowExists();
+}
+
+HWND standaloneTrayHelperWindow() {
+    HWND hwnd = fcitx::findStandaloneTrayHelperWindow();
+    if (hwnd) {
+        return hwnd;
+    }
+    for (int attempt = 0; attempt < 10; ++attempt) {
+        Sleep(20);
+        hwnd = fcitx::findStandaloneTrayHelperWindow();
+        if (hwnd) {
+            return hwnd;
+        }
+    }
+    return nullptr;
 }
 
 std::vector<wchar_t> buildEnvironmentWithPathPrefix(
@@ -887,33 +903,62 @@ void exploreUserRimeConfig() {
     openDirectoryInDetachedExplorer(dir);
 }
 
-void exploreFcitx5LogDir() {
+bool directoryHasEntries(const std::filesystem::path &dir) {
+    std::error_code ec;
+    return std::filesystem::exists(dir, ec) &&
+           std::filesystem::is_directory(dir, ec) &&
+           !std::filesystem::is_empty(dir, ec);
+}
+
+std::filesystem::path fcitx5LogDir() {
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return;
+        return {};
     }
     std::filesystem::path dir = std::filesystem::path(appData) / L"Fcitx5" / L"log";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    const auto tsfTraceFile =
-        std::filesystem::path(appData) / L"Fcitx5" / L"tsf-trace.log";
-    if (std::filesystem::exists(tsfTraceFile, ec)) {
-        dir = std::filesystem::path(appData) / L"Fcitx5";
+    return dir;
+}
+
+std::filesystem::path preferredFcitx5LogDir() {
+    const auto logDir = fcitx5LogDir();
+    WCHAR appData[MAX_PATH];
+    if (logDir.empty() ||
+        FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return logDir;
+    }
+    const auto rootDir = std::filesystem::path(appData) / L"Fcitx5";
+    const auto traceFile = rootDir / L"tsf-trace.log";
+    std::error_code ec;
+    if (!directoryHasEntries(logDir) && std::filesystem::exists(traceFile, ec)) {
+        return rootDir;
+    }
+    return logDir;
+}
+
+void exploreFcitx5LogDir() {
+    const auto dir = preferredFcitx5LogDir();
+    if (dir.empty()) {
+        return;
     }
     tsfTrace("exploreFcitx5LogDir path=" + dir.string());
     openDirectoryInDetachedExplorer(dir.wstring());
 }
 
 void exploreRimeLogDir() {
-    WCHAR appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+    auto dir = fcitx5RimeUserDir();
+    if (dir.empty()) {
         return;
     }
-    std::wstring dir = appData;
-    dir += L"\\Fcitx5\\rime";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    openDirectoryInDetachedExplorer(dir);
+    const auto sharedLogDir = fcitx5LogDir();
+    if (directoryHasEntries(sharedLogDir)) {
+        dir = sharedLogDir;
+    }
+    tsfTrace("exploreRimeLogDir path=" + dir.string());
+    openDirectoryInDetachedExplorer(dir.wstring());
 }
 
 std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
@@ -1532,14 +1577,85 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
     return true;
 }
 
-void Tsf::langBarNotifyIconUpdate() {
-    if (currentProcessIsExplorer() && !shellTrayHostHwnd_) {
-        const bool recreated = initShellTrayIcon();
-        tsfTrace(std::string("langBarNotifyIconUpdate recreated explorer tray host=") +
-                 (recreated ? "true" : "false"));
-    }
+void Tsf::pushTrayServiceStateSnapshot(bool visible) const {
     if (currentProcessIsExplorer()) {
-        readSharedTrayChineseModeState(&chineseActive_);
+        return;
+    }
+    if (!ensureStandaloneTrayHelperRunning()) {
+        return;
+    }
+    const HWND helper = standaloneTrayHelperWindow();
+    if (!helper) {
+        tsfTrace("pushTrayServiceStateSnapshot missing helper window");
+        return;
+    }
+    fcitx::TrayServiceSnapshot snapshot = {};
+    snapshot.version = 1;
+    snapshot.visible = visible ? TRUE : FALSE;
+    snapshot.chineseMode = chineseActive_ ? TRUE : FALSE;
+    const auto current =
+        engine_ ? engine_->currentInputMethod() : std::string{};
+    fcitx::trayServiceCopyUtf8(snapshot.currentInputMethod, current);
+    if (engine_) {
+        const auto actions = engine_->trayStatusActions();
+        snapshot.actionCount = static_cast<UINT>(
+            (actions.size() > fcitx::kTrayServiceMaxStatusActionCount)
+                ? fcitx::kTrayServiceMaxStatusActionCount
+                : actions.size());
+        for (UINT i = 0; i < snapshot.actionCount; ++i) {
+            fcitx::trayServiceCopyUtf8(snapshot.actions[i].uniqueName,
+                                       actions[i].uniqueName);
+            fcitx::trayServiceCopyWide(snapshot.actions[i].displayName,
+                                       actions[i].displayName);
+            snapshot.actions[i].isChecked = actions[i].isChecked ? TRUE : FALSE;
+        }
+    }
+    if (!fcitx::sendTrayServiceCopyData(helper,
+                                        fcitx::kTrayServiceCopyDataSnapshot,
+                                        &snapshot, sizeof(snapshot))) {
+        tsfTrace("pushTrayServiceStateSnapshot SendMessageTimeout failed");
+        return;
+    }
+    tsfTrace("pushTrayServiceStateSnapshot sent visible=" +
+             std::string(visible ? "true" : "false") + " chinese=" +
+             std::string(chineseActive_ ? "true" : "false") + " current=" +
+             current);
+}
+
+void Tsf::pushTrayServiceExplorerRefreshHint(bool visible, UINT delayMs) const {
+    if (!currentProcessIsExplorer()) {
+        return;
+    }
+    if (!ensureStandaloneTrayHelperRunning()) {
+        return;
+    }
+    const HWND helper = standaloneTrayHelperWindow();
+    if (!helper) {
+        tsfTrace("pushTrayServiceExplorerRefreshHint missing helper window");
+        return;
+    }
+    fcitx::TrayServiceExplorerRefresh refresh = {};
+    refresh.version = 1;
+    refresh.visible = visible ? TRUE : FALSE;
+    refresh.delayMs = delayMs;
+    if (!fcitx::sendTrayServiceCopyData(helper,
+                                        fcitx::kTrayServiceCopyDataExplorerRefresh,
+                                        &refresh, sizeof(refresh))) {
+        tsfTrace("pushTrayServiceExplorerRefreshHint SendMessageTimeout failed");
+        return;
+    }
+    tsfTrace("pushTrayServiceExplorerRefreshHint sent visible=" +
+             std::string(visible ? "true" : "false") + " delayMs=" +
+             std::to_string(static_cast<unsigned long>(delayMs)));
+}
+
+void Tsf::langBarNotifyIconUpdate() {
+    if (currentProcessIsExplorer()) {
+        if (!shellTrayHostHwnd_) {
+            const bool recreated = initShellTrayIcon();
+            tsfTrace(std::string("langBarNotifyIconUpdate recreated explorer tray host=") +
+                     (recreated ? "true" : "false"));
+        }
     } else {
         persistSharedTrayChineseModeState(chineseActive_);
         if (engine_) {
@@ -1549,6 +1665,7 @@ void Tsf::langBarNotifyIconUpdate() {
             }
         }
         persistSharedTrayStatusActionState();
+        pushTrayServiceStateSnapshot(true);
     }
     updateShellTrayTooltip();
     if (langBarItem_) {

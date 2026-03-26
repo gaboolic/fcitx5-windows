@@ -611,6 +611,10 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
 }
 
 bool Fcitx5ImeEngine::init() {
+    return initWithInputMethod({});
+}
+
+bool Fcitx5ImeEngine::initWithInputMethod(const std::string &preferredInputMethod) {
     loggingAttached_ = false;
     try {
         pinStandardPathsToImeModule();
@@ -645,7 +649,7 @@ bool Fcitx5ImeEngine::init() {
         ic_->focusIn();
         tsfTrace("Fcitx5ImeEngine::init input context focused");
 
-        activatePreferredInputMethod();
+        activatePreferredInputMethod(preferredInputMethod);
         syncUiFromIc();
         tsfTrace(std::string("Fcitx5ImeEngine::init success current=") +
                  instance_->inputMethod(ic_.get()));
@@ -662,11 +666,32 @@ bool Fcitx5ImeEngine::init() {
     }
 }
 
-void Fcitx5ImeEngine::activatePreferredInputMethod() {
+bool Fcitx5ImeEngine::rebuildForInputMethod(const std::string &preferredInputMethod) {
+    tsfTrace("rebuildForInputMethod begin target=" + preferredInputMethod);
+    ic_.reset();
+    instance_.reset();
+    commitQueueUtf8_.clear();
+    preeditWide_.clear();
+    candidatesWide_.clear();
+    highlightIndex_ = 0;
+    preeditCaretWide_ = 0;
+    const bool ok = initWithInputMethod(preferredInputMethod);
+    tsfTrace(std::string("rebuildForInputMethod result=") +
+             (ok ? "true" : "false") + " target=" + preferredInputMethod);
+    return ok;
+}
+
+void Fcitx5ImeEngine::activatePreferredInputMethod(
+    const std::string &preferredInputMethod) {
     if (!instance_ || !ic_) {
         return;
     }
     auto &imm = instance_->inputMethodManager();
+    if (!preferredInputMethod.empty() && imm.entry(preferredInputMethod)) {
+        instance_->setCurrentInputMethod(ic_.get(), preferredInputMethod, true);
+        syncUiFromIc();
+        return;
+    }
     if (const char *envIm = std::getenv("FCITX_TS_IM");
         envIm && envIm[0] && imm.entry(std::string(envIm))) {
         instance_->setCurrentInputMethod(ic_.get(), envIm, true);
@@ -1086,14 +1111,40 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
                      << uniqueName << " pid=" << GetCurrentProcessId();
         return false;
     }
+    // On-demand IM addons are loaded after init(), so re-enter the portable bin
+    // DLL directory here to resolve their runtime dependencies.
+    ScopedDllDirectory scopedDllDirectory(imeBinDir());
     const std::string addon = entry->addon();
+    auto loadedAddonSummary = [this]() {
+        std::string loaded;
+        const auto &names = instance_->addonManager().loadedAddonNames();
+        for (size_t i = 0; i < names.size(); ++i) {
+            if (i != 0) {
+                loaded += ",";
+            }
+            loaded += names[i];
+        }
+        return loaded;
+    };
+    if (!addon.empty()) {
+        auto *addonInstance = instance_->addonManager().addon(addon, true);
+        tsfTrace("activateProfileInputMethod addon request target=" + uniqueName +
+                 " addon=" + addon + " loaded=" +
+                 std::string(addonInstance ? "true" : "false") +
+                 " loadedAddons=" + loadedAddonSummary());
+        if (!addonInstance && !rebuildForInputMethod(uniqueName)) {
+            tsfTrace("activateProfileInputMethod rebuild failed target=" +
+                     uniqueName + " addon=" + addon);
+        }
+    }
     // Explicitly load the target addon in the current host process first.
     // This is required for on-demand engines like Rime; otherwise the IM name
     // may switch while addonManager never loads `rime` in the focused app.
     auto *targetEngine = instance_->inputMethodEngine(uniqueName);
     if (!targetEngine) {
         tsfTrace("activateProfileInputMethod inputMethodEngine returned null target=" +
-                 uniqueName + " addon=" + addon);
+                 uniqueName + " addon=" + addon + " loadedAddons=" +
+                 loadedAddonSummary());
         FCITX_ERROR() << "activateProfileInputMethod failed to load engine for "
                       << uniqueName << " addon=" << addon
                       << " pid=" << GetCurrentProcessId();
@@ -1188,6 +1239,7 @@ bool Fcitx5ImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,
     if (!instance_ || uniqueName.empty() || subPath.empty()) {
         return false;
     }
+    ScopedDllDirectory scopedDllDirectory(imeBinDir());
     auto *engine = instance_->inputMethodEngine(uniqueName);
     if (!engine) {
         return false;

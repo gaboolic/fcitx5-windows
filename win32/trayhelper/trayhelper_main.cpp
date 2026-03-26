@@ -1,7 +1,8 @@
 #include <windows.h>
-#include <msctf.h>
 #include <shellapi.h>
 #include <shlobj.h>
+
+#include "../tsf/TrayServiceIpc.h"
 
 #include <filesystem>
 #include <fstream>
@@ -43,20 +44,14 @@ struct TrayStatusActionItem {
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kReopenContextMenuMessage = WM_APP + 89;
-constexpr UINT_PTR kRefreshTimerId = 1;
-constexpr UINT_PTR kRetryTimerId = 2;
-constexpr UINT kRefreshIntervalMs = 1000;
+constexpr UINT_PTR kRetryTimerId = 1;
+constexpr UINT_PTR kExplorerRefreshTimerId = 2;
 constexpr UINT kRetryDelayMs = 1500;
 constexpr UINT kShellTrayUid = 1;
-constexpr wchar_t kWindowClassName[] = L"Fcitx5StandaloneTrayHelperWindow";
 constexpr wchar_t kMutexName[] = L"Local\\Fcitx5StandaloneTrayHelperMutex";
 
 const GUID kFcitxShellTrayNotifyGuid = {
     0x8b4d3a2f, 0x1e0c, 0x4a5b, {0x9c, 0x8d, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2e}};
-const GUID kFcitxClsid = {0xfc3869ba,
-                          0x51e3,
-                          0x4078,
-                          {0x8e, 0xe2, 0x5f, 0xe4, 0x94, 0x93, 0xa1, 0xf4}};
 
 enum TrayMenuId : UINT {
     IDM_INPUT_MODE_CHINESE = 0x4100,
@@ -89,6 +84,18 @@ bool g_lastChineseMode = true;
 std::string g_lastCurrentIm;
 POINT g_reopenMenuPoint = {};
 bool g_reopenMenuPending = false;
+bool g_pendingExplorerVisible = false;
+bool g_pendingExplorerRefresh = false;
+
+struct TrayServiceState {
+    bool hasSnapshot = false;
+    bool visible = false;
+    bool chineseMode = true;
+    std::string currentInputMethod;
+    std::vector<TrayStatusActionItem> statusActions;
+};
+
+TrayServiceState g_trayState;
 
 struct RimeDeployMonitorData {
     HANDLE process = nullptr;
@@ -308,14 +315,6 @@ void writeSharedTrayChineseModeFile(const std::filesystem::path &path,
     writeSharedTrayTextFile(path, value ? "1" : "0");
 }
 
-std::string readSharedTrayCurrentInputMethodState() {
-    auto current = readSharedTrayTextFile(sharedTrayCurrentInputMethodFile());
-    if (current.empty()) {
-        current = readSharedTrayTextFile(sharedTrayInputMethodRequestFile());
-    }
-    return current;
-}
-
 bool readSharedTrayChineseModeState(bool *value) {
     return readSharedTrayChineseModeFile(sharedTrayChineseModeStateFile(), value);
 }
@@ -374,6 +373,50 @@ std::vector<TrayStatusActionItem> readSharedTrayStatusActions() {
             uniqueName, utf8ToWide(label), checked == "1" || checked == "true"});
     }
     return items;
+}
+
+void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
+    g_trayState.hasSnapshot = true;
+    if (snapshot.visible != FALSE) {
+        g_trayState.visible = true;
+    }
+    g_trayState.chineseMode = snapshot.chineseMode != FALSE;
+    g_trayState.currentInputMethod =
+        fcitx::trayServiceUtf8FromBuffer(snapshot.currentInputMethod);
+    g_trayState.statusActions.clear();
+    const UINT count =
+        (snapshot.actionCount > fcitx::kTrayServiceMaxStatusActionCount)
+            ? static_cast<UINT>(fcitx::kTrayServiceMaxStatusActionCount)
+            : snapshot.actionCount;
+    g_trayState.statusActions.reserve(count);
+    for (UINT i = 0; i < count; ++i) {
+        TrayStatusActionItem item;
+        item.uniqueName =
+            fcitx::trayServiceUtf8FromBuffer(snapshot.actions[i].uniqueName);
+        item.displayName =
+            fcitx::trayServiceWideFromBuffer(snapshot.actions[i].displayName);
+        item.isChecked = snapshot.actions[i].isChecked != FALSE;
+        if (!item.uniqueName.empty()) {
+            g_trayState.statusActions.push_back(std::move(item));
+        }
+    }
+}
+
+void applyTrayServiceExplorerRefresh(bool visible) {
+    g_trayState.hasSnapshot = true;
+    g_trayState.visible = visible;
+}
+
+std::string trayServiceCurrentInputMethodState() {
+    return g_trayState.currentInputMethod;
+}
+
+bool trayServiceChineseModeState() {
+    return g_trayState.hasSnapshot ? g_trayState.chineseMode : true;
+}
+
+std::vector<TrayStatusActionItem> trayServiceStatusActions() {
+    return g_trayState.statusActions;
 }
 
 std::wstring trayStatusActionMenuText(const std::string &uniqueName,
@@ -497,7 +540,7 @@ void persistSharedTrayStatusActions(
 }
 
 void optimisticToggleSharedTrayStatusActionState(const std::string &uniqueName) {
-    auto items = readSharedTrayStatusActions();
+    auto items = trayServiceStatusActions();
     bool changed = false;
     for (auto &item : items) {
         if (item.uniqueName != uniqueName) {
@@ -512,7 +555,8 @@ void optimisticToggleSharedTrayStatusActionState(const std::string &uniqueName) 
         break;
     }
     if (changed) {
-        persistSharedTrayStatusActions(items);
+        g_trayState.hasSnapshot = true;
+        g_trayState.statusActions = items;
     }
 }
 
@@ -574,7 +618,7 @@ std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
             }
         }
     }
-    std::string current = readSharedTrayCurrentInputMethodState();
+    std::string current = trayServiceCurrentInputMethodState();
     if (current.empty()) {
         current = defaultIm;
     }
@@ -660,6 +704,8 @@ void launchSettingsGui() {
     launchDetachedProcess(exeStr, L"", exe.parent_path().wstring());
 }
 
+std::filesystem::path fcitx5RimeUserDir();
+
 void exploreUserFcitxConfig() {
     openDirectoryInDetachedExplorer(appDataRoot().wstring());
 }
@@ -671,22 +717,44 @@ void exploreUserRimeConfig() {
     openDirectoryInDetachedExplorer(dir.wstring());
 }
 
-void exploreFcitx5LogDir() {
+bool directoryHasEntries(const std::filesystem::path &dir) {
+    std::error_code ec;
+    return std::filesystem::exists(dir, ec) &&
+           std::filesystem::is_directory(dir, ec) &&
+           !std::filesystem::is_empty(dir, ec);
+}
+
+std::filesystem::path fcitx5LogDir() {
     auto dir = appDataRoot() / L"log";
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
-    const auto tsfTrace = appDataRoot() / L"tsf-trace.log";
-    if (std::filesystem::exists(tsfTrace, ec)) {
-        dir = appDataRoot();
+    return dir;
+}
+
+std::filesystem::path preferredFcitx5LogDir() {
+    const auto logDir = fcitx5LogDir();
+    const auto traceFile = appDataRoot() / L"tsf-trace.log";
+    std::error_code ec;
+    if (!directoryHasEntries(logDir) && std::filesystem::exists(traceFile, ec)) {
+        return appDataRoot();
     }
+    return logDir;
+}
+
+void exploreFcitx5LogDir() {
+    const auto dir = preferredFcitx5LogDir();
     trayHelperTrace("exploreFcitx5LogDir path=" + dir.string());
     openDirectoryInDetachedExplorer(dir.wstring());
 }
 
 void exploreRimeLogDir() {
-    const auto dir = appDataRoot() / L"rime";
+    auto dir = fcitx5RimeUserDir();
     std::error_code ec;
     std::filesystem::create_directories(dir, ec);
+    const auto sharedLogDir = fcitx5LogDir();
+    if (directoryHasEntries(sharedLogDir)) {
+        dir = sharedLogDir;
+    }
     trayHelperTrace("exploreRimeLogDir path=" + dir.string());
     openDirectoryInDetachedExplorer(dir.wstring());
 }
@@ -803,13 +871,33 @@ bool addTrayIcon(bool chineseMode) {
     return false;
 }
 
+bool deleteTrayIconWithIdentity(bool useGuid, const char *tag) {
+    NOTIFYICONDATAW nid = {};
+    fillShellTrayNidIdentity(&nid, useGuid);
+    SetLastError(ERROR_SUCCESS);
+    const BOOL deleted = Shell_NotifyIconW(NIM_DELETE, &nid);
+    const DWORD gle = GetLastError();
+    trayHelperTrace(std::string("removeTrayIcon delete ") + tag +
+                    " useGuid=" + (useGuid ? "true" : "false") +
+                    " deleted=" + (deleted ? "true" : "false") +
+                    " gle=" + std::to_string(static_cast<unsigned long>(gle)));
+    return deleted != FALSE;
+}
+
 void removeTrayIcon() {
     if (!g_trayAdded || !g_hwnd) {
         return;
     }
-    NOTIFYICONDATAW nid = {};
-    fillShellTrayNidIdentity(&nid, g_useGuidIdentity);
-    Shell_NotifyIconW(NIM_DELETE, &nid);
+    trayHelperTrace(std::string("removeTrayIcon begin trayAdded=true useGuid=") +
+                    (g_useGuidIdentity ? "true" : "false"));
+    const bool primaryDeleted =
+        deleteTrayIconWithIdentity(g_useGuidIdentity, "primary");
+    const bool secondaryDeleted =
+        deleteTrayIconWithIdentity(!g_useGuidIdentity, "secondary");
+    trayHelperTrace(std::string("removeTrayIcon end primaryDeleted=") +
+                    (primaryDeleted ? "true" : "false") +
+                    " secondaryDeleted=" +
+                    (secondaryDeleted ? "true" : "false"));
     g_trayAdded = false;
 }
 
@@ -839,51 +927,26 @@ bool updateTrayTooltip(bool chineseMode) {
     return false;
 }
 
-bool queryActiveFcitxTip(bool *active) {
-    if (!active) {
-        return false;
-    }
-    *active = false;
-    ITfInputProcessorProfileMgr *mgr = nullptr;
-    const HRESULT hrCreate =
-        CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
-                         CLSCTX_INPROC_SERVER,
-                         IID_ITfInputProcessorProfileMgr,
-                         reinterpret_cast<void **>(&mgr));
-    if (FAILED(hrCreate) || !mgr) {
-        trayHelperTrace("queryActiveFcitxTip CoCreateInstance failed hr=0x" +
-                        std::to_string(static_cast<unsigned long>(hrCreate)));
-        return false;
-    }
-    TF_INPUTPROCESSORPROFILE profile = {};
-    const HRESULT hrProfile =
-        mgr->GetActiveProfile(GUID_TFCAT_TIP_KEYBOARD, &profile);
-    mgr->Release();
-    if (FAILED(hrProfile)) {
-        trayHelperTrace("queryActiveFcitxTip GetActiveProfile failed hr=0x" +
-                        std::to_string(static_cast<unsigned long>(hrProfile)));
-        return false;
-    }
-    *active = profile.dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR &&
-              IsEqualGUID(profile.clsid, kFcitxClsid);
-    return true;
-}
-
 // Mirror WeaselTrayIcon::Refresh(): decide visibility first, then update icon.
-bool shouldShowTrayIcon(const std::string &current) {
-    bool activeFcitxTip = false;
-    if (queryActiveFcitxTip(&activeFcitxTip)) {
-        return activeFcitxTip;
+bool shouldShowTrayIcon() {
+    if (g_trayState.hasSnapshot) {
+        return g_trayState.visible;
     }
-    trayHelperTrace("shouldShowTrayIcon fallback current=" + current);
+    trayHelperTrace("shouldShowTrayIcon missing tray snapshot");
     return false;
 }
 
 void refreshTrayState() {
-    bool chineseMode = true;
-    readSharedTrayChineseModeState(&chineseMode);
-    const std::string current = readSharedTrayCurrentInputMethodState();
-    if (!shouldShowTrayIcon(current)) {
+    const bool chineseMode = trayServiceChineseModeState();
+    const std::string current = trayServiceCurrentInputMethodState();
+    const bool visible = shouldShowTrayIcon();
+    trayHelperTrace("refreshTrayState begin visible=" +
+                    std::string(visible ? "true" : "false") +
+                    " trayAdded=" + std::string(g_trayAdded ? "true" : "false") +
+                    " useGuid=" + std::string(g_useGuidIdentity ? "true" : "false") +
+                    " chinese=" + std::string(chineseMode ? "true" : "false") +
+                    " current=" + current);
+    if (!visible) {
         if (g_trayAdded) {
             trayHelperTrace("refreshTrayState hiding tray icon current=" + current);
         }
@@ -1006,9 +1069,8 @@ void showContextMenu() {
     }
     {
         auto profileItems = readProfileInputMethodsFromConfig();
-        auto statusActions = readSharedTrayStatusActions();
-        bool chineseMode = true;
-        readSharedTrayChineseModeState(&chineseMode);
+        auto statusActions = trayServiceStatusActions();
+        const bool chineseMode = trayServiceChineseModeState();
         trayHelperTrace("showContextMenu chineseMode=" +
                         std::string(chineseMode ? "true" : "false") +
                         " statusActions=" +
@@ -1160,6 +1222,8 @@ void showContextMenu() {
             return;
         case IDM_INPUT_MODE_CHINESE:
             if (!chineseMode) {
+                g_trayState.hasSnapshot = true;
+                g_trayState.chineseMode = true;
                 persistSharedTrayChineseModeRequest(true);
                 persistSharedTrayChineseModeState(true);
             }
@@ -1168,6 +1232,8 @@ void showContextMenu() {
             break;
         case IDM_INPUT_MODE_ENGLISH:
             if (chineseMode) {
+                g_trayState.hasSnapshot = true;
+                g_trayState.chineseMode = false;
                 persistSharedTrayChineseModeRequest(false);
                 persistSharedTrayChineseModeState(false);
             }
@@ -1203,6 +1269,9 @@ void showContextMenu() {
             if (cmd >= IDM_INPUT_METHOD_BASE &&
                 cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
                 const auto &item = profileItems[cmd - IDM_INPUT_METHOD_BASE];
+                g_trayState.hasSnapshot = true;
+                g_trayState.currentInputMethod = item.uniqueName;
+                g_trayState.chineseMode = true;
                 persistSharedTrayInputMethodRequest(item.uniqueName);
                 persistSharedTrayCurrentInputMethodState(item.uniqueName);
                 persistSharedTrayChineseModeRequest(true);
@@ -1234,12 +1303,66 @@ void showContextMenu() {
     }
 }
 
+bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
+    if (!cds || !cds->lpData) {
+        return false;
+    }
+    if (cds->dwData == fcitx::kTrayServiceCopyDataSnapshot &&
+        cds->cbData == sizeof(fcitx::TrayServiceSnapshot)) {
+        const auto *snapshot =
+            reinterpret_cast<const fcitx::TrayServiceSnapshot *>(cds->lpData);
+        if (snapshot->version != 1) {
+            return false;
+        }
+        KillTimer(g_hwnd, kExplorerRefreshTimerId);
+        g_pendingExplorerRefresh = false;
+        applyTrayServiceSnapshot(*snapshot);
+        trayHelperTrace("received tray snapshot snapshotVisible=" +
+                        std::string(snapshot->visible != FALSE ? "true" : "false") +
+                        " effectiveVisible=" +
+                        std::string(g_trayState.visible ? "true" : "false") +
+                        " chinese=" +
+                        std::string(g_trayState.chineseMode ? "true" : "false") +
+                        " current=" + g_trayState.currentInputMethod);
+        refreshTrayState();
+        return true;
+    }
+    if (cds->dwData == fcitx::kTrayServiceCopyDataExplorerRefresh &&
+        cds->cbData == sizeof(fcitx::TrayServiceExplorerRefresh)) {
+        const auto *refresh =
+            reinterpret_cast<const fcitx::TrayServiceExplorerRefresh *>(cds->lpData);
+        if (refresh->version != 1) {
+            return false;
+        }
+        g_pendingExplorerVisible = refresh->visible != FALSE;
+        KillTimer(g_hwnd, kExplorerRefreshTimerId);
+        if (refresh->delayMs > 0) {
+            SetTimer(g_hwnd, kExplorerRefreshTimerId, refresh->delayMs, nullptr);
+            g_pendingExplorerRefresh = true;
+            trayHelperTrace("scheduled explorer refresh visible=" +
+                            std::string(g_pendingExplorerVisible ? "true"
+                                                                 : "false") +
+                            " delayMs=" +
+                            std::to_string(
+                                static_cast<unsigned long>(refresh->delayMs)));
+        } else {
+            applyTrayServiceExplorerRefresh(g_pendingExplorerVisible);
+            trayHelperTrace("applied explorer refresh visible=" +
+                            std::string(g_trayState.visible ? "true" : "false"));
+            refreshTrayState();
+        }
+        return true;
+    }
+    return false;
+}
+
 LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == kShellTrayCallback) {
         const UINT code = LOWORD(static_cast<DWORD_PTR>(lp));
         if (code == WM_LBUTTONUP || code == NIN_SELECT || code == NIN_KEYSELECT) {
-            bool chineseMode = true;
-            readSharedTrayChineseModeState(&chineseMode);
+            const bool chineseMode = trayServiceChineseModeState();
+            g_trayState.hasSnapshot = true;
+            g_trayState.chineseMode = !chineseMode;
             persistSharedTrayChineseModeRequest(!chineseMode);
             persistSharedTrayChineseModeState(!chineseMode);
             refreshTrayState();
@@ -1254,19 +1377,28 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     switch (msg) {
+    case WM_COPYDATA:
+        if (handleTrayServiceCopyData(reinterpret_cast<const COPYDATASTRUCT *>(lp))) {
+            return TRUE;
+        }
+        return FALSE;
     case WM_CREATE:
         trayHelperTrace("wndproc WM_CREATE");
-        SetTimer(hwnd, kRefreshTimerId, kRefreshIntervalMs, nullptr);
         refreshTrayState();
         return 0;
     case WM_TIMER:
-        if (wp == kRefreshTimerId) {
-            refreshTrayState();
-            return 0;
-        }
         if (wp == kRetryTimerId) {
             g_retryPending = false;
             KillTimer(hwnd, kRetryTimerId);
+            refreshTrayState();
+            return 0;
+        }
+        if (wp == kExplorerRefreshTimerId) {
+            KillTimer(hwnd, kExplorerRefreshTimerId);
+            g_pendingExplorerRefresh = false;
+            applyTrayServiceExplorerRefresh(g_pendingExplorerVisible);
+            trayHelperTrace("timer applied explorer refresh visible=" +
+                            std::string(g_trayState.visible ? "true" : "false"));
             refreshTrayState();
             return 0;
         }
@@ -1280,8 +1412,8 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     case WM_DESTROY:
         trayHelperTrace("wndproc WM_DESTROY");
-        KillTimer(hwnd, kRefreshTimerId);
         KillTimer(hwnd, kRetryTimerId);
+        KillTimer(hwnd, kExplorerRefreshTimerId);
         removeTrayIcon();
         PostQuitMessage(0);
         return 0;
@@ -1307,20 +1439,12 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     installTrayHelperCrashLogging();
-    const HRESULT hrCo = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const bool comInitialized = SUCCEEDED(hrCo);
     g_singleInstanceMutex = CreateMutexW(nullptr, TRUE, kMutexName);
     if (!g_singleInstanceMutex) {
-        if (comInitialized) {
-            CoUninitialize();
-        }
         return 1;
     }
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         CloseHandle(g_singleInstanceMutex);
-        if (comInitialized) {
-            CoUninitialize();
-        }
         return 0;
     }
 
@@ -1339,29 +1463,25 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     wc.cbSize = sizeof(wc);
     wc.lpfnWndProc = trayHelperWndProc;
     wc.hInstance = instance;
-    wc.lpszClassName = kWindowClassName;
+    wc.lpszClassName = fcitx::kStandaloneTrayHelperWindowClass;
     const ATOM atom = RegisterClassExW(&wc);
     if (!atom && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
         if (g_iconOwned && g_icon) {
             DestroyIcon(g_icon);
         }
         CloseHandle(g_singleInstanceMutex);
-        if (comInitialized) {
-            CoUninitialize();
-        }
         return 1;
     }
 
-    g_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW, kWindowClassName, L"", WS_POPUP,
+    g_hwnd = CreateWindowExW(WS_EX_TOOLWINDOW,
+                             fcitx::kStandaloneTrayHelperWindowClass, L"",
+                             WS_POPUP,
                              0, 0, 0, 0, nullptr, nullptr, instance, nullptr);
     if (!g_hwnd) {
         if (g_iconOwned && g_icon) {
             DestroyIcon(g_icon);
         }
         CloseHandle(g_singleInstanceMutex);
-        if (comInitialized) {
-            CoUninitialize();
-        }
         return 1;
     }
 
@@ -1380,9 +1500,6 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
     if (g_singleInstanceMutex) {
         ReleaseMutex(g_singleInstanceMutex);
         CloseHandle(g_singleInstanceMutex);
-    }
-    if (comInitialized) {
-        CoUninitialize();
     }
     return 0;
 }
