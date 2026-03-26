@@ -44,6 +44,15 @@ extern HINSTANCE dllInstance;
 
 namespace {
 
+class ScopedDllPin {
+  public:
+    ScopedDllPin() { DllAddRef(); }
+    ~ScopedDllPin() { DllRelease(); }
+
+    ScopedDllPin(const ScopedDllPin &) = delete;
+    ScopedDllPin &operator=(const ScopedDllPin &) = delete;
+};
+
 const GUID kFcitxTrayLangBarItemId = {
     0xf7e8d9c0, 0xb1a2, 0x4e3f, {0x9d, 0x8c, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2d}};
 
@@ -1339,10 +1348,18 @@ bool Tsf::initShellTrayIcon() {
             }
             gShellTrayClassRegistered = true;
         }
+        if (!shellTrayHostDllPinned_) {
+            DllAddRef();
+            shellTrayHostDllPinned_ = true;
+        }
         shellTrayHostHwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, kShellTrayHostClass,
                                              L"", WS_POPUP, 0, 0, 0, 0, nullptr,
                                              nullptr, dllInstance, this);
         if (!shellTrayHostHwnd_) {
+            if (shellTrayHostDllPinned_) {
+                DllRelease();
+                shellTrayHostDllPinned_ = false;
+            }
             return false;
         }
         const int cx = GetSystemMetrics(SM_CXSMICON);
@@ -1379,6 +1396,10 @@ void Tsf::uninitShellTrayIcon() {
     if (shellTrayHostHwnd_) {
         DestroyWindow(shellTrayHostHwnd_);
         shellTrayHostHwnd_ = nullptr;
+    }
+    if (shellTrayHostDllPinned_) {
+        DllRelease();
+        shellTrayHostDllPinned_ = false;
     }
     if (shellTrayIconOwned_ && shellTrayIcon_) {
         DestroyIcon(shellTrayIcon_);
@@ -1431,6 +1452,7 @@ void Tsf::showShellTrayContextMenu() {
 }
 
 void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
+    ScopedDllPin menuPin;
     HMENU menu = CreatePopupMenu();
     if (!menu) {
         return;

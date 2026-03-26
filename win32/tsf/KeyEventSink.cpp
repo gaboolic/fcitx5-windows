@@ -132,12 +132,13 @@ BOOL Tsf::processKey(WPARAM wParam, LPARAM lParam) {
     pendingKeyIsRelease_ = false;
     pendingKeyWParam_ = wParam;
     pendingKeyLParam_ = lParam;
+    pendingKeyHandled_ = false;
     HRESULT hr = E_FAIL;
     if (FAILED(textEditSinkContext_->RequestEditSession(
             clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr))) {
         return FALSE;
     }
-    return SUCCEEDED(hr) ? TRUE : FALSE;
+    return SUCCEEDED(hr) && pendingKeyHandled_ ? TRUE : FALSE;
 }
 
 BOOL Tsf::processKeyUp(WPARAM wParam, LPARAM lParam) {
@@ -147,12 +148,13 @@ BOOL Tsf::processKeyUp(WPARAM wParam, LPARAM lParam) {
     pendingKeyIsRelease_ = true;
     pendingKeyWParam_ = wParam;
     pendingKeyLParam_ = lParam;
+    pendingKeyHandled_ = false;
     HRESULT hr = E_FAIL;
     if (FAILED(textEditSinkContext_->RequestEditSession(
             clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr))) {
         return FALSE;
     }
-    return SUCCEEDED(hr) ? TRUE : FALSE;
+    return SUCCEEDED(hr) && pendingKeyHandled_ ? TRUE : FALSE;
 }
 
 bool Tsf::canProcessKeyDown(WPARAM wParam, LPARAM lParam) {

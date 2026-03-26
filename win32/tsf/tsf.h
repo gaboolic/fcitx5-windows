@@ -178,6 +178,7 @@ class Tsf : public ITfTextInputProcessorEx,
     bool chineseActive_ = true;
     FcitxLangBarButton *langBarItem_ = nullptr;
     HWND shellTrayHostHwnd_ = nullptr;
+    bool shellTrayHostDllPinned_ = false;
     HICON shellTrayIcon_ = nullptr;
     bool shellTrayIconOwned_ = false;
     bool shellTrayAdded_ = false;
@@ -195,6 +196,7 @@ class Tsf : public ITfTextInputProcessorEx,
     WPARAM pendingKeyWParam_ = 0;
     LPARAM pendingKeyLParam_ = 0;
     bool pendingKeyIsRelease_ = false;
+    bool pendingKeyHandled_ = false;
     int pendingMousePick_ = -1;
     /// Plain Shift tap toggles Chinese / English (Shift+letter cancels).
     bool shiftTapTrack_ = false;

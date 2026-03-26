@@ -69,6 +69,58 @@ bool tsfIsChineseModeShiftNumberSymbolVk(unsigned vk) {
     return vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9');
 }
 
+wchar_t tsfShiftNumberFallbackSymbol(unsigned vk) {
+    switch (vk) {
+    case '1':
+        return L'!';
+    case '2':
+        return L'@';
+    case '3':
+        return L'#';
+    case '4':
+        return L'$';
+    case '5':
+        return L'%';
+    case '6':
+        return L'^';
+    case '7':
+        return L'&';
+    case '8':
+        return L'*';
+    case '9':
+        return L'(';
+    case '0':
+        return L')';
+    default:
+        return L'\0';
+    }
+}
+
+bool tsfCanAttemptRawImeKey(unsigned vk) {
+    if ((vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9')) ||
+        (vk >= static_cast<unsigned>('A') && vk <= static_cast<unsigned>('Z'))) {
+        return true;
+    }
+    switch (vk) {
+    case VK_OEM_1:
+    case VK_OEM_2:
+    case VK_OEM_3:
+    case VK_OEM_4:
+    case VK_OEM_5:
+    case VK_OEM_6:
+    case VK_OEM_7:
+    case VK_OEM_PLUS:
+    case VK_OEM_COMMA:
+    case VK_OEM_MINUS:
+    case VK_OEM_PERIOD:
+    case VK_OEM_102:
+    case VK_DECIMAL:
+        return true;
+    default:
+        return false;
+    }
+}
+
 bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
     if (!out || threadId == 0) {
         return false;
@@ -443,6 +495,9 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
             vk, static_cast<std::uintptr_t>(lParam))) {
         return true;
     }
+    if (tsfChordHasCtrlOrAlt() && tsfCanAttemptRawImeKey(vk)) {
+        return true;
+    }
     if (vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000)) {
         return true;
     }
@@ -509,14 +564,17 @@ bool Tsf::keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const {
 
 HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
                                bool isRelease) {
+    pendingKeyHandled_ = false;
     if (!engine_) {
         return S_OK;
     }
     const UINT vk = static_cast<UINT>(wp);
     if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
-        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
-                                        isRelease);
-        afterFcitxEngineKey(ec);
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), isRelease);
+        if (pendingKeyHandled_) {
+            afterFcitxEngineKey(ec);
+        }
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
@@ -527,12 +585,24 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     if (engine_->tryConsumeImManagerHotkey(vk,
                                            static_cast<std::uintptr_t>(lp))) {
+        pendingKeyHandled_ = true;
         afterFcitxEngineKey(ec);
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
 
+    if (tsfChordHasCtrlOrAlt() && tsfCanAttemptRawImeKey(vk)) {
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), false);
+        if (pendingKeyHandled_) {
+            afterFcitxEngineKey(ec);
+        }
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
     if (vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000)) {
+        pendingKeyHandled_ = true;
         chineseActive_ = !chineseActive_;
         if (!chineseActive_) {
             endCompositionCancel(ec);
@@ -552,6 +622,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
+        pendingKeyHandled_ = true;
         endCompositionCancel(ec);
         drainCommitsAfterEngine(ec);
         return S_OK;
@@ -563,6 +634,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             return S_OK;
         }
         if (!engine_->preedit().empty()) {
+            pendingKeyHandled_ = true;
             engine_->backspace();
             if (engine_->preedit().empty()) {
                 endCompositionCancel(ec);
@@ -582,6 +654,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
         const int idx = (vk == '0') ? 9 : (static_cast<int>(vk - '1'));
         if (idx >= 0 && engine_->hasCandidate(static_cast<size_t>(idx))) {
+            pendingKeyHandled_ = true;
             if (engine_->tryForwardCandidateKey(vk)) {
                 afterFcitxEngineKey(ec);
             } else {
@@ -595,6 +668,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
         (vk == VK_UP || vk == VK_DOWN)) {
+        pendingKeyHandled_ = true;
         if (engine_->tryForwardCandidateKey(vk)) {
             afterFcitxEngineKey(ec);
         } else {
@@ -616,17 +690,21 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         }
         if (!engine_->candidates().empty()) {
             if (engine_->tryForwardCandidateKey(VK_RETURN)) {
+                pendingKeyHandled_ = true;
                 afterFcitxEngineKey(ec);
             } else {
                 const auto t = engine_->highlightedCandidateText();
                 if (!t.empty()) {
+                    pendingKeyHandled_ = true;
                     endCompositionCommit(ec, t);
                 }
             }
         } else if (!engine_->preedit().empty()) {
             if (engine_->tryForwardPreeditCommit()) {
+                pendingKeyHandled_ = true;
                 afterFcitxEngineKey(ec);
             } else {
+                pendingKeyHandled_ = true;
                 endCompositionCommit(ec, engine_->preedit());
             }
         }
@@ -637,10 +715,12 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     if (vk == VK_SPACE && !tsfChordHasCtrlOrAlt() &&
         !engine_->candidates().empty()) {
         if (engine_->tryForwardCandidateKey(VK_SPACE)) {
+            pendingKeyHandled_ = true;
             afterFcitxEngineKey(ec);
         } else {
             const auto t = engine_->highlightedCandidateText();
             if (!t.empty()) {
+                pendingKeyHandled_ = true;
                 endCompositionCommit(ec, t);
             }
         }
@@ -655,6 +735,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         }
         wchar_t ch = static_cast<wchar_t>(vk - L'A' + L'a');
         if (engine_->preedit().size() < 32) {
+            pendingKeyHandled_ = true;
             engine_->appendLatinLowercase(ch);
             if (!ensureCompositionStarted(ec)) {
                 drainCommitsAfterEngine(ec);
@@ -672,9 +753,11 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
-                                         false);
-        afterFcitxEngineKey(ec);
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), false);
+        if (pendingKeyHandled_) {
+            afterFcitxEngineKey(ec);
+        }
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
@@ -687,9 +770,17 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             return S_OK;
         }
         FCITX_INFO() << "Delivering Shift+number key to engine: vk=" << vk;
-        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
-                                         false);
-        afterFcitxEngineKey(ec);
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), false);
+        if (pendingKeyHandled_) {
+            afterFcitxEngineKey(ec);
+        } else {
+            const wchar_t fallback = tsfShiftNumberFallbackSymbol(vk);
+            if (fallback != L'\0') {
+                pendingKeyHandled_ = true;
+                endCompositionCommit(ec, std::wstring(1, fallback));
+            }
+        }
         drainCommitsAfterEngine(ec);
         return S_OK;
     }
@@ -766,6 +857,7 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     }
     const bool isRelease = pendingKeyIsRelease_;
     pendingKeyIsRelease_ = false;
+    pendingKeyHandled_ = false;
     return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_, isRelease);
 }
 
