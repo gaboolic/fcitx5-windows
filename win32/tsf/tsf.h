@@ -36,6 +36,19 @@ inline std::filesystem::path tsfTraceLogPath() {
     return dir / "tsf-trace.log";
 }
 
+inline std::wstring currentProcessExeBaseName() {
+    WCHAR exePath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        return {};
+    }
+    return std::filesystem::path(exePath).filename().wstring();
+}
+
+inline std::string currentProcessExeBaseNameUtf8() {
+    const std::wstring baseName = currentProcessExeBaseName();
+    return std::string(baseName.begin(), baseName.end());
+}
+
 inline void tsfTrace(const std::string &message) {
     const auto path = tsfTraceLogPath();
     HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
@@ -45,7 +58,9 @@ inline void tsfTrace(const std::string &message) {
         return;
     }
     std::ostringstream ss;
-    ss << "[pid=" << GetCurrentProcessId() << "] " << message << "\r\n";
+    ss << "[pid=" << GetCurrentProcessId()
+       << " process=" << currentProcessExeBaseNameUtf8() << "] " << message
+       << "\r\n";
     const std::string line = ss.str();
     DWORD written = 0;
     WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
@@ -53,18 +68,19 @@ inline void tsfTrace(const std::string &message) {
     CloseHandle(file);
 }
 
-inline std::wstring currentProcessExeBaseName() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return {};
-    }
-    return std::filesystem::path(exePath).filename().wstring();
-}
-
 inline bool currentProcessExeBaseNameEquals(const wchar_t *expected) {
     const std::wstring baseName = currentProcessExeBaseName();
     return !baseName.empty() && expected &&
            _wcsicmp(baseName.c_str(), expected) == 0;
+}
+
+inline bool currentProcessIsStandaloneTrayHelper() {
+    return currentProcessExeBaseNameEquals(L"fcitx5-tray-helper.exe");
+}
+
+inline bool currentProcessUsesMinimalTsfMode() {
+    return currentProcessExeBaseNameEquals(L"explorer.exe") ||
+           currentProcessIsStandaloneTrayHelper();
 }
 
 template <typename T>
@@ -135,8 +151,10 @@ class Tsf : public ITfTextInputProcessorEx,
     bool langBarChineseMode() const { return chineseActive_; }
     bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
+    bool sharedTrayStatusActionRequestPending() const;
     bool scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext = nullptr);
     bool scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext = nullptr);
+    bool scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext = nullptr);
     HWND shellTrayHostHwnd() const { return shellTrayHostHwnd_; }
 
   private:
@@ -161,6 +179,8 @@ class Tsf : public ITfTextInputProcessorEx,
     void showShellTrayContextMenuAt(POINT pt, HWND owner);
     void persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
     void clearSharedTrayInputMethodRequest() const;
+    void persistSharedTrayStatusActionState() const;
+    void clearSharedTrayStatusActionRequest() const;
     static LRESULT CALLBACK shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
                                                  LPARAM lp);
 
@@ -207,6 +227,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool pendingTraySetChineseModeValid_ = false;
     std::string pendingTrayInputMethod_;
     bool pendingTrayInputMethodFromSharedRequest_ = false;
+    std::string pendingTrayStatusAction_;
+    bool pendingTrayStatusActionFromSharedRequest_ = false;
     std::string deferredSharedTrayInputMethod_;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;

@@ -14,6 +14,9 @@
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
+#include <fcitx/action.h>
+#include <fcitx/statusarea.h>
+#include <fcitx/userinterfacemanager.h>
 #include <fcitx-config/rawconfig.h>
 
 #include <fcitx-utils/log.h>
@@ -94,6 +97,68 @@ std::wstring utf8ToWide(const std::string &utf8) {
     MultiByteToWideChar(CP_UTF8, 0, utf8.data(), static_cast<int>(utf8.size()),
                         w.data(), n);
     return w;
+}
+
+std::wstring asciiLowerWide(std::wstring value) {
+    std::transform(value.begin(), value.end(), value.begin(),
+                   [](wchar_t ch) -> wchar_t {
+                       if (ch >= L'A' && ch <= L'Z') {
+                           return static_cast<wchar_t>(ch - L'A' + L'a');
+                       }
+                       return ch;
+                   });
+    return value;
+}
+
+Action *lookupTrayStatusAction(Instance *instance, InputContext *ic,
+                               const char *name) {
+    if (!instance || !ic || !name || !*name) {
+        return nullptr;
+    }
+    instance->addonManager().addon(name, true);
+    auto *action = instance->userInterfaceManager().lookupAction(name);
+    if (!action) {
+        return nullptr;
+    }
+    if (!action->isParent(&ic->statusArea())) {
+        ic->statusArea().addAction(StatusGroup::AfterInputMethod, action);
+    }
+    return action;
+}
+
+bool trayStatusActionChecked(std::string_view actionName,
+                             const std::wstring &shortText) {
+    const auto lower = asciiLowerWide(shortText);
+    if (actionName == "punctuation") {
+        return lower.find(L"full width") != std::wstring::npos ||
+               shortText.find(L"\x5168\x89d2") != std::wstring::npos;
+    }
+    if (actionName == "fullwidth") {
+        return lower.find(L"full width") != std::wstring::npos ||
+               shortText.find(L"\x5168\x89d2") != std::wstring::npos;
+    }
+    if (actionName == "chttrans") {
+        return lower.find(L"traditional") != std::wstring::npos ||
+               shortText.find(L"\x7e41\x4f53") != std::wstring::npos;
+    }
+    return false;
+}
+
+std::wstring trayStatusActionLabel(std::string_view actionName,
+                                   bool checked) {
+    if (actionName == "punctuation") {
+        return checked ? L"\x4e2d\x6587\x6807\x70b9\xff1a\x5f00"
+                       : L"\x4e2d\x6587\x6807\x70b9\xff1a\x5173";
+    }
+    if (actionName == "fullwidth") {
+        return checked ? L"\x5168\x89d2\x8f93\x5165\xff1a\x5f00"
+                       : L"\x5168\x89d2\x8f93\x5165\xff1a\x5173";
+    }
+    if (actionName == "chttrans") {
+        return checked ? L"\x7e41\x4f53\x4e2d\x6587\xff1a\x5f00"
+                       : L"\x7e41\x4f53\x4e2d\x6587\xff1a\x5173";
+    }
+    return {};
 }
 
 std::filesystem::path dllInstallRootFromAddress(const void *addr) {
@@ -1074,6 +1139,48 @@ std::string Fcitx5ImeEngine::currentInputMethod() const {
         return {};
     }
     return instance_->inputMethod(ic_.get());
+}
+
+std::vector<TrayStatusActionItem> Fcitx5ImeEngine::trayStatusActions() const {
+    std::vector<TrayStatusActionItem> items;
+    if (!instance_ || !ic_) {
+        return items;
+    }
+    static constexpr const char *kActionNames[] = {"punctuation", "fullwidth",
+                                                   "chttrans"};
+    items.reserve(std::size(kActionNames));
+    for (const char *name : kActionNames) {
+        auto *action = lookupTrayStatusAction(instance_.get(), ic_.get(), name);
+        if (!action) {
+            continue;
+        }
+        const auto shortText = utf8ToWide(action->shortText(ic_.get()));
+        if (shortText.empty()) {
+            continue;
+        }
+        const bool checked = trayStatusActionChecked(name, shortText);
+        items.push_back(TrayStatusActionItem{
+            action->name(), trayStatusActionLabel(name, checked), checked});
+    }
+    return items;
+}
+
+bool Fcitx5ImeEngine::activateTrayStatusAction(const std::string &uniqueName) {
+    if (!instance_ || !ic_ || uniqueName.empty()) {
+        return false;
+    }
+    auto *action =
+        lookupTrayStatusAction(instance_.get(), ic_.get(), uniqueName.c_str());
+    if (!action) {
+        return false;
+    }
+    ic_->focusIn();
+    action->activate(ic_.get());
+    instance_->eventDispatcher().dispatchPending();
+    flushLibuvLoopForIme(instance_->eventLoop());
+    instance_->save();
+    syncUiFromIc();
+    return true;
 }
 
 bool Fcitx5ImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,

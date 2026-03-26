@@ -58,6 +58,7 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
     }
     deferredSharedTrayInputMethod_.clear();
     scheduleSharedTrayChineseModeRequest();
+    scheduleSharedTrayStatusActionRequest();
     return S_OK;
 }
 

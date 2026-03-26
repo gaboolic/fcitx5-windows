@@ -59,6 +59,8 @@ class Fcitx5ImeEngine : public ImeEngine {
     std::vector<ProfileInputMethodItem> profileInputMethods() const override;
     bool activateProfileInputMethod(const std::string &uniqueName) override;
     std::string currentInputMethod() const override;
+    std::vector<TrayStatusActionItem> trayStatusActions() const override;
+    bool activateTrayStatusAction(const std::string &uniqueName) override;
     bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                     const std::string &subPath) override;
 

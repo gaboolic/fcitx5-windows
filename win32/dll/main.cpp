@@ -8,6 +8,49 @@ void DllAddRef() { InterlockedIncrement(&dllRefCount); }
 
 void DllRelease() { InterlockedDecrement(&dllRefCount); }
 
+class NoopTextInputProcessor final : public ITfTextInputProcessorEx {
+  public:
+    NoopTextInputProcessor() { DllAddRef(); }
+
+    ~NoopTextInputProcessor() { DllRelease(); }
+
+    STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject) override {
+        if (ppvObject == nullptr) {
+            return E_INVALIDARG;
+        }
+        *ppvObject = nullptr;
+        if (IsEqualIID(riid, IID_IUnknown) ||
+            IsEqualIID(riid, IID_ITfTextInputProcessor) ||
+            IsEqualIID(riid, IID_ITfTextInputProcessorEx)) {
+            *ppvObject = static_cast<ITfTextInputProcessorEx *>(this);
+            AddRef();
+            return S_OK;
+        }
+        return E_NOINTERFACE;
+    }
+
+    STDMETHODIMP_(ULONG) AddRef() override { return ++refCount_; }
+
+    STDMETHODIMP_(ULONG) Release() override {
+        const LONG ret = --refCount_;
+        if (ret == 0) {
+            delete this;
+        }
+        return ret;
+    }
+
+    STDMETHODIMP Activate(ITfThreadMgr *, TfClientId) override { return S_OK; }
+
+    STDMETHODIMP Deactivate() override { return S_OK; }
+
+    STDMETHODIMP ActivateEx(ITfThreadMgr *, TfClientId, DWORD) override {
+        return S_OK;
+    }
+
+  private:
+    LONG refCount_ = 1;
+};
+
 class ClassFactory : public IClassFactory {
   public:
     // IUnknown methods
@@ -35,16 +78,26 @@ class ClassFactory : public IClassFactory {
     // IClassFactory methods
     STDMETHODIMP CreateInstance(IUnknown *pUnkOuter, REFIID riid,
                                 void **ppvObject) override {
-        fcitx::Tsf *tsf;
-        HRESULT hr;
         if (ppvObject == nullptr)
             return E_INVALIDARG;
         *ppvObject = nullptr;
         if (pUnkOuter != nullptr)
             return CLASS_E_NOAGGREGATION;
-        if ((tsf = new fcitx::Tsf()) == nullptr)
+        if (fcitx::currentProcessIsStandaloneTrayHelper()) {
+            auto *noop = new NoopTextInputProcessor();
+            if (noop == nullptr) {
+                return E_OUTOFMEMORY;
+            }
+            fcitx::tsfTrace(
+                "ClassFactory::CreateInstance returning helper noop TIP");
+            const HRESULT hr = noop->QueryInterface(riid, ppvObject);
+            noop->Release();
+            return hr;
+        }
+        auto *tsf = new fcitx::Tsf();
+        if (tsf == nullptr)
             return E_OUTOFMEMORY;
-        hr = tsf->QueryInterface(riid, ppvObject);
+        const HRESULT hr = tsf->QueryInterface(riid, ppvObject);
         tsf->Release(); // caller still holds ref if hr == S_OK
         return hr;
     }

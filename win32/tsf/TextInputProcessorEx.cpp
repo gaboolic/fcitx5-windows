@@ -3,15 +3,11 @@
 namespace fcitx {
 namespace {
 bool currentProcessIsExplorerForMinimalTray() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return false;
-    }
-    const std::wstring_view path(exePath);
-    const size_t pos = path.find_last_of(L"\\/");
-    const std::wstring_view file =
-        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
-    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+    return currentProcessExeBaseNameEquals(L"explorer.exe");
+}
+
+bool currentProcessIsStandaloneTrayHelperForMinimalTsf() {
+    return currentProcessIsStandaloneTrayHelper();
 }
 } // namespace
 
@@ -20,18 +16,28 @@ STDAPI Tsf::Activate(ITfThreadMgr *pThreadMgr, TfClientId tfClientId) {
 }
 
 STDAPI Tsf::Deactivate() {
-    candidateWin_.hide();
-    resetCompositionState();
-    resetShiftToggleGesture();
-    uninitLangBarTrayItem();
+    if (currentProcessIsStandaloneTrayHelperForMinimalTsf()) {
+        initTextEditSink(nullptr);
+        trayEditContextFallback_.Reset();
+        threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
+        threadMgr_.Reset();
+        clientId_ = TF_CLIENTID_NULL;
+        tsfTrace("Deactivate helper minimal isolated");
+        return S_OK;
+    }
     if (currentProcessIsExplorerForMinimalTray()) {
         initTextEditSink(nullptr);
         trayEditContextFallback_.Reset();
         threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
         threadMgr_.Reset();
         clientId_ = TF_CLIENTID_NULL;
+        tsfTrace("Deactivate explorer minimal no-op");
         return S_OK;
     }
+    candidateWin_.hide();
+    resetCompositionState();
+    resetShiftToggleGesture();
+    uninitLangBarTrayItem();
     initTextEditSink(nullptr);
     trayEditContextFallback_.Reset();
     if (threadMgr_) {
@@ -48,10 +54,14 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     ComPtr<ITfDocumentMgr> documentMgr;
     threadMgr_ = pThreadMgr;
     clientId_ = tfClientId;
+    if (currentProcessIsStandaloneTrayHelperForMinimalTsf()) {
+        tsfTrace("ActivateEx helper minimal isolated");
+        return S_OK;
+    }
     if (currentProcessIsExplorerForMinimalTray()) {
-        const bool trayReady = initLangBarTrayItem();
-        tsfTrace(std::string("ActivateEx explorer minimal trayReady=") +
-                 (trayReady ? "true" : "false"));
+        const bool helperReady = initShellTrayIcon();
+        tsfTrace(std::string("ActivateEx explorer minimal helperReady=") +
+                 (helperReady ? "true" : "false"));
         return S_OK;
     }
     if (!initThreadMgrEventSink()) {

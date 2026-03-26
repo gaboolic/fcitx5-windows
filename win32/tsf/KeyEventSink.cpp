@@ -174,13 +174,20 @@ STDMETHODIMP Tsf::OnSetFocus(BOOL fForeground) { return S_OK; }
 
 STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
                                 LPARAM lParam, BOOL *pfEaten) {
-    (void)pContext;
     trackShiftToggleKeyDown(wParam, lParam);
     if (sharedTrayChineseModeRequestPending() ||
-        sharedTrayInputMethodRequestPending()) {
+        sharedTrayInputMethodRequestPending() ||
+        sharedTrayStatusActionRequestPending()) {
         tsfTrace("OnTestKeyDown shared tray request pending");
-        *pfEaten = TRUE;
-        return S_OK;
+        scheduleSharedTrayChineseModeRequest(pContext);
+        scheduleSharedTrayInputMethodRequest(pContext);
+        scheduleSharedTrayStatusActionRequest(pContext);
+        if (sharedTrayChineseModeRequestPending() ||
+            sharedTrayInputMethodRequestPending() ||
+            sharedTrayStatusActionRequestPending()) {
+            *pfEaten = TRUE;
+            return S_OK;
+        }
     }
     // Peek only: must not run edit session here. Running processKey in both
     // OnTestKeyDown and OnKeyDown doubles input on some hosts (nii -> ni).
@@ -195,6 +202,7 @@ STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
     tsfTrace("OnKeyDown enter");
     scheduleSharedTrayChineseModeRequest(pContext);
     scheduleSharedTrayInputMethodRequest(pContext);
+    scheduleSharedTrayStatusActionRequest(pContext);
     if (!canProcessKeyDown(wParam, lParam)) {
         tsfTrace("OnKeyDown not handled by IME");
         *pfEaten = FALSE;
@@ -208,8 +216,20 @@ STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
 
 STDMETHODIMP Tsf::OnTestKeyUp(ITfContext *pContext, WPARAM wParam,
                               LPARAM lParam, BOOL *pfEaten) {
-    (void)pContext;
     trackShiftToggleKeyUp(wParam, lParam);
+    if (sharedTrayChineseModeRequestPending() ||
+        sharedTrayInputMethodRequestPending() ||
+        sharedTrayStatusActionRequestPending()) {
+        scheduleSharedTrayChineseModeRequest(pContext);
+        scheduleSharedTrayInputMethodRequest(pContext);
+        scheduleSharedTrayStatusActionRequest(pContext);
+        if (sharedTrayChineseModeRequestPending() ||
+            sharedTrayInputMethodRequestPending() ||
+            sharedTrayStatusActionRequestPending()) {
+            *pfEaten = TRUE;
+            return S_OK;
+        }
+    }
     *pfEaten = (shiftTapTogglePending_ || canProcessKeyUp(wParam, lParam))
                    ? TRUE
                    : FALSE;

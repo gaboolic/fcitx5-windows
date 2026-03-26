@@ -13,6 +13,12 @@ struct ProfileInputMethodItem {
     bool isCurrent = false;
 };
 
+struct TrayStatusActionItem {
+    std::string uniqueName;
+    std::wstring displayName;
+    bool isChecked = false;
+};
+
 // Pluggable input logic (pinyin → preedit/candidates). TSF layer only displays
 // and commits strings; replace Stub with fcitx5/libime-backed engine later.
 class ImeEngine {
@@ -71,6 +77,10 @@ class ImeEngine {
     virtual bool activateProfileInputMethod(const std::string &uniqueName);
     /// Query the current active input method unique name.
     virtual std::string currentInputMethod() const;
+    /// List checkable status-area actions for tray menus.
+    virtual std::vector<TrayStatusActionItem> trayStatusActions() const;
+    /// Activate one status-area action by unique name.
+    virtual bool activateTrayStatusAction(const std::string &uniqueName);
     /// Invoke addon sub-config action for a specific input method engine.
     virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                             const std::string &subPath);

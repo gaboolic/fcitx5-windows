@@ -19,9 +19,13 @@ bool currentProcessIsExplorerForDefaultEngine() {
     return currentProcessExeBaseNameEquals(L"explorer.exe");
 }
 
+bool currentProcessShouldBypassDefaultEngine() {
+    return currentProcessUsesMinimalTsfMode();
+}
+
 std::unique_ptr<ImeEngine> makeDefaultImeEngine() {
 #if FCITX_WIN32_IME_WITH_CORE
-    if (!currentProcessIsExplorerForDefaultEngine()) {
+    if (!currentProcessShouldBypassDefaultEngine()) {
         if (auto e = makeFcitx5ImeEngineAttempt()) {
             return e;
         }
@@ -40,6 +44,9 @@ Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
             0) {
         DllAddRef();
         tsfTrace("Tsf::Tsf pinned DLL for explorer process lifetime");
+    }
+    if (currentProcessIsStandaloneTrayHelper()) {
+        tsfTrace("Tsf::Tsf helper process using isolated minimal TSF path");
     }
     candidateWin_.setOnPick([this](int idx) {
         pendingMousePick_ = idx;

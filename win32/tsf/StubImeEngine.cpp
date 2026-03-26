@@ -40,6 +40,14 @@ bool ImeEngine::activateProfileInputMethod(const std::string & /*uniqueName*/) {
 
 std::string ImeEngine::currentInputMethod() const { return {}; }
 
+std::vector<TrayStatusActionItem> ImeEngine::trayStatusActions() const {
+    return {};
+}
+
+bool ImeEngine::activateTrayStatusAction(const std::string & /*uniqueName*/) {
+    return false;
+}
+
 bool ImeEngine::invokeInputMethodSubConfig(const std::string & /*uniqueName*/,
                                            const std::string & /*subPath*/) {
     return false;

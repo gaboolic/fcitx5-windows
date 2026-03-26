@@ -804,6 +804,19 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     if (!engine_) {
         return S_OK;
     }
+    if (!pendingTrayStatusAction_.empty()) {
+        const auto actionName = std::move(pendingTrayStatusAction_);
+        pendingTrayStatusAction_.clear();
+        const bool fromSharedRequest = pendingTrayStatusActionFromSharedRequest_;
+        pendingTrayStatusActionFromSharedRequest_ = false;
+        const bool activated = engine_->activateTrayStatusAction(actionName);
+        if (fromSharedRequest && activated) {
+            clearSharedTrayStatusActionRequest();
+        }
+        persistSharedTrayStatusActionState();
+        langBarNotifyIconUpdate();
+        return S_OK;
+    }
     if (!pendingTrayInputMethod_.empty()) {
         const auto uniqueName = std::move(pendingTrayInputMethod_);
         pendingTrayInputMethod_.clear();

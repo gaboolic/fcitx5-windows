@@ -61,8 +61,14 @@ const GUID kFcitxShellTrayNotifyGuid = {
     0x8b4d3a2f, 0x1e0c, 0x4a5b, {0x9c, 0x8d, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2e}};
 
 enum TrayMenuId : UINT {
-    IDM_CHINESE = 0x4100,
-    IDM_ENGLISH,
+    IDM_INPUT_MODE_CHINESE = 0x4100,
+    IDM_INPUT_MODE_ENGLISH,
+    IDM_FULLWIDTH_ON,
+    IDM_FULLWIDTH_OFF,
+    IDM_SCRIPT_TRADITIONAL,
+    IDM_SCRIPT_SIMPLIFIED,
+    IDM_PUNCTUATION_CHINESE,
+    IDM_PUNCTUATION_ENGLISH,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
     IDM_OPEN_LOG_DIR,
@@ -70,6 +76,7 @@ enum TrayMenuId : UINT {
     IDM_RIME_SYNC,
     IDM_RIME_OPEN_USER_DIR,
     IDM_RIME_OPEN_LOG_DIR,
+    IDM_STATUS_ACTION_BASE = 0x4200,
     IDM_INPUT_METHOD_BASE = 0x4300,
 };
 
@@ -282,6 +289,24 @@ std::filesystem::path sharedTrayChineseModeStateFile() {
            L"current-tray-chinese-mode.txt";
 }
 
+std::filesystem::path sharedTrayStatusActionRequestFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"pending-tray-status-action.txt";
+}
+
+std::filesystem::path sharedTrayStatusActionStateFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"current-tray-status-actions.txt";
+}
+
 std::string trimSharedTrayValue(std::string value) {
     while (!value.empty() &&
            (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' ||
@@ -298,6 +323,22 @@ std::string trimSharedTrayValue(std::string value) {
         value.erase(0, first);
     }
     return value;
+}
+
+std::string wideToUtf8(const std::wstring &wide) {
+    if (wide.empty()) {
+        return {};
+    }
+    const int n = WideCharToMultiByte(CP_UTF8, 0, wide.data(),
+                                      static_cast<int>(wide.size()), nullptr, 0,
+                                      nullptr, nullptr);
+    if (n <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, wide.data(), static_cast<int>(wide.size()),
+                        utf8.data(), n, nullptr, nullptr);
+    return utf8;
 }
 
 std::string readSharedTrayTextFile(const std::filesystem::path &path) {
@@ -351,6 +392,10 @@ void writeSharedTrayChineseModeFile(const std::filesystem::path &path,
 
 std::string readSharedTrayInputMethodRequestFile() {
     return readSharedTrayTextFile(sharedTrayInputMethodRequestFile());
+}
+
+std::string readSharedTrayStatusActionRequestFile() {
+    return readSharedTrayTextFile(sharedTrayStatusActionRequestFile());
 }
 
 void persistSharedTrayCurrentInputMethodState(const std::string &uniqueName) {
@@ -893,6 +938,45 @@ std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
     return std::wstring(item.uniqueName.begin(), item.uniqueName.end());
 }
 
+std::wstring trayChineseModeMenuText(bool chineseMode) {
+    return chineseMode ? L"输入模式(中文)" : L"输入模式(英文)";
+}
+
+std::wstring trayStatusToggleMenuText(const TrayStatusActionItem &item) {
+    if (item.uniqueName == "punctuation") {
+        return item.isChecked ? L"中英文标点(中文)" : L"中英文标点(英文)";
+    }
+    if (item.uniqueName == "fullwidth") {
+        return item.isChecked ? L"全角/半角(全角)" : L"全角/半角(半角)";
+    }
+    if (item.uniqueName == "chttrans") {
+        return item.isChecked ? L"字符集(繁体)" : L"字符集(简体)";
+    }
+    return item.displayName;
+}
+
+const TrayStatusActionItem *findTrayStatusAction(
+    const std::vector<TrayStatusActionItem> &items, const char *uniqueName) {
+    for (const auto &item : items) {
+        if (item.uniqueName == uniqueName) {
+            return &item;
+        }
+    }
+    return nullptr;
+}
+
+void appendRadioMenuItem(HMENU menu, UINT id, const wchar_t *label) {
+    if (!menu || !label) {
+        return;
+    }
+    AppendMenuW(menu, MF_STRING, id, label);
+    MENUITEMINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = MIIM_FTYPE;
+    info.fType = MFT_RADIOCHECK;
+    SetMenuItemInfoW(menu, id, FALSE, &info);
+}
+
 } // namespace
 
 FcitxLangBarButton::FcitxLangBarButton(Tsf *tsf)
@@ -1229,6 +1313,35 @@ void Tsf::clearSharedTrayInputMethodRequest() const {
     std::filesystem::remove(path, ec);
 }
 
+void Tsf::persistSharedTrayStatusActionState() const {
+    const auto path = sharedTrayStatusActionStateFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return;
+    }
+    if (!engine_) {
+        return;
+    }
+    for (const auto &item : engine_->trayStatusActions()) {
+        out << item.uniqueName << '\t' << (item.isChecked ? '1' : '0') << '\t'
+            << wideToUtf8(item.displayName) << '\n';
+    }
+}
+
+void Tsf::clearSharedTrayStatusActionRequest() const {
+    const auto path = sharedTrayStatusActionRequestFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
 bool Tsf::sharedTrayChineseModeRequestPending() const {
     bool value = false;
     return readSharedTrayChineseModeRequest(&value);
@@ -1236,6 +1349,10 @@ bool Tsf::sharedTrayChineseModeRequestPending() const {
 
 bool Tsf::sharedTrayInputMethodRequestPending() const {
     return !readSharedTrayInputMethodRequestFile().empty();
+}
+
+bool Tsf::sharedTrayStatusActionRequestPending() const {
+    return !readSharedTrayStatusActionRequestFile().empty();
 }
 
 bool Tsf::scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext) {
@@ -1375,6 +1492,46 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
     return true;
 }
 
+bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
+    if (!engine_ || !pendingTrayStatusAction_.empty() || currentProcessIsExplorer()) {
+        return false;
+    }
+    const auto uniqueName = readSharedTrayStatusActionRequestFile();
+    if (uniqueName.empty()) {
+        return false;
+    }
+    pendingTrayStatusAction_ = uniqueName;
+    pendingTrayStatusActionFromSharedRequest_ = true;
+    HRESULT hr = E_FAIL;
+    ComPtr<ITfContext> ctx;
+    if (preferredContext) {
+        ctx = preferredContext;
+    } else {
+        ctx = textEditSinkContext_;
+    }
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE, &hr);
+    }
+    if (FAILED(hr)) {
+        const auto action = pendingTrayStatusAction_;
+        pendingTrayStatusAction_.clear();
+        pendingTrayStatusActionFromSharedRequest_ = false;
+        if (engine_->activateTrayStatusAction(action)) {
+            clearSharedTrayStatusActionRequest();
+            persistSharedTrayStatusActionState();
+            langBarNotifyIconUpdate();
+        }
+        return false;
+    }
+    return true;
+}
+
 void Tsf::langBarNotifyIconUpdate() {
     if (currentProcessIsExplorer() && !shellTrayHostHwnd_) {
         const bool recreated = initShellTrayIcon();
@@ -1391,6 +1548,7 @@ void Tsf::langBarNotifyIconUpdate() {
                 persistSharedTrayCurrentInputMethodState(current);
             }
         }
+        persistSharedTrayStatusActionState();
     }
     updateShellTrayTooltip();
     if (langBarItem_) {
@@ -1549,6 +1707,10 @@ void Tsf::recreateShellTrayIcon() {
 }
 
 void Tsf::showShellTrayContextMenu() {
+    if (currentProcessIsExplorer()) {
+        ensureStandaloneTrayHelperRunning();
+        return;
+    }
     POINT pt;
     GetCursorPos(&pt);
     HWND owner = shellTrayHostHwnd_ ? shellTrayHostHwnd_ : GetForegroundWindow();
@@ -1559,105 +1721,221 @@ void Tsf::showShellTrayContextMenu() {
 }
 
 void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
-    ScopedDllPin menuPin;
-    HMENU menu = CreatePopupMenu();
-    if (!menu) {
+    if (currentProcessIsExplorer()) {
+        ensureStandaloneTrayHelperRunning();
         return;
     }
-    auto profileItems =
-        engine_ ? engine_->profileInputMethods() : std::vector<ProfileInputMethodItem>{};
-    if (profileItems.empty()) {
-        profileItems = readProfileInputMethodsFromConfig();
-    }
-    bool currentIsRime = false;
-    for (const auto &item : profileItems) {
-        if (item.isCurrent && item.uniqueName == "rime") {
-            currentIsRime = true;
-            break;
+    ScopedDllPin menuPin;
+    for (;;) {
+        HMENU menu = CreatePopupMenu();
+        if (!menu) {
+            return;
         }
-    }
-    AppendMenuW(menu, MF_STRING | (langBarChineseMode() ? MF_CHECKED : 0),
-                IDM_CHINESE, L"中文模式");
-    AppendMenuW(menu,
-                MF_STRING | (!langBarChineseMode() ? MF_CHECKED : 0),
-                IDM_ENGLISH, L"英文模式（直接键入）");
-    HMENU imMenu = CreatePopupMenu();
-    if (imMenu) {
+        auto profileItems =
+            engine_ ? engine_->profileInputMethods()
+                    : std::vector<ProfileInputMethodItem>{};
         if (profileItems.empty()) {
-            AppendMenuW(imMenu, MF_STRING | MF_GRAYED, IDM_INPUT_METHOD_BASE,
-                        L"当前 profile 中没有可切换输入法");
-        } else {
-            for (size_t i = 0; i < profileItems.size(); ++i) {
-                AppendMenuW(
-                    imMenu,
-                    MF_STRING |
-                        (profileItems[i].isCurrent ? MF_CHECKED : 0),
-                    IDM_INPUT_METHOD_BASE + static_cast<UINT>(i),
-                    trayInputMethodMenuText(profileItems[i]).c_str());
+            profileItems = readProfileInputMethodsFromConfig();
+        }
+        const auto statusActions =
+            engine_ ? engine_->trayStatusActions()
+                    : std::vector<TrayStatusActionItem>{};
+        bool currentIsRime = false;
+        for (const auto &item : profileItems) {
+            if (item.isCurrent && item.uniqueName == "rime") {
+                currentIsRime = true;
+                break;
             }
         }
-        AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(imMenu),
-                    L"切换输入法");
-    }
-    if (currentIsRime) {
-        AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-        AppendMenuW(menu, MF_STRING, IDM_RIME_DEPLOY, L"重新部署中州韵");
-        AppendMenuW(menu, MF_STRING, IDM_RIME_SYNC, L"同步中州韵用户数据");
-        AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_USER_DIR,
-                    L"打开中州韵配置目录");
-        AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_LOG_DIR,
-                    L"打开中州韵日志目录");
-    }
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR, L"打开配置文件夹");
-    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR, L"打开 Fcitx5 日志目录");
+        HMENU statusMenu = CreatePopupMenu();
+        if (statusMenu) {
+            HMENU inputModeMenu = CreatePopupMenu();
+            if (inputModeMenu) {
+                appendRadioMenuItem(inputModeMenu, IDM_INPUT_MODE_CHINESE,
+                                    L"中文模式");
+                appendRadioMenuItem(inputModeMenu, IDM_INPUT_MODE_ENGLISH,
+                                    L"英文模式");
+                CheckMenuRadioItem(inputModeMenu, IDM_INPUT_MODE_CHINESE,
+                                   IDM_INPUT_MODE_ENGLISH,
+                                   langBarChineseMode() ? IDM_INPUT_MODE_CHINESE
+                                                        : IDM_INPUT_MODE_ENGLISH,
+                                   MF_BYCOMMAND);
+                AppendMenuW(statusMenu, MF_POPUP,
+                            reinterpret_cast<UINT_PTR>(inputModeMenu),
+                            trayChineseModeMenuText(langBarChineseMode()).c_str());
+            }
+            if (const auto *item = findTrayStatusAction(statusActions, "fullwidth")) {
+                HMENU subMenu = CreatePopupMenu();
+                if (subMenu) {
+                    appendRadioMenuItem(subMenu, IDM_FULLWIDTH_ON, L"全角");
+                    appendRadioMenuItem(subMenu, IDM_FULLWIDTH_OFF, L"半角");
+                    CheckMenuRadioItem(subMenu, IDM_FULLWIDTH_ON, IDM_FULLWIDTH_OFF,
+                                       item->isChecked ? IDM_FULLWIDTH_ON
+                                                       : IDM_FULLWIDTH_OFF,
+                                       MF_BYCOMMAND);
+                    AppendMenuW(statusMenu, MF_POPUP,
+                                reinterpret_cast<UINT_PTR>(subMenu),
+                                trayStatusToggleMenuText(*item).c_str());
+                }
+            }
+            if (const auto *item = findTrayStatusAction(statusActions, "chttrans")) {
+                HMENU subMenu = CreatePopupMenu();
+                if (subMenu) {
+                    appendRadioMenuItem(subMenu, IDM_SCRIPT_SIMPLIFIED,
+                                        L"简体中文");
+                    appendRadioMenuItem(subMenu, IDM_SCRIPT_TRADITIONAL,
+                                        L"繁体中文");
+                    CheckMenuRadioItem(subMenu, IDM_SCRIPT_TRADITIONAL,
+                                       IDM_SCRIPT_SIMPLIFIED,
+                                       item->isChecked ? IDM_SCRIPT_TRADITIONAL
+                                                       : IDM_SCRIPT_SIMPLIFIED,
+                                       MF_BYCOMMAND);
+                    AppendMenuW(statusMenu, MF_POPUP,
+                                reinterpret_cast<UINT_PTR>(subMenu),
+                                trayStatusToggleMenuText(*item).c_str());
+                }
+            }
+            if (const auto *item = findTrayStatusAction(statusActions, "punctuation")) {
+                HMENU subMenu = CreatePopupMenu();
+                if (subMenu) {
+                    appendRadioMenuItem(subMenu, IDM_PUNCTUATION_CHINESE,
+                                        L"中文标点");
+                    appendRadioMenuItem(subMenu, IDM_PUNCTUATION_ENGLISH,
+                                        L"英文标点");
+                    CheckMenuRadioItem(subMenu, IDM_PUNCTUATION_CHINESE,
+                                       IDM_PUNCTUATION_ENGLISH,
+                                       item->isChecked ? IDM_PUNCTUATION_CHINESE
+                                                       : IDM_PUNCTUATION_ENGLISH,
+                                       MF_BYCOMMAND);
+                    AppendMenuW(statusMenu, MF_POPUP,
+                                reinterpret_cast<UINT_PTR>(subMenu),
+                                trayStatusToggleMenuText(*item).c_str());
+                }
+            }
+            AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_CONFIG_DIR,
+                        L"打开配置文件夹");
+            AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_LOG_DIR,
+                        L"打开 Fcitx5 日志目录");
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(statusMenu),
+                        L"输入状态");
+        }
+        HMENU imMenu = CreatePopupMenu();
+        if (imMenu) {
+            if (profileItems.empty()) {
+                AppendMenuW(imMenu, MF_STRING | MF_GRAYED, IDM_INPUT_METHOD_BASE,
+                            L"当前 profile 中没有可切换输入法");
+            } else {
+                for (size_t i = 0; i < profileItems.size(); ++i) {
+                    AppendMenuW(
+                        imMenu,
+                        MF_STRING |
+                            (profileItems[i].isCurrent ? MF_CHECKED : 0),
+                        IDM_INPUT_METHOD_BASE + static_cast<UINT>(i),
+                        trayInputMethodMenuText(profileItems[i]).c_str());
+                }
+            }
+            AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(imMenu),
+                        L"切换输入法");
+        }
+        if (currentIsRime) {
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, IDM_RIME_DEPLOY, L"重新部署中州韵");
+            AppendMenuW(menu, MF_STRING, IDM_RIME_SYNC, L"同步中州韵用户数据");
+            AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_USER_DIR,
+                        L"打开中州韵配置目录");
+            AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_LOG_DIR,
+                        L"打开中州韵日志目录");
+        }
+        if (owner && owner != GetDesktopWindow()) {
+            SetForegroundWindow(owner);
+        }
+        const UINT cmd = TrackPopupMenu(
+            menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            pt.x, pt.y, 0, owner ? owner : GetDesktopWindow(), nullptr);
+        if (owner && owner != GetDesktopWindow()) {
+            PostMessageW(owner, WM_NULL, 0, 0);
+        }
+        DestroyMenu(menu);
 
-    if (owner && owner != GetDesktopWindow()) {
-        SetForegroundWindow(owner);
-    }
-    const UINT cmd = TrackPopupMenu(
-        menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-        pt.x, pt.y, 0, owner ? owner : GetDesktopWindow(), nullptr);
-    if (owner && owner != GetDesktopWindow()) {
-        PostMessageW(owner, WM_NULL, 0, 0);
-    }
-    DestroyMenu(menu);
-    switch (cmd) {
-    case IDM_CHINESE:
-        langBarScheduleSetChineseMode(true);
-        break;
-    case IDM_ENGLISH:
-        langBarScheduleSetChineseMode(false);
-        break;
-    case IDM_OPEN_CONFIG_DIR:
-        exploreUserFcitxConfig();
-        break;
-    case IDM_RIME_DEPLOY:
-        if (!launchRimeDeployWithNotification(shellTrayHostHwnd_) && engine_) {
-            engine_->invokeInputMethodSubConfig("rime", "deploy");
+        bool reopenMenu = false;
+        switch (cmd) {
+        case 0:
+            return;
+        case IDM_INPUT_MODE_CHINESE:
+            if (!langBarChineseMode()) {
+                langBarScheduleSetChineseMode(true);
+            }
+            reopenMenu = true;
+            break;
+        case IDM_INPUT_MODE_ENGLISH:
+            if (langBarChineseMode()) {
+                langBarScheduleSetChineseMode(false);
+            }
+            reopenMenu = true;
+            break;
+        case IDM_OPEN_CONFIG_DIR:
+            exploreUserFcitxConfig();
+            return;
+        case IDM_RIME_DEPLOY:
+            if (!launchRimeDeployWithNotification(shellTrayHostHwnd_) && engine_) {
+                engine_->invokeInputMethodSubConfig("rime", "deploy");
+            }
+            return;
+        case IDM_RIME_SYNC:
+            if (engine_) {
+                engine_->invokeInputMethodSubConfig("rime", "sync");
+            }
+            return;
+        case IDM_RIME_OPEN_USER_DIR:
+            exploreUserRimeConfig();
+            return;
+        case IDM_RIME_OPEN_LOG_DIR:
+            exploreRimeLogDir();
+            return;
+        case IDM_OPEN_LOG_DIR:
+            exploreFcitx5LogDir();
+            return;
+        default:
+            if (cmd == IDM_FULLWIDTH_ON || cmd == IDM_FULLWIDTH_OFF ||
+                cmd == IDM_SCRIPT_SIMPLIFIED || cmd == IDM_SCRIPT_TRADITIONAL ||
+                cmd == IDM_PUNCTUATION_CHINESE || cmd == IDM_PUNCTUATION_ENGLISH) {
+                if (engine_) {
+                    const char *actionName = nullptr;
+                    bool targetChecked = false;
+                    if (cmd == IDM_FULLWIDTH_ON || cmd == IDM_FULLWIDTH_OFF) {
+                        actionName = "fullwidth";
+                        targetChecked = cmd == IDM_FULLWIDTH_ON;
+                    } else if (cmd == IDM_SCRIPT_SIMPLIFIED ||
+                               cmd == IDM_SCRIPT_TRADITIONAL) {
+                        actionName = "chttrans";
+                        targetChecked = cmd == IDM_SCRIPT_TRADITIONAL;
+                    } else {
+                        actionName = "punctuation";
+                        targetChecked = cmd == IDM_PUNCTUATION_CHINESE;
+                    }
+                    if (const auto *item =
+                            findTrayStatusAction(statusActions, actionName);
+                        item && item->isChecked != targetChecked) {
+                        engine_->activateTrayStatusAction(item->uniqueName);
+                        langBarNotifyIconUpdate();
+                    }
+                }
+                reopenMenu = true;
+                break;
+            }
+            if (cmd >= IDM_INPUT_METHOD_BASE &&
+                cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
+                langBarScheduleActivateInputMethod(
+                    profileItems[cmd - IDM_INPUT_METHOD_BASE].uniqueName);
+                return;
+            }
+            break;
         }
-        break;
-    case IDM_RIME_SYNC:
-        if (engine_) {
-            engine_->invokeInputMethodSubConfig("rime", "sync");
+        if (!reopenMenu) {
+            return;
         }
-        break;
-    case IDM_RIME_OPEN_USER_DIR:
-        exploreUserRimeConfig();
-        break;
-    case IDM_RIME_OPEN_LOG_DIR:
-        exploreRimeLogDir();
-        break;
-    case IDM_OPEN_LOG_DIR:
-        exploreFcitx5LogDir();
-        break;
-    default:
-        if (cmd >= IDM_INPUT_METHOD_BASE &&
-            cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
-            langBarScheduleActivateInputMethod(
-                profileItems[cmd - IDM_INPUT_METHOD_BASE].uniqueName);
-        }
-        break;
+        GetCursorPos(&pt);
     }
 }
 
