@@ -576,8 +576,10 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
 
+    // 处理数字键选择候选词（仅在未按 Shift 时）
     if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
-        vk >= '0' && vk <= '9') {
+        vk >= '0' && vk <= '9' &&
+        (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
         const int idx = (vk == '0') ? 9 : (static_cast<int>(vk - '1'));
         if (idx >= 0 && engine_->hasCandidate(static_cast<size_t>(idx))) {
             if (engine_->tryForwardCandidateKey(vk)) {
@@ -677,6 +679,21 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
 
+    // 处理 Shift+数字键 输入中文标点符号（如 Shift+1 输入 "！"）
+    if (tsfIsChineseModeShiftNumberSymbolVk(vk)) {
+        FCITX_INFO() << "Shift+number key: vk=" << vk << " shift state=" << (GetKeyState(VK_SHIFT) & 0x8000);
+        if (tsfChordHasCtrlOrAlt()) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
+        FCITX_INFO() << "Delivering Shift+number key to engine: vk=" << vk;
+        engine_->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
+                                         false);
+        afterFcitxEngineKey(ec);
+        drainCommitsAfterEngine(ec);
+        return S_OK;
+    }
+
     drainCommitsAfterEngine(ec);
     return S_OK;
 }
@@ -685,6 +702,12 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     if (pendingTrayToggleChinese_) {
         pendingTrayToggleChinese_ = false;
         trayToggleChineseInEditSession(ec);
+        return S_OK;
+    }
+    if (pendingTraySetChineseModeValid_) {
+        const bool wantChinese = pendingTraySetChineseMode_;
+        pendingTraySetChineseModeValid_ = false;
+        traySetChineseModeInEditSession(ec, wantChinese);
         return S_OK;
     }
     if (!engine_) {

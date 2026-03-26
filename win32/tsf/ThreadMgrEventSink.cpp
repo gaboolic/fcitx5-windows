@@ -37,6 +37,7 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
     tsfTrace("OnSetFocus document manager focus changed");
     initTextEditSink(pDocMgrFocus);
+    scheduleSharedTrayChineseModeRequest();
     scheduleSharedTrayInputMethodRequest();
     return S_OK;
 }

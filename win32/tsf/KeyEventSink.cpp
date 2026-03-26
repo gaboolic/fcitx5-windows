@@ -171,7 +171,8 @@ STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
                                 LPARAM lParam, BOOL *pfEaten) {
     (void)pContext;
     trackShiftToggleKeyDown(wParam, lParam);
-    if (sharedTrayInputMethodRequestPending()) {
+    if (sharedTrayChineseModeRequestPending() ||
+        sharedTrayInputMethodRequestPending()) {
         tsfTrace("OnTestKeyDown shared tray request pending");
         *pfEaten = TRUE;
         return S_OK;
@@ -187,6 +188,7 @@ STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
     (void)pContext;
     trackShiftToggleKeyDown(wParam, lParam);
     tsfTrace("OnKeyDown enter");
+    scheduleSharedTrayChineseModeRequest(pContext);
     scheduleSharedTrayInputMethodRequest(pContext);
     if (!canProcessKeyDown(wParam, lParam)) {
         tsfTrace("OnKeyDown not handled by IME");

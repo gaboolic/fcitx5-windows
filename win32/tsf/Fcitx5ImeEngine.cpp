@@ -116,7 +116,22 @@ std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     return p.parent_path().parent_path();
 }
 
+bool currentProcessIsExplorerForTsf() {
+    WCHAR exePath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        return false;
+    }
+    const std::wstring_view path(exePath);
+    const size_t pos = path.find_last_of(L"\\/");
+    const std::wstring_view file =
+        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
+    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+}
+
 void setupDefaultTsLogPath() {
+    if (currentProcessIsExplorerForTsf()) {
+        return;
+    }
     const char *existing = std::getenv("FCITX_TS_LOG");
     if (existing && existing[0]) {
         return;
@@ -508,11 +523,16 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
 bool Fcitx5ImeEngine::init() {
     loggingAttached_ = false;
     try {
+        const bool explorerProcess = currentProcessIsExplorerForTsf();
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
         tsfTrace(std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
                  (std::getenv("FCITX_TS_LOG") ? std::getenv("FCITX_TS_LOG") : ""));
-        loggingAttached_ = tsImeTryAttachLogging();
+        if (!explorerProcess) {
+            loggingAttached_ = tsImeTryAttachLogging();
+        } else {
+            tsfTrace("Fcitx5ImeEngine::init skip FCITX_TS_LOG in explorer");
+        }
         tsfTrace(std::string("Fcitx5ImeEngine::init loggingAttached=") +
                  (loggingAttached_ ? "true" : "false"));
         if (loggingAttached_) {

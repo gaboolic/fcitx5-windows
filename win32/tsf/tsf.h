@@ -119,8 +119,11 @@ class Tsf : public ITfTextInputProcessorEx,
     void langBarScheduleActivateInputMethod(const std::string &uniqueName);
     void langBarNotifyIconUpdate();
     bool langBarChineseMode() const { return chineseActive_; }
+    bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
+    bool scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext = nullptr);
     bool scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext = nullptr);
+    HWND shellTrayHostHwnd() const { return shellTrayHostHwnd_; }
 
   private:
     friend class CandidateListUiElement;
@@ -131,6 +134,7 @@ class Tsf : public ITfTextInputProcessorEx,
     // ITfThreadMgrEventSink
     bool initLangBarTrayItem();
     void uninitLangBarTrayItem();
+    void traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese);
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
@@ -179,6 +183,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool shellTrayAdded_ = false;
     static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
+    bool pendingTraySetChineseMode_ = false;
+    bool pendingTraySetChineseModeValid_ = false;
     std::string pendingTrayInputMethod_;
     bool pendingTrayInputMethodFromSharedRequest_ = false;
     std::unique_ptr<ImeEngine> engine_;

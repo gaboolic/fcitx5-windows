@@ -11,6 +11,8 @@
 #include <vector>
 #include <string_view>
 #include <windows.h>
+#include <unordered_map>
+#include <memory>
 
 #ifndef CONNECT_E_NOCONNECTION
 #define CONNECT_E_NOCONNECTION static_cast<HRESULT>(0x80040200L)
@@ -54,9 +56,11 @@ enum TrayMenuId : UINT {
     IDM_ENGLISH,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
+    IDM_OPEN_LOG_DIR,
     IDM_RIME_DEPLOY,
     IDM_RIME_SYNC,
     IDM_RIME_OPEN_USER_DIR,
+    IDM_RIME_OPEN_LOG_DIR,
     IDM_INPUT_METHOD_BASE = 0x4300,
 };
 
@@ -186,12 +190,15 @@ void openDirectoryInDetachedExplorer(const std::wstring &dir) {
     if (dir.empty()) {
         return;
     }
-    if (currentProcessIsExplorer()) {
-        launchDetachedProcess(L"C:\\Windows\\explorer.exe", L"\"" + dir + L"\"");
-        return;
-    }
-    ShellExecuteW(nullptr, L"explore", dir.c_str(), nullptr, nullptr,
-                  SW_SHOWNORMAL);
+    // 使用 ShellExecuteExW 打开目录，避免在资源管理器进程中出现问题
+    // SEE_MASK_NOASYNC 确保操作同步完成，避免资源管理器崩溃
+    SHELLEXECUTEINFOW sei = {};
+    sei.cbSize = sizeof(sei);
+    sei.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    sei.lpVerb = L"open";
+    sei.lpFile = dir.c_str();
+    sei.nShow = SW_SHOWNORMAL;
+    ShellExecuteExW(&sei);
 }
 
 std::filesystem::path sharedTrayInputMethodRequestFile() {
@@ -203,8 +210,52 @@ std::filesystem::path sharedTrayInputMethodRequestFile() {
            L"pending-tray-input-method.txt";
 }
 
-std::string readSharedTrayInputMethodRequestFile() {
-    const auto path = sharedTrayInputMethodRequestFile();
+std::filesystem::path sharedTrayCurrentInputMethodFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"current-tray-input-method.txt";
+}
+
+std::filesystem::path sharedTrayChineseModeRequestFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"pending-tray-chinese-mode.txt";
+}
+
+std::filesystem::path sharedTrayChineseModeStateFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"current-tray-chinese-mode.txt";
+}
+
+std::string trimSharedTrayValue(std::string value) {
+    while (!value.empty() &&
+           (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' ||
+            value.back() == '\t')) {
+        value.pop_back();
+    }
+    size_t first = 0;
+    while (first < value.size() &&
+           (value[first] == ' ' || value[first] == '\t' ||
+            value[first] == '\r' || value[first] == '\n')) {
+        ++first;
+    }
+    if (first > 0) {
+        value.erase(0, first);
+    }
+    return value;
+}
+
+std::string readSharedTrayTextFile(const std::filesystem::path &path) {
     if (path.empty()) {
         return {};
     }
@@ -214,12 +265,86 @@ std::string readSharedTrayInputMethodRequestFile() {
     }
     std::string value;
     std::getline(in, value);
-    while (!value.empty() &&
-           (value.back() == '\r' || value.back() == '\n' || value.back() == ' ' ||
-            value.back() == '\t')) {
-        value.pop_back();
+    return trimSharedTrayValue(std::move(value));
+}
+
+void writeSharedTrayTextFile(const std::filesystem::path &path,
+                             const std::string &value) {
+    if (path.empty()) {
+        return;
     }
-    return value;
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return;
+    }
+    out << value;
+}
+
+bool readSharedTrayChineseModeFile(const std::filesystem::path &path,
+                                   bool *value) {
+    if (!value) {
+        return false;
+    }
+    const auto text = readSharedTrayTextFile(path);
+    if (text == "1" || text == "true" || text == "chinese") {
+        *value = true;
+        return true;
+    }
+    if (text == "0" || text == "false" || text == "english") {
+        *value = false;
+        return true;
+    }
+    return false;
+}
+
+void writeSharedTrayChineseModeFile(const std::filesystem::path &path,
+                                    bool value) {
+    writeSharedTrayTextFile(path, value ? "1" : "0");
+}
+
+std::string readSharedTrayInputMethodRequestFile() {
+    return readSharedTrayTextFile(sharedTrayInputMethodRequestFile());
+}
+
+void persistSharedTrayCurrentInputMethodState(const std::string &uniqueName) {
+    if (!uniqueName.empty()) {
+        writeSharedTrayTextFile(sharedTrayCurrentInputMethodFile(), uniqueName);
+    }
+}
+
+std::string readSharedTrayCurrentInputMethodState() {
+    auto current = readSharedTrayTextFile(sharedTrayCurrentInputMethodFile());
+    if (current.empty()) {
+        current = readSharedTrayInputMethodRequestFile();
+    }
+    return current;
+}
+
+void persistSharedTrayChineseModeState(bool chineseMode) {
+    writeSharedTrayChineseModeFile(sharedTrayChineseModeStateFile(), chineseMode);
+}
+
+bool readSharedTrayChineseModeState(bool *value) {
+    return readSharedTrayChineseModeFile(sharedTrayChineseModeStateFile(), value);
+}
+
+void persistSharedTrayChineseModeRequest(bool chineseMode) {
+    writeSharedTrayChineseModeFile(sharedTrayChineseModeRequestFile(), chineseMode);
+}
+
+bool readSharedTrayChineseModeRequest(bool *value) {
+    return readSharedTrayChineseModeFile(sharedTrayChineseModeRequestFile(), value);
+}
+
+void clearSharedTrayChineseModeRequest() {
+    const auto path = sharedTrayChineseModeRequestFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
 }
 
 void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
@@ -229,6 +354,21 @@ void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
     nid->uID = kShellTrayUid;
     nid->uFlags = NIF_GUID;
     nid->guidItem = kFcitxShellTrayNotifyGuid;
+}
+
+void showTrayBalloon(HWND hostHwnd, const wchar_t *title, const wchar_t *text,
+                     DWORD infoFlags = NIIF_INFO) {
+    if (!hostHwnd) {
+        return;
+    }
+    NOTIFYICONDATAW nid = {};
+    fillShellTrayNidIdentity(&nid, hostHwnd);
+    nid.uFlags |= NIF_INFO;
+    nid.dwInfoFlags = infoFlags;
+    wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
+    wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+    nid.uTimeout = 3000;
+    Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
 
 bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode) {
@@ -302,7 +442,96 @@ std::filesystem::path fcitxPortableRoot() {
     return dll.parent_path().parent_path();
 }
 
+std::filesystem::path sharedTrayProfileFile() {
+    const auto portable = fcitxPortableRoot() / L"config" / L"fcitx5" / L"profile";
+    std::error_code ec;
+    if (std::filesystem::exists(portable, ec)) {
+        return portable;
+    }
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return portable;
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" / L"config" / L"fcitx5" /
+           L"profile";
+}
+
+std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
+    const auto profilePath = sharedTrayProfileFile();
+    if (profilePath.empty()) {
+        return {};
+    }
+    std::ifstream in(profilePath, std::ios::binary);
+    if (!in.is_open()) {
+        return {};
+    }
+    std::string section;
+    std::string defaultIm;
+    std::vector<std::string> names;
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trimSharedTrayValue(std::move(line));
+        if (line.empty() || line[0] == '#' || line[0] == ';') {
+            continue;
+        }
+        if (line.front() == '[' && line.back() == ']') {
+            section = line.substr(1, line.size() - 2);
+            continue;
+        }
+        const size_t eq = line.find('=');
+        if (eq == std::string::npos) {
+            continue;
+        }
+        const std::string key = trimSharedTrayValue(line.substr(0, eq));
+        const std::string value = trimSharedTrayValue(line.substr(eq + 1));
+        if (section == "Groups/0" && key == "DefaultIM") {
+            defaultIm = value;
+            continue;
+        }
+        if (section.rfind("Groups/0/Items/", 0) == 0 && key == "Name" &&
+            !value.empty()) {
+            bool seen = false;
+            for (const auto &name : names) {
+                if (name == value) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen) {
+                names.push_back(value);
+            }
+        }
+    }
+    std::string current = readSharedTrayCurrentInputMethodState();
+    if (current.empty()) {
+        current = defaultIm;
+    }
+    std::vector<ProfileInputMethodItem> items;
+    items.reserve(names.size());
+    for (const auto &name : names) {
+        items.push_back(ProfileInputMethodItem{name, L"", name == current});
+    }
+    return items;
+}
+
 std::filesystem::path userRimeConfigPath() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    // Fcitx5 的 Rime 配置在 %APPDATA%\Fcitx5\rime 目录
+    // 这是 Fcitx5 中州韵输入法的用户数据目录
+    return std::filesystem::path(appData) / L"Fcitx5" / L"rime";
+}
+
+std::filesystem::path fcitx5RimeUserDir() {
+    // 获取 Fcitx5 的 Rime 用户目录
+    // 首先检查环境变量，如果没有设置则使用默认路径
+    const wchar_t* envDir = _wgetenv(L"FCITX_RIME_USER_DIR");
+    if (envDir && *envDir) {
+        return envDir;
+    }
+    
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
         return {};
@@ -326,23 +555,87 @@ std::filesystem::path locateRimeDeployer() {
     return {};
 }
 
-bool launchRimeDeploy() {
+struct RimeDeployMonitorData {
+    HANDLE hProcess;
+    HANDLE hThread;
+    HWND trayHwnd;
+    HANDLE hWaitHandle;
+};
+
+static std::unordered_map<HANDLE, std::unique_ptr<RimeDeployMonitorData>> g_rimeDeployMonitors;
+
+static void CALLBACK rimeDeployWaitCallback(PVOID lpParameter, BOOLEAN TimerOrWaitFired) {
+    auto it = g_rimeDeployMonitors.find(lpParameter);
+    if (it == g_rimeDeployMonitors.end() || !it->second) {
+        return;
+    }
+
+    auto &data = it->second;
+
+    // 获取退出码
+    DWORD exitCode = 0;
+    BOOL gotExitCode = GetExitCodeProcess(data->hProcess, &exitCode);
+
+    // 清理资源
+    if (data->hWaitHandle) {
+        UnregisterWait(data->hWaitHandle);
+    }
+    CloseHandle(data->hThread);
+    CloseHandle(data->hProcess);
+
+    // 显示结果通知
+    if (data->trayHwnd) {
+        if (gotExitCode && exitCode == 0) {
+            showTrayBalloon(data->trayHwnd, L"中州韵部署", L"部署成功完成！", NIIF_INFO);
+        } else {
+            std::wstring msg = L"部署失败 (退出码: " + std::to_wstring(exitCode) + L")";
+            showTrayBalloon(data->trayHwnd, L"中州韵部署", msg.c_str(), NIIF_ERROR);
+        }
+    }
+
+    g_rimeDeployMonitors.erase(it);
+}
+
+bool launchRimeDeployWithNotification(HWND trayHwnd) {
     const auto deployer = locateRimeDeployer();
     if (deployer.empty()) {
         tsfTrace("rime deploy tool not found");
         FCITX_WARN() << "Rime deploy tool not found.";
+        if (trayHwnd) {
+            showTrayBalloon(trayHwnd, L"中州韵部署", L"错误：找不到 rime_deployer.exe",
+                            NIIF_ERROR);
+        }
         return false;
     }
     const auto portableRoot = fcitxPortableRoot();
-    const auto userDir = userRimeConfigPath();
+    const auto userDir = fcitx5RimeUserDir();
     if (portableRoot.empty() || userDir.empty()) {
         tsfTrace("rime deploy aborted missing root/user dir");
         FCITX_WARN() << "Rime deploy aborted: missing portable root or user dir.";
+        if (trayHwnd) {
+            showTrayBalloon(trayHwnd, L"中州韵部署", L"错误：无法获取配置目录",
+                            NIIF_ERROR);
+        }
         return false;
     }
     const auto sharedDir = portableRoot / L"share" / L"rime-data";
     const auto stagingDir = userDir / L"build";
+    
+    // 调试信息
+    FCITX_INFO() << "Rime deploy paths:";
+    FCITX_INFO() << "  portableRoot: " << portableRoot.string();
+    FCITX_INFO() << "  userDir: " << userDir.string();
+    FCITX_INFO() << "  sharedDir: " << sharedDir.string();
+    FCITX_INFO() << "  stagingDir: " << stagingDir.string();
+    FCITX_INFO() << "  deployer: " << deployer.string();
+    
+    // 检查目录是否存在
     std::error_code ec;
+    bool userDirExists = std::filesystem::exists(userDir, ec);
+    bool sharedDirExists = std::filesystem::exists(sharedDir, ec);
+    FCITX_INFO() << "  userDir exists: " << userDirExists;
+    FCITX_INFO() << "  sharedDir exists: " << sharedDirExists;
+    
     std::filesystem::create_directories(userDir, ec);
     ec.clear();
     std::filesystem::create_directories(stagingDir, ec);
@@ -350,16 +643,86 @@ bool launchRimeDeploy() {
                               sharedDir.wstring() + L"\" \"" +
                               stagingDir.wstring() + L"\"";
     tsfTrace("launch rime deployer exe=" + deployer.string());
-    const auto portableBin = (portableRoot / L"bin").wstring();
-    const bool ok = launchDetachedProcessWithPathPrefix(
-        deployer.wstring(), args, deployer.parent_path().wstring(), portableBin);
+    FCITX_INFO() << "Rime deploy command args: " << std::string(args.begin(), args.end());
+
+    // 显示开始部署通知
+    if (trayHwnd) {
+        showTrayBalloon(trayHwnd, L"中州韵部署", L"正在部署中州韵...", NIIF_INFO);
+    }
+
+    // 构建命令行（包含程序名和参数）
+    std::wstring commandLine = L"\"" + deployer.wstring() + L"\"";
+    if (!args.empty()) {
+        commandLine += L" " + args;
+    }
+    std::vector<wchar_t> buffer(commandLine.begin(), commandLine.end());
+    buffer.push_back(L'\0');
+
+    auto env = buildEnvironmentWithPathPrefix((portableRoot / L"bin").wstring());
+    STARTUPINFOW si = {};
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi = {};
+
+    // 修复：使用局部变量存储工作目录，避免悬空指针
+    std::wstring workingDir = deployer.parent_path().wstring();
+    const wchar_t *cwd = workingDir.empty() ? nullptr : workingDir.c_str();
+
+    const DWORD flags =
+        CREATE_NO_WINDOW | (env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
+
+    // lpApplicationName 为 nullptr，让系统从 lpCommandLine 解析程序名
+    const BOOL ok = CreateProcessW(nullptr, buffer.data(), nullptr,
+                                   nullptr, FALSE, flags,
+                                   env.empty() ? nullptr : env.data(), cwd, &si,
+                                   &pi);
     if (!ok) {
         tsfTrace("launch rime deployer failed");
         FCITX_WARN() << "Failed to launch Rime deployer: " << deployer.string();
+        if (trayHwnd) {
+            showTrayBalloon(trayHwnd, L"中州韵部署", L"错误：启动部署工具失败",
+                            NIIF_ERROR);
+        }
         return false;
     }
+
     FCITX_INFO() << "Launched Rime deployer: " << deployer.string();
+
+    // 使用线程池等待机制监视进程，避免创建新线程
+    if (trayHwnd) {
+        auto monitorData = std::make_unique<RimeDeployMonitorData>();
+        monitorData->hProcess = pi.hProcess;
+        monitorData->hThread = pi.hThread;
+        monitorData->trayHwnd = trayHwnd;
+        monitorData->hWaitHandle = nullptr;
+
+        HANDLE hProcessForKey = pi.hProcess;
+        g_rimeDeployMonitors[hProcessForKey] = std::move(monitorData);
+
+        // 注册线程池等待，进程结束时自动回调
+        if (!RegisterWaitForSingleObject(
+                &g_rimeDeployMonitors[hProcessForKey]->hWaitHandle,
+                pi.hProcess,
+                rimeDeployWaitCallback,
+                hProcessForKey,
+                INFINITE,
+                WT_EXECUTEONLYONCE)) {
+            // 注册失败，直接关闭句柄
+            CloseHandle(pi.hThread);
+            CloseHandle(pi.hProcess);
+            g_rimeDeployMonitors.erase(hProcessForKey);
+        }
+    } else {
+        // 不需要通知时，直接关闭句柄
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+
     return true;
+}
+
+// 保持向后兼容的函数
+bool launchRimeDeploy() {
+    return launchRimeDeployWithNotification(nullptr);
 }
 
 void exploreUserFcitxConfig() {
@@ -380,6 +743,30 @@ void exploreUserRimeConfig() {
     std::wstring dir = appData;
     dir += L"\\Fcitx5\\rime";
     CreateDirectoryW(dir.c_str(), nullptr);
+    openDirectoryInDetachedExplorer(dir);
+}
+
+void exploreFcitx5LogDir() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return;
+    }
+    std::wstring dir = appData;
+    dir += L"\\Fcitx5\\log";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
+    openDirectoryInDetachedExplorer(dir);
+}
+
+void exploreRimeLogDir() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return;
+    }
+    std::wstring dir = appData;
+    dir += L"\\Fcitx5\\rime";
+    std::error_code ec;
+    std::filesystem::create_directories(dir, ec);
     openDirectoryInDetachedExplorer(dir);
 }
 
@@ -620,6 +1007,12 @@ void Tsf::uninitLangBarTrayItem() {
 }
 
 void Tsf::langBarScheduleToggleChinese() {
+    if (currentProcessIsExplorer()) {
+        bool current = chineseActive_;
+        readSharedTrayChineseModeState(&current);
+        langBarScheduleSetChineseMode(!current);
+        return;
+    }
     pendingTrayToggleChinese_ = true;
     HRESULT hr = E_FAIL;
     ComPtr<ITfContext> ctx = textEditSinkContext_;
@@ -643,6 +1036,13 @@ void Tsf::langBarScheduleToggleChinese() {
 }
 
 void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
+    if (currentProcessIsExplorer()) {
+        chineseActive_ = wantChinese;
+        persistSharedTrayChineseModeRequest(wantChinese);
+        persistSharedTrayChineseModeState(wantChinese);
+        langBarNotifyIconUpdate();
+        return;
+    }
     if (chineseActive_ == wantChinese) {
         langBarNotifyIconUpdate();
         return;
@@ -651,10 +1051,18 @@ void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
 }
 
 void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
-    if (uniqueName.empty() || !engine_) {
+    if (uniqueName.empty()) {
         return;
     }
     persistSharedTrayInputMethodRequest(uniqueName);
+    persistSharedTrayCurrentInputMethodState(uniqueName);
+    persistSharedTrayChineseModeRequest(true);
+    persistSharedTrayChineseModeState(true);
+    if (currentProcessIsExplorer() || !engine_) {
+        chineseActive_ = true;
+        langBarNotifyIconUpdate();
+        return;
+    }
     pendingTrayInputMethod_ = uniqueName;
     pendingTrayInputMethodFromSharedRequest_ = false;
     HRESULT hr = E_FAIL;
@@ -708,8 +1116,60 @@ void Tsf::clearSharedTrayInputMethodRequest() const {
     std::filesystem::remove(path, ec);
 }
 
+bool Tsf::sharedTrayChineseModeRequestPending() const {
+    bool value = false;
+    return readSharedTrayChineseModeRequest(&value);
+}
+
 bool Tsf::sharedTrayInputMethodRequestPending() const {
     return !readSharedTrayInputMethodRequestFile().empty();
+}
+
+bool Tsf::scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext) {
+    if (pendingTraySetChineseModeValid_) {
+        return false;
+    }
+    if (currentProcessIsExplorer()) {
+        return false;
+    }
+    bool wantChinese = false;
+    if (!readSharedTrayChineseModeRequest(&wantChinese)) {
+        return false;
+    }
+    if (chineseActive_ == wantChinese) {
+        clearSharedTrayChineseModeRequest();
+        persistSharedTrayChineseModeState(wantChinese);
+        return false;
+    }
+    pendingTraySetChineseMode_ = wantChinese;
+    pendingTraySetChineseModeValid_ = true;
+    HRESULT hr = E_FAIL;
+    ComPtr<ITfContext> ctx;
+    if (preferredContext) {
+        ctx = preferredContext;
+    } else {
+        ctx = textEditSinkContext_;
+    }
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
+                                &hr);
+    }
+    if (FAILED(hr)) {
+        pendingTraySetChineseModeValid_ = false;
+        if (chineseActive_ != wantChinese) {
+            trayToggleChineseWithoutContext();
+        }
+        clearSharedTrayChineseModeRequest();
+        persistSharedTrayChineseModeState(chineseActive_);
+        return false;
+    }
+    return true;
 }
 
 bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
@@ -777,10 +1237,37 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
 }
 
 void Tsf::langBarNotifyIconUpdate() {
+    if (currentProcessIsExplorer()) {
+        readSharedTrayChineseModeState(&chineseActive_);
+    } else {
+        persistSharedTrayChineseModeState(chineseActive_);
+        if (engine_) {
+            const auto current = engine_->currentInputMethod();
+            if (!current.empty()) {
+                persistSharedTrayCurrentInputMethodState(current);
+            }
+        }
+    }
     updateShellTrayTooltip();
     if (langBarItem_) {
         langBarItem_->notifyModeChanged();
     }
+}
+
+void Tsf::traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese) {
+    if (chineseActive_ == wantChinese) {
+        clearSharedTrayChineseModeRequest();
+        langBarNotifyIconUpdate();
+        return;
+    }
+    chineseActive_ = wantChinese;
+    if (!chineseActive_) {
+        endCompositionCancel(ec);
+    }
+    syncCandidateWindow(ec);
+    drainCommitsAfterEngine(ec);
+    clearSharedTrayChineseModeRequest();
+    langBarNotifyIconUpdate();
 }
 
 void Tsf::trayToggleChineseInEditSession(TfEditCookie ec) {
@@ -852,9 +1339,9 @@ bool Tsf::initShellTrayIcon() {
             }
             gShellTrayClassRegistered = true;
         }
-        shellTrayHostHwnd_ = CreateWindowExW(
-            0, kShellTrayHostClass, L"", 0, 0, 0, 0, 0, HWND_MESSAGE, nullptr,
-            dllInstance, this);
+        shellTrayHostHwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, kShellTrayHostClass,
+                                             L"", WS_POPUP, 0, 0, 0, 0, nullptr,
+                                             nullptr, dllInstance, this);
         if (!shellTrayHostHwnd_) {
             return false;
         }
@@ -934,12 +1421,12 @@ void Tsf::recreateShellTrayIcon() {
 }
 
 void Tsf::showShellTrayContextMenu() {
+    POINT pt;
+    GetCursorPos(&pt);
     HWND owner = shellTrayHostHwnd_ ? shellTrayHostHwnd_ : GetForegroundWindow();
     if (!owner) {
         owner = GetDesktopWindow();
     }
-    POINT pt;
-    GetCursorPos(&pt);
     showShellTrayContextMenuAt(pt, owner);
 }
 
@@ -948,10 +1435,18 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
     if (!menu) {
         return;
     }
-    const auto profileItems =
+    auto profileItems =
         engine_ ? engine_->profileInputMethods() : std::vector<ProfileInputMethodItem>{};
-    const bool currentIsRime =
-        engine_ && engine_->currentInputMethod() == "rime";
+    if (profileItems.empty()) {
+        profileItems = readProfileInputMethodsFromConfig();
+    }
+    bool currentIsRime = false;
+    for (const auto &item : profileItems) {
+        if (item.isCurrent && item.uniqueName == "rime") {
+            currentIsRime = true;
+            break;
+        }
+    }
     AppendMenuW(menu, MF_STRING | (langBarChineseMode() ? MF_CHECKED : 0),
                 IDM_CHINESE, L"中文模式");
     AppendMenuW(menu,
@@ -981,17 +1476,24 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         AppendMenuW(menu, MF_STRING, IDM_RIME_SYNC, L"同步中州韵用户数据");
         AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_USER_DIR,
                     L"打开中州韵配置目录");
+        AppendMenuW(menu, MF_STRING, IDM_RIME_OPEN_LOG_DIR,
+                    L"打开中州韵日志目录");
     }
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI, L"打开设置界面…");
     AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR, L"打开配置文件夹");
-    SetForegroundWindow(owner);
-    const UINT cmd =
-        TrackPopupMenu(menu,
-                     TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
-                     pt.x, pt.y, 0, owner, nullptr);
+    AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR, L"打开日志文件夹");
+
+    if (owner && owner != GetDesktopWindow()) {
+        SetForegroundWindow(owner);
+    }
+    const UINT cmd = TrackPopupMenu(
+        menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+        pt.x, pt.y, 0, owner ? owner : GetDesktopWindow(), nullptr);
+    if (owner && owner != GetDesktopWindow()) {
+        PostMessageW(owner, WM_NULL, 0, 0);
+    }
     DestroyMenu(menu);
-    PostMessageW(owner, WM_NULL, 0, 0);
     switch (cmd) {
     case IDM_CHINESE:
         langBarScheduleSetChineseMode(true);
@@ -1006,7 +1508,7 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         exploreUserFcitxConfig();
         break;
     case IDM_RIME_DEPLOY:
-        if (!launchRimeDeploy() && engine_) {
+        if (!launchRimeDeployWithNotification(shellTrayHostHwnd_) && engine_) {
             engine_->invokeInputMethodSubConfig("rime", "deploy");
         }
         break;
@@ -1017,6 +1519,12 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         break;
     case IDM_RIME_OPEN_USER_DIR:
         exploreUserRimeConfig();
+        break;
+    case IDM_RIME_OPEN_LOG_DIR:
+        exploreRimeLogDir();
+        break;
+    case IDM_OPEN_LOG_DIR:
+        exploreFcitx5LogDir();
         break;
     default:
         if (cmd >= IDM_INPUT_METHOD_BASE &&
