@@ -1,6 +1,20 @@
 #include "tsf.h"
 
 namespace fcitx {
+namespace {
+bool currentProcessIsExplorerForThreadMgr() {
+    WCHAR exePath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
+        return false;
+    }
+    const std::wstring_view path(exePath);
+    const size_t pos = path.find_last_of(L"\\/");
+    const std::wstring_view file =
+        pos == std::wstring_view::npos ? path : path.substr(pos + 1);
+    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+}
+} // namespace
+
 bool Tsf::initThreadMgrEventSink() {
     ComPtr<ITfSource> source;
     if (FAILED(threadMgr_->QueryInterface(
@@ -18,7 +32,7 @@ bool Tsf::initThreadMgrEventSink() {
 
 void Tsf::uninitThreadMgrEventSink() {
     ComPtr<ITfSource> source;
-    if (threadMgrEventSinkCookie_ == TF_INVALID_COOKIE) {
+    if (!threadMgr_ || threadMgrEventSinkCookie_ == TF_INVALID_COOKIE) {
         return;
     }
     if (SUCCEEDED(threadMgr_->QueryInterface(
@@ -37,8 +51,13 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
     tsfTrace("OnSetFocus document manager focus changed");
     initTextEditSink(pDocMgrFocus);
+    if (currentProcessIsExplorerForThreadMgr() && !shellTrayHostHwnd_) {
+        const bool trayReady = initShellTrayIcon();
+        tsfTrace(std::string("OnSetFocus recreated explorer tray host=") +
+                 (trayReady ? "true" : "false"));
+    }
+    deferredSharedTrayInputMethod_.clear();
     scheduleSharedTrayChineseModeRequest();
-    scheduleSharedTrayInputMethodRequest();
     return S_OK;
 }
 

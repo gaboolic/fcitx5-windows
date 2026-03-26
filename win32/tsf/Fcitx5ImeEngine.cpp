@@ -129,22 +129,8 @@ bool currentProcessIsExplorerForTsf() {
 }
 
 void setupDefaultTsLogPath() {
-    if (currentProcessIsExplorerForTsf()) {
-        return;
-    }
-    const char *existing = std::getenv("FCITX_TS_LOG");
-    if (existing && existing[0]) {
-        return;
-    }
-    const char *appData = std::getenv("APPDATA");
-    if (!appData || !appData[0]) {
-        return;
-    }
-    auto dir = std::filesystem::path(appData) / "Fcitx5";
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    const auto logPath = (dir / "tsf-ime.log").string();
-    setEnvironment("FCITX_TS_LOG", logPath.c_str());
+    // TSF runs inside arbitrary host processes. Do not set up FCITX_TS_LOG here:
+    // attaching glog in transient hosts has caused unload-time crashes.
 }
 
 void setupImeFcitxEnvironment() {
@@ -157,21 +143,13 @@ void setupImeFcitxEnvironment() {
     auto addon = (root / "lib" / "fcitx5").lexically_normal();
     auto share = root / "share";
     auto fcitxdata = share / "fcitx5";
-    // TSF runs inside the host process (Notepad, etc.). Windows does not search
-    // the portable bin/ for DLLs loaded as dependencies of lib/fcitx5/*.dll,
-    // so libpinyin fails with ERROR_MOD_NOT_FOUND unless PATH includes bin.
-    {
-        std::string pathHead = bin.string() + ";" + addon.string();
-        if (auto oldPath = getEnvironment("PATH")) {
-            setEnvironment("PATH", (pathHead + ";" + *oldPath).c_str());
-        } else {
-            setEnvironment("PATH", pathHead.c_str());
-        }
-    }
-    // MinGW dlopen/LoadLibrary dependency search often ignores PATH for indirect
-    // deps; SetDllDirectory adds portable bin/ to the process DLL search order.
+    // TSF runs inside arbitrary host processes such as QQ. Do not prepend the
+    // portable bin/ to PATH here: child processes (e.g. crashpad_handler.exe)
+    // inherit PATH and may accidentally load our libglog-2.dll. Keep the
+    // addon/data env vars, but limit DLL search changes to the current host.
     if (!SetDllDirectoryW(bin.wstring().c_str())) {
-        // non-fatal; PATH may still help in some cases
+        // non-fatal; addon loads may still work if the host already has the
+        // required runtime DLLs available.
     }
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
@@ -523,16 +501,11 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
 bool Fcitx5ImeEngine::init() {
     loggingAttached_ = false;
     try {
-        const bool explorerProcess = currentProcessIsExplorerForTsf();
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
         tsfTrace(std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
                  (std::getenv("FCITX_TS_LOG") ? std::getenv("FCITX_TS_LOG") : ""));
-        if (!explorerProcess) {
-            loggingAttached_ = tsImeTryAttachLogging();
-        } else {
-            tsfTrace("Fcitx5ImeEngine::init skip FCITX_TS_LOG in explorer");
-        }
+        tsfTrace("Fcitx5ImeEngine::init skip FCITX_TS_LOG in TSF host");
         tsfTrace(std::string("Fcitx5ImeEngine::init loggingAttached=") +
                  (loggingAttached_ ? "true" : "false"));
         if (loggingAttached_) {
@@ -988,26 +961,30 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
         return false;
     }
     auto &imm = instance_->inputMethodManager();
-    if (!imm.entry(uniqueName)) {
+    const auto *entry = imm.entry(uniqueName);
+    if (!entry) {
         tsfTrace("activateProfileInputMethod target not found=" + uniqueName);
         FCITX_WARN() << "activateProfileInputMethod target not found: "
                      << uniqueName << " pid=" << GetCurrentProcessId();
         return false;
     }
+    const std::string addon = entry->addon();
     // Explicitly load the target addon in the current host process first.
     // This is required for on-demand engines like Rime; otherwise the IM name
     // may switch while addonManager never loads `rime` in the focused app.
     auto *targetEngine = instance_->inputMethodEngine(uniqueName);
     if (!targetEngine) {
         tsfTrace("activateProfileInputMethod inputMethodEngine returned null target=" +
-                 uniqueName);
+                 uniqueName + " addon=" + addon);
         FCITX_ERROR() << "activateProfileInputMethod failed to load engine for "
-                      << uniqueName << " pid=" << GetCurrentProcessId();
+                      << uniqueName << " addon=" << addon
+                      << " pid=" << GetCurrentProcessId();
         return false;
     }
     tsfTrace("activateProfileInputMethod begin target=" + uniqueName +
-             " current=" + instance_->inputMethod(ic_.get()));
+             " addon=" + addon + " current=" + instance_->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod begin target=" << uniqueName
+                 << " addon=" << addon
                  << " current=" << instance_->inputMethod(ic_.get())
                  << " focused=" << ic_->hasFocus()
                  << " pid=" << GetCurrentProcessId();
@@ -1019,9 +996,10 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     auto *engine = instance_->inputMethodEngine(uniqueName);
     if (!engine || instance_->inputMethod(ic_.get()) != uniqueName) {
         tsfTrace("activateProfileInputMethod switch failed target=" + uniqueName +
+                 " addon=" + addon +
                  " current=" + instance_->inputMethod(ic_.get()));
         FCITX_ERROR() << "activateProfileInputMethod switch failed target="
-                      << uniqueName << " current="
+                      << uniqueName << " addon=" << addon << " current="
                       << instance_->inputMethod(ic_.get())
                       << " engineLoaded=" << (engine != nullptr)
                       << " pid=" << GetCurrentProcessId();
@@ -1030,8 +1008,9 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     instance_->save();
     syncUiFromIc();
     tsfTrace("activateProfileInputMethod success target=" + uniqueName +
-             " current=" + instance_->inputMethod(ic_.get()));
+             " addon=" + addon + " current=" + instance_->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod success target=" << uniqueName
+                 << " addon=" << addon
                  << " current=" << instance_->inputMethod(ic_.get())
                  << " pid=" << GetCurrentProcessId();
     return true;

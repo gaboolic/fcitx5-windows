@@ -13,6 +13,8 @@ namespace fcitx {
 
 namespace {
 
+LONG gExplorerProcessLifetimeDllPinned = 0;
+
 bool currentProcessIsExplorerForDefaultEngine() {
     WCHAR exePath[MAX_PATH] = {};
     if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
@@ -41,6 +43,12 @@ std::unique_ptr<ImeEngine> makeDefaultImeEngine() {
 Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
     : engine_(engine ? std::move(engine) : makeDefaultImeEngine()) {
     DllAddRef();
+    if (currentProcessIsExplorerForDefaultEngine() &&
+        InterlockedCompareExchange(&gExplorerProcessLifetimeDllPinned, 1, 0) ==
+            0) {
+        DllAddRef();
+        tsfTrace("Tsf::Tsf pinned DLL for explorer process lifetime");
+    }
     candidateWin_.setOnPick([this](int idx) {
         pendingMousePick_ = idx;
         if (!textEditSinkContext_) {
@@ -52,7 +60,13 @@ Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
     });
 }
 
-Tsf::~Tsf() { DllRelease(); }
+Tsf::~Tsf() {
+    if (threadMgr_ || langBarItem_ || shellTrayHostHwnd_ || textEditSinkContext_ ||
+        trayEditContextFallback_) {
+        Deactivate();
+    }
+    DllRelease();
+}
 
 // Windows also queries ITfDisplayAttributeCollectionProvider
 // {3977526D-1A0A-435A-8D06-ECC9516B484F} which is internal and we simply

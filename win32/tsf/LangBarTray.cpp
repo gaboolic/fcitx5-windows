@@ -75,6 +75,11 @@ enum TrayMenuId : UINT {
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kShellTrayUid = 1;
+constexpr UINT_PTR kShellTrayRetryTimerId = 0x4654;
+constexpr UINT kShellTrayRetryDelayMs = 1500;
+const wchar_t kStandaloneTrayHelperWindowClass[] =
+    L"Fcitx5StandaloneTrayHelperWindow";
+const wchar_t kStandaloneTrayHelperExeName[] = L"fcitx5-tray-helper.exe";
 /** Win32 resource id in fcitx5-ime.rc (fcitx5-x86_64.dll); keep in sync with .rc.in */
 constexpr WORD kFcitxPenguinIconResId = 100;
 const wchar_t kShellTrayHostClass[] = L"Fcitx5ShellTrayHost";
@@ -116,6 +121,37 @@ bool launchDetachedProcess(const std::wstring &application,
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return true;
+}
+
+bool standaloneTrayHelperWindowExists() {
+    return FindWindowW(kStandaloneTrayHelperWindowClass, nullptr) != nullptr;
+}
+
+std::filesystem::path locateStandaloneTrayHelperExe() {
+    WCHAR dllPath[MAX_PATH] = {};
+    if (!GetModuleFileNameW(dllInstance, dllPath, MAX_PATH)) {
+        return {};
+    }
+    std::filesystem::path dll(dllPath);
+    return dll.parent_path() / kStandaloneTrayHelperExeName;
+}
+
+bool ensureStandaloneTrayHelperRunning() {
+    if (standaloneTrayHelperWindowExists()) {
+        return true;
+    }
+    const auto exe = locateStandaloneTrayHelperExe();
+    std::error_code ec;
+    if (exe.empty() || !std::filesystem::exists(exe, ec)) {
+        tsfTrace("ensureStandaloneTrayHelperRunning missing exe path=" +
+                 exe.string());
+        return false;
+    }
+    const bool launched =
+        launchDetachedProcess(exe.wstring(), L"", exe.parent_path().wstring());
+    tsfTrace(std::string("ensureStandaloneTrayHelperRunning launched=") +
+             (launched ? "true" : "false") + " path=" + exe.string());
+    return launched || standaloneTrayHelperWindowExists();
 }
 
 std::vector<wchar_t> buildEnvironmentWithPathPrefix(
@@ -356,13 +392,17 @@ void clearSharedTrayChineseModeRequest() {
     std::filesystem::remove(path, ec);
 }
 
-void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd) {
+void fillShellTrayNidIdentity(NOTIFYICONDATAW *nid, HWND hostHwnd,
+                              bool useGuid = true) {
     ZeroMemory(nid, sizeof(*nid));
     nid->cbSize = sizeof(*nid);
     nid->hWnd = hostHwnd;
     nid->uID = kShellTrayUid;
-    nid->uFlags = NIF_GUID;
-    nid->guidItem = kFcitxShellTrayNotifyGuid;
+    nid->uFlags = 0;
+    if (useGuid) {
+        nid->uFlags |= NIF_GUID;
+        nid->guidItem = kFcitxShellTrayNotifyGuid;
+    }
 }
 
 void showTrayBalloon(HWND hostHwnd, const wchar_t *title, const wchar_t *text,
@@ -371,36 +411,73 @@ void showTrayBalloon(HWND hostHwnd, const wchar_t *title, const wchar_t *text,
         return;
     }
     NOTIFYICONDATAW nid = {};
-    fillShellTrayNidIdentity(&nid, hostHwnd);
+    fillShellTrayNidIdentity(&nid, hostHwnd, true);
     nid.uFlags |= NIF_INFO;
     nid.dwInfoFlags = infoFlags;
     wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
     wcsncpy_s(nid.szInfo, text, _TRUNCATE);
     nid.uTimeout = 3000;
-    Shell_NotifyIconW(NIM_MODIFY, &nid);
+    if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) {
+        fillShellTrayNidIdentity(&nid, hostHwnd, false);
+        nid.uFlags |= NIF_INFO;
+        nid.dwInfoFlags = infoFlags;
+        wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
+        wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+        nid.uTimeout = 3000;
+        Shell_NotifyIconW(NIM_MODIFY, &nid);
+    }
 }
 
-bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode) {
+bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode,
+                        bool *usedGuidIdentity) {
+    auto populate = [&](NOTIFYICONDATAW *nid, bool useGuid) {
+        fillShellTrayNidIdentity(nid, hostHwnd, useGuid);
+        nid->uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
+        nid->uCallbackMessage = kShellTrayCallback;
+        nid->hIcon = icon;
+        if (chineseMode) {
+            wcsncpy_s(nid->szTip,
+                      L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                      _TRUNCATE);
+        } else {
+            wcsncpy_s(nid->szTip,
+                      L"Fcitx5 \x2014 English\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
+                      _TRUNCATE);
+        }
+    };
+
     NOTIFYICONDATAW nid = {};
-    fillShellTrayNidIdentity(&nid, hostHwnd);
-    nid.uFlags |= NIF_MESSAGE | NIF_ICON | NIF_TIP | NIF_SHOWTIP;
-    nid.uCallbackMessage = kShellTrayCallback;
-    nid.hIcon = icon;
-    if (chineseMode) {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
-    } else {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
+    populate(&nid, true);
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+    if (Shell_NotifyIconW(NIM_ADD, &nid)) {
+        nid.uVersion = NOTIFYICON_VERSION_4;
+        Shell_NotifyIconW(NIM_SETVERSION, &nid);
+        if (usedGuidIdentity) {
+            *usedGuidIdentity = true;
+        }
+        return true;
     }
-    if (!Shell_NotifyIconW(NIM_ADD, &nid)) {
-        return false;
+    const DWORD guidError = GetLastError();
+
+    NOTIFYICONDATAW legacy = {};
+    populate(&legacy, false);
+    Shell_NotifyIconW(NIM_DELETE, &legacy);
+    if (Shell_NotifyIconW(NIM_ADD, &legacy)) {
+        legacy.uVersion = NOTIFYICON_VERSION_4;
+        Shell_NotifyIconW(NIM_SETVERSION, &legacy);
+        if (usedGuidIdentity) {
+            *usedGuidIdentity = false;
+        }
+        tsfTrace("shellTrayNotifyAdd fallback to legacy identity after guid failure gle=" +
+                 std::to_string(static_cast<unsigned long>(guidError)));
+        return true;
     }
-    nid.uVersion = NOTIFYICON_VERSION_4;
-    Shell_NotifyIconW(NIM_SETVERSION, &nid);
-    return true;
+    const DWORD legacyError = GetLastError();
+    tsfTrace("shellTrayNotifyAdd failed guid_gle=" +
+             std::to_string(static_cast<unsigned long>(guidError)) +
+             " legacy_gle=" +
+             std::to_string(static_cast<unsigned long>(legacyError)));
+    return false;
 }
 
 HICON loadPenguinIconNearDll(unsigned cx, unsigned cy) {
@@ -453,16 +530,20 @@ std::filesystem::path fcitxPortableRoot() {
 
 std::filesystem::path sharedTrayProfileFile() {
     const auto portable = fcitxPortableRoot() / L"config" / L"fcitx5" / L"profile";
-    std::error_code ec;
-    if (std::filesystem::exists(portable, ec)) {
-        return portable;
-    }
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
         return portable;
     }
-    return std::filesystem::path(appData) / L"Fcitx5" / L"config" / L"fcitx5" /
-           L"profile";
+    const auto roaming = std::filesystem::path(appData) / L"Fcitx5" / L"config" /
+                         L"fcitx5" / L"profile";
+    std::error_code ec;
+    if (std::filesystem::exists(roaming, ec)) {
+        return roaming;
+    }
+    if (std::filesystem::exists(portable, ec)) {
+        return portable;
+    }
+    return roaming;
 }
 
 std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
@@ -472,6 +553,8 @@ std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
     }
     std::ifstream in(profilePath, std::ios::binary);
     if (!in.is_open()) {
+        tsfTrace("readProfileInputMethodsFromConfig failed to open profile path=" +
+                 profilePath.string());
         return {};
     }
     std::string section;
@@ -520,6 +603,10 @@ std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
     for (const auto &name : names) {
         items.push_back(ProfileInputMethodItem{name, L"", name == current});
     }
+    tsfTrace("readProfileInputMethodsFromConfig path=" + profilePath.string() +
+             " items=" +
+             std::to_string(static_cast<unsigned long>(items.size())) +
+             " current=" + current);
     return items;
 }
 
@@ -976,25 +1063,37 @@ STDMETHODIMP FcitxLangBarButton::UnadviseSink(DWORD dwCookie) {
 }
 
 bool Tsf::initLangBarTrayItem() {
+    const bool trayReady = initShellTrayIcon();
+    if (currentProcessIsExplorer()) {
+        tsfTrace(std::string("initLangBarTrayItem explorer trayOnly trayReady=") +
+                 (trayReady ? "true" : "false"));
+        return trayReady;
+    }
     if (langBarItem_ || !threadMgr_) {
-        initShellTrayIcon();
-        return langBarItem_ != nullptr;
+        tsfTrace(std::string("initLangBarTrayItem early return langBarItem=") +
+                 (langBarItem_ ? "true" : "false") + " threadMgr=" +
+                 (threadMgr_ ? "true" : "false") + " trayReady=" +
+                 (trayReady ? "true" : "false"));
+        return langBarItem_ != nullptr || trayReady;
     }
     ComPtr<ITfLangBarItemMgr> mgr;
     if (FAILED(threadMgr_->QueryInterface(
             IID_ITfLangBarItemMgr,
             reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
-        initShellTrayIcon();
-        return false;
+        tsfTrace(std::string("initLangBarTrayItem missing ITfLangBarItemMgr trayReady=") +
+                 (trayReady ? "true" : "false"));
+        return trayReady;
     }
     auto *btn = new FcitxLangBarButton(this);
     if (FAILED(mgr->AddItem(btn))) {
         btn->Release();
-        initShellTrayIcon();
-        return false;
+        tsfTrace(std::string("initLangBarTrayItem AddItem failed trayReady=") +
+                 (trayReady ? "true" : "false"));
+        return trayReady;
     }
     langBarItem_ = btn;
-    initShellTrayIcon();
+    tsfTrace(std::string("initLangBarTrayItem success trayReady=") +
+             (trayReady ? "true" : "false"));
     return true;
 }
 
@@ -1203,10 +1302,36 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
                       << " pid=" << GetCurrentProcessId();
         return false;
     }
+    if (!preferredContext) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest deferred until key event target=" +
+                 uniqueName);
+        FCITX_DEBUG()
+            << "scheduleSharedTrayInputMethodRequest deferred until key event target="
+            << uniqueName << " pid=" << GetCurrentProcessId();
+        return false;
+    }
+    if (uniqueName == deferredSharedTrayInputMethod_) {
+        tsfTrace("scheduleSharedTrayInputMethodRequest deferred target=" +
+                 uniqueName);
+        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest deferred target="
+                      << uniqueName << " pid=" << GetCurrentProcessId();
+        return false;
+    }
+    const auto current = engine_->currentInputMethod();
+    if (current == uniqueName) {
+        clearSharedTrayInputMethodRequest();
+        persistSharedTrayCurrentInputMethodState(uniqueName);
+        tsfTrace("scheduleSharedTrayInputMethodRequest cleared already-current target=" +
+                 uniqueName);
+        FCITX_INFO()
+            << "scheduleSharedTrayInputMethodRequest cleared already-current target="
+            << uniqueName << " pid=" << GetCurrentProcessId();
+        return false;
+    }
     tsfTrace("scheduleSharedTrayInputMethodRequest consume target=" + uniqueName +
-             " current=" + engine_->currentInputMethod());
+             " current=" + current);
     FCITX_INFO() << "scheduleSharedTrayInputMethodRequest consume request target="
-                 << uniqueName << " current=" << engine_->currentInputMethod()
+                 << uniqueName << " current=" << current
                  << " pid=" << GetCurrentProcessId();
     pendingTrayInputMethod_ = uniqueName;
     pendingTrayInputMethodFromSharedRequest_ = true;
@@ -1246,6 +1371,11 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
 }
 
 void Tsf::langBarNotifyIconUpdate() {
+    if (currentProcessIsExplorer() && !shellTrayHostHwnd_) {
+        const bool recreated = initShellTrayIcon();
+        tsfTrace(std::string("langBarNotifyIconUpdate recreated explorer tray host=") +
+                 (recreated ? "true" : "false"));
+    }
     if (currentProcessIsExplorer()) {
         readSharedTrayChineseModeState(&chineseActive_);
     } else {
@@ -1313,6 +1443,26 @@ LRESULT CALLBACK Tsf::shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
     if (!self) {
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
+    if (msg == WM_NCDESTROY) {
+        const bool hadPinnedDll = self->shellTrayHostDllPinned_;
+        KillTimer(hwnd, kShellTrayRetryTimerId);
+        self->shellTrayRetryPending_ = false;
+        self->shellTrayHostClosing_ = false;
+        if (self->shellTrayHostHwnd_ == hwnd) {
+            self->shellTrayHostHwnd_ = nullptr;
+            self->shellTrayAdded_ = false;
+        }
+        self->shellTrayHostDllPinned_ = false;
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+        const LRESULT result = DefWindowProcW(hwnd, msg, wp, lp);
+        if (hadPinnedDll) {
+            DllRelease();
+        }
+        return result;
+    }
+    if (self->shellTrayHostClosing_) {
+        return DefWindowProcW(hwnd, msg, wp, lp);
+    }
     if (msg == kShellTrayCallback) {
         const UINT code = LOWORD(static_cast<DWORD_PTR>(lp));
         if (code == WM_LBUTTONUP || code == NIN_SELECT ||
@@ -1328,117 +1478,69 @@ LRESULT CALLBACK Tsf::shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
         self->recreateShellTrayIcon();
         return 0;
     }
+    if (msg == WM_TIMER && wp == kShellTrayRetryTimerId) {
+        KillTimer(hwnd, kShellTrayRetryTimerId);
+        self->shellTrayRetryPending_ = false;
+        tsfTrace("shellTrayHostWndProc retrying Shell_NotifyIcon add");
+        self->recreateShellTrayIcon();
+        return 0;
+    }
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 bool Tsf::initShellTrayIcon() {
-    if (taskbarCreatedMessage_ == 0) {
-        taskbarCreatedMessage_ = RegisterWindowMessageW(L"TaskbarCreated");
-    }
-    if (!shellTrayHostHwnd_) {
-        if (!gShellTrayClassRegistered) {
-            WNDCLASSEXW wc = {};
-            wc.cbSize = sizeof(wc);
-            wc.lpfnWndProc = shellTrayHostWndProc;
-            wc.hInstance = dllInstance;
-            wc.lpszClassName = kShellTrayHostClass;
-            const ATOM a = RegisterClassExW(&wc);
-            if (!a && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
-                return false;
-            }
-            gShellTrayClassRegistered = true;
-        }
-        if (!shellTrayHostDllPinned_) {
-            DllAddRef();
-            shellTrayHostDllPinned_ = true;
-        }
-        shellTrayHostHwnd_ = CreateWindowExW(WS_EX_TOOLWINDOW, kShellTrayHostClass,
-                                             L"", WS_POPUP, 0, 0, 0, 0, nullptr,
-                                             nullptr, dllInstance, this);
-        if (!shellTrayHostHwnd_) {
-            if (shellTrayHostDllPinned_) {
-                DllRelease();
-                shellTrayHostDllPinned_ = false;
-            }
-            return false;
-        }
-        const int cx = GetSystemMetrics(SM_CXSMICON);
-        const int cy = GetSystemMetrics(SM_CYSMICON);
-        shellTrayIcon_ = loadPenguinIconNearDll(static_cast<unsigned>(cx),
-                                                static_cast<unsigned>(cy));
-        if (shellTrayIcon_) {
-            shellTrayIconOwned_ = true;
-        } else {
-            shellTrayIcon_ = reinterpret_cast<HICON>(LoadImageW(
-                nullptr, MAKEINTRESOURCEW(32512), IMAGE_ICON, cx, cy,
-                LR_SHARED));
-            shellTrayIconOwned_ = false;
-        }
-    }
-    if (!shellTrayIcon_) {
-        return false;
-    }
-    if (shellTrayAdded_) {
-        return true;
-    }
-    shellTrayAdded_ = shellTrayNotifyAdd(shellTrayHostHwnd_, shellTrayIcon_,
-                                        langBarChineseMode());
-    return shellTrayAdded_;
+    const bool helperReady = ensureStandaloneTrayHelperRunning();
+    tsfTrace(std::string("initShellTrayIcon standalone helperReady=") +
+             (helperReady ? "true" : "false"));
+    return helperReady;
 }
 
 void Tsf::uninitShellTrayIcon() {
-    if (shellTrayAdded_ && shellTrayHostHwnd_) {
-        NOTIFYICONDATAW nid = {};
-        fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_);
-        Shell_NotifyIconW(NIM_DELETE, &nid);
-    }
+    cancelShellTrayRetry();
     shellTrayAdded_ = false;
     if (shellTrayHostHwnd_) {
+        tsfTrace("uninitShellTrayIcon destroying shell tray host window");
+        shellTrayHostClosing_ = true;
         DestroyWindow(shellTrayHostHwnd_);
-        shellTrayHostHwnd_ = nullptr;
-    }
-    if (shellTrayHostDllPinned_) {
-        DllRelease();
-        shellTrayHostDllPinned_ = false;
     }
     if (shellTrayIconOwned_ && shellTrayIcon_) {
         DestroyIcon(shellTrayIcon_);
     }
     shellTrayIcon_ = nullptr;
     shellTrayIconOwned_ = false;
+    shellTrayUseGuidIdentity_ = true;
+    shellTrayHostClosing_ = false;
+}
+
+void Tsf::scheduleShellTrayRetry(UINT delayMs) {
+    if (!currentProcessIsExplorer() || !shellTrayHostHwnd_ || shellTrayHostClosing_) {
+        return;
+    }
+    if (delayMs == 0) {
+        delayMs = kShellTrayRetryDelayMs;
+    }
+    if (!SetTimer(shellTrayHostHwnd_, kShellTrayRetryTimerId, delayMs, nullptr)) {
+        tsfTrace("scheduleShellTrayRetry SetTimer failed");
+        return;
+    }
+    shellTrayRetryPending_ = true;
+    tsfTrace("scheduleShellTrayRetry armed delayMs=" +
+             std::to_string(static_cast<unsigned long>(delayMs)));
+}
+
+void Tsf::cancelShellTrayRetry() {
+    if (shellTrayHostHwnd_ && shellTrayRetryPending_) {
+        KillTimer(shellTrayHostHwnd_, kShellTrayRetryTimerId);
+    }
+    shellTrayRetryPending_ = false;
 }
 
 void Tsf::updateShellTrayTooltip() {
-    if (!shellTrayAdded_ || !shellTrayHostHwnd_) {
-        return;
-    }
-    NOTIFYICONDATAW nid = {};
-    fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_);
-    nid.uFlags |= NIF_TIP | NIF_SHOWTIP;
-    if (langBarChineseMode()) {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
-    } else {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space \x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
-    }
-    Shell_NotifyIconW(NIM_MODIFY, &nid);
+    ensureStandaloneTrayHelperRunning();
 }
 
 void Tsf::recreateShellTrayIcon() {
-    if (!shellTrayHostHwnd_ || !shellTrayIcon_) {
-        return;
-    }
-    if (shellTrayAdded_) {
-        NOTIFYICONDATAW del = {};
-        fillShellTrayNidIdentity(&del, shellTrayHostHwnd_);
-        Shell_NotifyIconW(NIM_DELETE, &del);
-        shellTrayAdded_ = false;
-    }
-    shellTrayAdded_ = shellTrayNotifyAdd(shellTrayHostHwnd_, shellTrayIcon_,
-                                        langBarChineseMode());
+    ensureStandaloneTrayHelperRunning();
 }
 
 void Tsf::showShellTrayContextMenu() {

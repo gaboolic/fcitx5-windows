@@ -22,6 +22,22 @@ void setenv(const char *name, const std::string &value) {
     setEnvironment(name, value.c_str());
 }
 
+void setupRimeUserDirEnv() {
+    char existing[MAX_PATH] = {};
+    if (GetEnvironmentVariableA("FCITX_RIME_USER_DIR", existing, MAX_PATH) > 0) {
+        return;
+    }
+    char appData[MAX_PATH] = {};
+    const DWORD len = GetEnvironmentVariableA("APPDATA", appData, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return;
+    }
+    auto rimeUserDir = ::fs::path(appData) / "Fcitx5" / "rime";
+    std::error_code ec;
+    ::fs::create_directories(rimeUserDir, ec);
+    setenv("FCITX_RIME_USER_DIR", rimeUserDir.string());
+}
+
 void setupEnv() {
     char path[MAX_PATH];
     GetModuleFileNameA(NULL, path, MAX_PATH);
@@ -32,6 +48,7 @@ void setupEnv() {
     auto fcitx_data_dirs = xdg_data_dirs / "fcitx5";
     setenv("XDG_DATA_DIRS", xdg_data_dirs.string());
     setenv("FCITX_DATA_DIRS", fcitx_data_dirs.string());
+    setupRimeUserDirEnv();
 }
 
 void start() {

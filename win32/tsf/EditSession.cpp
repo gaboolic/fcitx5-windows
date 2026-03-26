@@ -830,9 +830,16 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
                      << activated << " target=" << uniqueName
                      << " pid=" << GetCurrentProcessId();
         if (fromSharedRequest && activated) {
+            deferredSharedTrayInputMethod_.clear();
             clearSharedTrayInputMethodRequest();
             tsfTrace("DoEditSession cleared shared tray request target=" + uniqueName);
             FCITX_INFO() << "DoEditSession cleared shared tray request target="
+                         << uniqueName << " pid=" << GetCurrentProcessId();
+        } else if (fromSharedRequest && !activated) {
+            deferredSharedTrayInputMethod_ = uniqueName;
+            tsfTrace("DoEditSession deferred shared tray request target=" +
+                     uniqueName);
+            FCITX_WARN() << "DoEditSession deferred shared tray request target="
                          << uniqueName << " pid=" << GetCurrentProcessId();
         }
         syncCandidateWindow(ec);

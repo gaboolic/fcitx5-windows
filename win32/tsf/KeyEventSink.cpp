@@ -117,6 +117,9 @@ bool Tsf::initKeyEventSink() {
 
 void Tsf::uninitKeyEventSink() {
     ComPtr<ITfKeystrokeMgr> keystrokeMgr;
+    if (!threadMgr_) {
+        return;
+    }
     if (FAILED(threadMgr_->QueryInterface(
             IID_ITfKeystrokeMgr,
             reinterpret_cast<void **>(keystrokeMgr.ReleaseAndGetAddressOf())))) {

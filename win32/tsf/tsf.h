@@ -141,6 +141,8 @@ class Tsf : public ITfTextInputProcessorEx,
     void uninitShellTrayIcon();
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
+    void scheduleShellTrayRetry(UINT delayMs = 1000);
+    void cancelShellTrayRetry();
     void showShellTrayContextMenu();
     void showShellTrayContextMenuAt(POINT pt, HWND owner);
     void persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
@@ -179,15 +181,19 @@ class Tsf : public ITfTextInputProcessorEx,
     FcitxLangBarButton *langBarItem_ = nullptr;
     HWND shellTrayHostHwnd_ = nullptr;
     bool shellTrayHostDllPinned_ = false;
+    bool shellTrayHostClosing_ = false;
     HICON shellTrayIcon_ = nullptr;
     bool shellTrayIconOwned_ = false;
     bool shellTrayAdded_ = false;
+    bool shellTrayUseGuidIdentity_ = true;
+    bool shellTrayRetryPending_ = false;
     static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
     bool pendingTraySetChineseMode_ = false;
     bool pendingTraySetChineseModeValid_ = false;
     std::string pendingTrayInputMethod_;
     bool pendingTrayInputMethodFromSharedRequest_ = false;
+    std::string deferredSharedTrayInputMethod_;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;
     DWORD candidateUiElementId_ = TF_INVALID_UIELEMENTID;
