@@ -1,5 +1,4 @@
 #include "tsf.h"
-#include "../dll/util.h"
 
 namespace fcitx {
 namespace {
@@ -107,13 +106,9 @@ STDAPI Tsf::OnActivated(DWORD dwProfileType, LANGID, REFCLSID clsid, REFGUID,
     if (!currentProcessIsExplorerForMinimalTray()) {
         return S_OK;
     }
-    const bool visible =
-        (dwFlags & TF_IPSINK_FLAG_ACTIVE) &&
-        dwProfileType == TF_PROFILETYPE_INPUTPROCESSOR &&
-        IsEqualGUID(clsid, FCITX_CLSID);
-    pushTrayServiceFocusEvent(visible);
-    tsfTrace(std::string("OnActivated explorer minimal active=") +
-             (visible ? "true" : "false") + " flags=0x" +
+    (void)dwProfileType;
+    (void)clsid;
+    tsfTrace(std::string("OnActivated explorer minimal ignored flags=0x") +
              std::to_string(static_cast<unsigned long>(dwFlags)));
     return S_OK;
 }
@@ -122,10 +117,9 @@ STDAPI Tsf::OnActivated(REFCLSID clsid, REFGUID, BOOL fActivated) {
     if (!currentProcessIsExplorerForMinimalTray()) {
         return S_OK;
     }
-    const bool visible = fActivated && IsEqualGUID(clsid, FCITX_CLSID);
-    pushTrayServiceFocusEvent(visible);
-    tsfTrace(std::string("OnActivated(active-profile) explorer minimal active=") +
-             (visible ? "true" : "false"));
+    (void)clsid;
+    (void)fActivated;
+    tsfTrace("OnActivated(active-profile) explorer minimal ignored");
     return S_OK;
 }
 
@@ -143,18 +137,14 @@ STDAPI Tsf::Deactivate() {
         return S_OK;
     }
     if (currentProcessIsExplorerForMinimalTray()) {
-        pushTrayServiceFocusEvent(false);
         initTextEditSink(nullptr);
         trayEditContextFallback_.Reset();
-        uninitProfileActivationSink();
-        uninitActiveLanguageProfileNotifySink();
-        uninitThreadMgrEventSink();
         threadMgr_.Reset();
         clientId_ = TF_CLIENTID_NULL;
-        tsfTrace("Deactivate explorer minimal active=false");
+        tsfTrace("Deactivate explorer minimal bootstrap-only");
         return S_OK;
     }
-    pushTrayServiceFocusEvent(false);
+    pushTrayServiceTipSessionEvent(false);
     candidateWin_.hide();
     resetCompositionState();
     resetShiftToggleGesture();
@@ -173,28 +163,20 @@ STDAPI Tsf::Deactivate() {
 STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
                        DWORD dwFlags) {
     ComPtr<ITfDocumentMgr> documentMgr;
-    threadMgr_ = pThreadMgr;
-    clientId_ = tfClientId;
+    (void)dwFlags;
     if (currentProcessIsStandaloneTrayHelperForMinimalTsf()) {
-        tsfTrace("ActivateEx helper minimal isolated");
+        tsfTrace("ActivateEx helper minimal isolated (no threadMgr bind)");
         return S_OK;
     }
     if (currentProcessIsExplorerForMinimalTray()) {
         const bool helperReady = initShellTrayIcon();
-        const bool threadMgrSinkReady = initThreadMgrEventSink();
-        const bool profileSinkReady = initProfileActivationSink();
-        const bool activeProfileSinkReady =
-            profileSinkReady ? true : initActiveLanguageProfileNotifySink();
-        pushTrayServiceFocusEvent(true);
         tsfTrace(std::string("ActivateEx explorer minimal helperReady=") +
                  (helperReady ? "true" : "false") +
-                 " threadMgrSinkReady=" +
-                 (threadMgrSinkReady ? "true" : "false") +
-                 " profileSinkReady=" + (profileSinkReady ? "true" : "false") +
-                 " activeProfileSinkReady=" +
-                 (activeProfileSinkReady ? "true" : "false"));
+                 " ensure-helper-only no threadMgr");
         return S_OK;
     }
+    threadMgr_ = pThreadMgr;
+    clientId_ = tfClientId;
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;
     }
@@ -210,7 +192,7 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
 
     initLangBarTrayItem();
     langBarNotifyIconUpdate();
-    pushTrayServiceFocusEvent(true);
+    pushTrayServiceTipSessionEvent(true);
 
     return S_OK;
 

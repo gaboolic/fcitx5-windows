@@ -45,9 +45,7 @@ struct TrayStatusActionItem {
 constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kReopenContextMenuMessage = WM_APP + 89;
 constexpr UINT_PTR kRetryTimerId = 1;
-constexpr UINT_PTR kHideDelayTimerId = 2;
 constexpr UINT kRetryDelayMs = 1500;
-constexpr UINT kHideDelayMs = 300;
 constexpr UINT kShellTrayUid = 1;
 constexpr wchar_t kMutexName[] = L"Local\\Fcitx5StandaloneTrayHelperMutex";
 
@@ -86,21 +84,19 @@ std::string g_lastCurrentIm;
 POINT g_reopenMenuPoint = {};
 bool g_reopenMenuPending = false;
 bool g_contextMenuShowing = false;
-bool g_hideDelayPending = false;
 
 struct TrayServiceState {
     bool hasSnapshot = false;
-    bool visible = false;
-    bool hasRecentFocusEvent = false;
-    DWORD recentFocusProcessId = 0;
-    bool recentFocusActive = false;
+    /// From TSF snapshot only (not derived from per-host document focus).
+    bool visible = true;
     bool chineseMode = true;
     std::string currentInputMethod;
     std::vector<TrayStatusActionItem> statusActions;
-    std::unordered_map<DWORD, bool> activeFocusByProcess;
 };
 
 TrayServiceState g_trayState;
+/// Per-PID ref count for ITfTextInputProcessor ActivateEx/Deactivate pairs.
+std::unordered_map<DWORD, int> g_tipSessionRefCount;
 
 struct RimeDeployMonitorData {
     HANDLE process = nullptr;
@@ -380,8 +376,54 @@ std::vector<TrayStatusActionItem> readSharedTrayStatusActions() {
     return items;
 }
 
+bool isProcessStillRunning(DWORD processId) {
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                                 FALSE, processId);
+    if (!process) {
+        return false;
+    }
+    const DWORD waitResult = WaitForSingleObject(process, 0);
+    CloseHandle(process);
+    return waitResult == WAIT_TIMEOUT;
+}
+
+void pruneInactiveTipSessions() {
+    for (auto it = g_tipSessionRefCount.begin();
+         it != g_tipSessionRefCount.end();) {
+        if (it->second <= 0 || !isProcessStillRunning(it->first)) {
+            if (it->second > 0) {
+                trayHelperTrace("prune dead tip session pid=" +
+                                std::to_string(
+                                    static_cast<unsigned long>(it->first)));
+            }
+            it = g_tipSessionRefCount.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void applyTrayServiceTipSessionEvent(
+    const fcitx::TrayServiceTipSessionEvent &event) {
+    const DWORD pid = event.processId;
+    if (event.active != FALSE) {
+        g_tipSessionRefCount[pid]++;
+        return;
+    }
+    auto it = g_tipSessionRefCount.find(pid);
+    if (it == g_tipSessionRefCount.end()) {
+        return;
+    }
+    if (it->second > 1) {
+        it->second--;
+    } else {
+        g_tipSessionRefCount.erase(it);
+    }
+}
+
 void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
     g_trayState.hasSnapshot = true;
+    g_trayState.visible = snapshot.visible != FALSE;
     g_trayState.chineseMode = snapshot.chineseMode != FALSE;
     g_trayState.currentInputMethod =
         fcitx::trayServiceUtf8FromBuffer(snapshot.currentInputMethod);
@@ -400,77 +442,6 @@ void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
         item.isChecked = snapshot.actions[i].isChecked != FALSE;
         if (!item.uniqueName.empty()) {
             g_trayState.statusActions.push_back(std::move(item));
-        }
-    }
-}
-
-bool isProcessStillRunning(DWORD processId) {
-    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
-                                 FALSE, processId);
-    if (!process) {
-        return false;
-    }
-    const DWORD waitResult = WaitForSingleObject(process, 0);
-    CloseHandle(process);
-    return waitResult == WAIT_TIMEOUT;
-}
-
-void pruneInactiveFocusSources() {
-    for (auto it = g_trayState.activeFocusByProcess.begin();
-         it != g_trayState.activeFocusByProcess.end();) {
-        if (!it->second || !isProcessStillRunning(it->first)) {
-            if (it->second) {
-                trayHelperTrace("dropping stale active focus source pid=" +
-                                std::to_string(
-                                    static_cast<unsigned long>(it->first)));
-            }
-            it = g_trayState.activeFocusByProcess.erase(it);
-            continue;
-        }
-        ++it;
-    }
-}
-
-void cancelDelayedHide() {
-    if (!g_hideDelayPending) {
-        return;
-    }
-    g_hideDelayPending = false;
-    KillTimer(g_hwnd, kHideDelayTimerId);
-    trayHelperTrace("cancelled delayed hide");
-}
-
-void scheduleDelayedHide() {
-    if (g_hideDelayPending) {
-        KillTimer(g_hwnd, kHideDelayTimerId);
-    }
-    if (!g_hwnd) {
-        return;
-    }
-    g_hideDelayPending = true;
-    SetTimer(g_hwnd, kHideDelayTimerId, kHideDelayMs, nullptr);
-    trayHelperTrace("scheduled delayed hide delayMs=" +
-                    std::to_string(static_cast<unsigned long>(kHideDelayMs)));
-}
-
-void applyTrayServiceFocusEvent(const fcitx::TrayServiceFocusEvent &event) {
-    g_trayState.hasRecentFocusEvent = true;
-    g_trayState.recentFocusProcessId = event.processId;
-    g_trayState.recentFocusActive = event.active != FALSE;
-    if (g_trayState.recentFocusActive) {
-        cancelDelayedHide();
-        g_trayState.activeFocusByProcess[event.processId] = true;
-    } else {
-        if (g_contextMenuShowing) {
-            trayHelperTrace("ignored inactive focus during context menu pid=" +
-                            std::to_string(
-                                static_cast<unsigned long>(event.processId)));
-            return;
-        }
-        g_trayState.activeFocusByProcess.erase(event.processId);
-        pruneInactiveFocusSources();
-        if (g_trayState.activeFocusByProcess.empty()) {
-            scheduleDelayedHide();
         }
     }
 }
@@ -995,23 +966,17 @@ bool updateTrayTooltip(bool chineseMode) {
     return false;
 }
 
-// Mirror WeaselTrayIcon::Refresh(): decide visibility first, then update icon.
+// Tray shows when at least one host has called ActivateEx (session ref > 0).
+// Snapshot.visible is an extra engine-level allow (Explorer does not bind TIP).
 bool shouldShowTrayIcon() {
     if (g_contextMenuShowing) {
         return true;
     }
-    pruneInactiveFocusSources();
-    if (g_hideDelayPending) {
-        g_trayState.visible = true;
-        return true;
+    pruneInactiveTipSessions();
+    if (g_trayState.hasSnapshot && !g_trayState.visible) {
+        return false;
     }
-    if (g_trayState.hasRecentFocusEvent) {
-        g_trayState.visible = !g_trayState.activeFocusByProcess.empty();
-        return g_trayState.visible;
-    }
-    g_trayState.visible = false;
-    trayHelperTrace("shouldShowTrayIcon missing focus event");
-    return false;
+    return !g_tipSessionRefCount.empty();
 }
 
 void refreshTrayState() {
@@ -1085,6 +1050,24 @@ static void CALLBACK rimeDeployWaitCallback(PVOID lpParameter,
         }
     }
     g_rimeDeployMonitors.erase(it);
+}
+
+/// Foreground transfer for notification-icon menus; pairs with AttachThreadInput
+/// to avoid fighting the shell (Explorer can host fcitx + MSCTF).
+void bringTrayHelperWindowForContextMenu() {
+    if (!g_hwnd) {
+        return;
+    }
+    HWND fg = GetForegroundWindow();
+    DWORD tidFg = fg ? GetWindowThreadProcessId(fg, nullptr) : 0;
+    const DWORD tidCur = GetCurrentThreadId();
+    if (tidFg != 0 && tidFg != tidCur) {
+        AttachThreadInput(tidCur, tidFg, TRUE);
+    }
+    SetForegroundWindow(g_hwnd);
+    if (tidFg != 0 && tidFg != tidCur) {
+        AttachThreadInput(tidCur, tidFg, FALSE);
+    }
 }
 
 bool launchRimeDeployWithNotification() {
@@ -1283,8 +1266,8 @@ void showContextMenu() {
         AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR,
                     L"\x6253\x5f00 Fcitx5 \x65e5\x5fd7\x76ee\x5f55");
 
-        SetForegroundWindow(g_hwnd);
         g_contextMenuShowing = true;
+        bringTrayHelperWindowForContextMenu();
         const UINT cmd =
             TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD |
                                       TPM_NONOTIFY,
@@ -1403,19 +1386,18 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
         refreshTrayState();
         return true;
     }
-    if (cds->dwData == fcitx::kTrayServiceCopyDataFocusEvent &&
-        cds->cbData == sizeof(fcitx::TrayServiceFocusEvent)) {
+    if (cds->dwData == fcitx::kTrayServiceCopyDataTipSession &&
+        cds->cbData == sizeof(fcitx::TrayServiceTipSessionEvent)) {
         const auto *event =
-            reinterpret_cast<const fcitx::TrayServiceFocusEvent *>(cds->lpData);
+            reinterpret_cast<const fcitx::TrayServiceTipSessionEvent *>(cds->lpData);
         if (event->version != 1) {
             return false;
         }
-        applyTrayServiceFocusEvent(*event);
-        trayHelperTrace("received tray focus event active=" +
-                        std::string(event->active != FALSE ? "true" : "false") +
-                        " pid=" +
-                        std::to_string(
-                            static_cast<unsigned long>(event->processId)));
+        applyTrayServiceTipSessionEvent(*event);
+        trayHelperTrace(
+            "received tip session active=" +
+            std::string(event->active != FALSE ? "true" : "false") + " pid=" +
+            std::to_string(static_cast<unsigned long>(event->processId)));
         refreshTrayState();
         return true;
     }
@@ -1433,6 +1415,18 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             persistSharedTrayChineseModeState(!chineseMode);
             refreshTrayState();
         } else if (code == WM_RBUTTONUP || code == WM_CONTEXTMENU) {
+            // Shell often delivers both WM_RBUTTONUP and WM_CONTEXTMENU for one
+            // click; running showContextMenu twice can steal foreground twice and
+            // destabilize Explorer (fcitx + MSCTF in explorer.exe).
+            static ULONGLONG s_lastContextMenuTick = 0;
+            const ULONGLONG now = GetTickCount64();
+            if (now - s_lastContextMenuTick < 400ULL) {
+                trayHelperTrace(
+                    "tray context menu debounced duplicate notify code=" +
+                    std::to_string(static_cast<unsigned long>(code)));
+                return 0;
+            }
+            s_lastContextMenuTick = now;
             showContextMenu();
         }
         return 0;
@@ -1459,13 +1453,6 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             refreshTrayState();
             return 0;
         }
-        if (wp == kHideDelayTimerId) {
-            KillTimer(hwnd, kHideDelayTimerId);
-            g_hideDelayPending = false;
-            trayHelperTrace("delayed hide timer fired");
-            refreshTrayState();
-            return 0;
-        }
         break;
     case WM_SETTINGCHANGE:
     case WM_DISPLAYCHANGE:
@@ -1477,7 +1464,6 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         trayHelperTrace("wndproc WM_DESTROY");
         KillTimer(hwnd, kRetryTimerId);
-        KillTimer(hwnd, kHideDelayTimerId);
         removeTrayIcon();
         PostQuitMessage(0);
         return 0;

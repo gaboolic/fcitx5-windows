@@ -1621,26 +1621,26 @@ void Tsf::pushTrayServiceStateSnapshot() const {
              current);
 }
 
-void Tsf::pushTrayServiceFocusEvent(bool active) const {
+void Tsf::pushTrayServiceTipSessionEvent(bool active) const {
     if (!ensureStandaloneTrayHelperRunning()) {
         return;
     }
     const HWND helper = standaloneTrayHelperWindow();
     if (!helper) {
-        tsfTrace("pushTrayServiceFocusEvent missing helper window");
+        tsfTrace("pushTrayServiceTipSessionEvent missing helper window");
         return;
     }
-    fcitx::TrayServiceFocusEvent event = {};
+    fcitx::TrayServiceTipSessionEvent event = {};
     event.version = 1;
     event.processId = GetCurrentProcessId();
     event.active = active ? TRUE : FALSE;
     if (!fcitx::sendTrayServiceCopyData(helper,
-                                        fcitx::kTrayServiceCopyDataFocusEvent,
+                                        fcitx::kTrayServiceCopyDataTipSession,
                                         &event, sizeof(event))) {
-        tsfTrace("pushTrayServiceFocusEvent SendMessageTimeout failed");
+        tsfTrace("pushTrayServiceTipSessionEvent SendMessageTimeout failed");
         return;
     }
-    tsfTrace("pushTrayServiceFocusEvent sent active=" +
+    tsfTrace("pushTrayServiceTipSessionEvent active=" +
              std::string(active ? "true" : "false") + " pid=" +
              std::to_string(static_cast<unsigned long>(event.processId)));
 }

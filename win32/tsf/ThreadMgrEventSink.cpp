@@ -36,12 +36,6 @@ STDMETHODIMP Tsf::OnUninitDocumentMgr(ITfDocumentMgr *pDocMgr) { return S_OK; }
 STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
                              ITfDocumentMgr *pDocMgrPrevFocus) {
     tsfTrace("OnSetFocus document manager focus changed");
-    if (!currentProcessIsStandaloneTrayHelper()) {
-        const bool active = pDocMgrFocus != nullptr;
-        pushTrayServiceFocusEvent(active);
-        tsfTrace(std::string("OnSetFocus pushed helper focus active=") +
-                 (active ? "true" : "false"));
-    }
     initTextEditSink(pDocMgrFocus);
     deferredSharedTrayInputMethod_.clear();
     scheduleSharedTrayChineseModeRequest();

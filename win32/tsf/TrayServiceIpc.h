@@ -10,7 +10,8 @@ namespace fcitx {
 constexpr wchar_t kStandaloneTrayHelperWindowClass[] =
     L"Fcitx5StandaloneTrayHelperWindow";
 constexpr ULONG_PTR kTrayServiceCopyDataSnapshot = 0x46545331ULL;
-constexpr ULONG_PTR kTrayServiceCopyDataFocusEvent = 0x46545332ULL;
+/// Per-process TSF TIP ActivateEx/Deactivate (not document focus / OnSetFocus).
+constexpr ULONG_PTR kTrayServiceCopyDataTipSession = 0x46545333ULL;
 constexpr size_t kTrayServiceMaxInputMethodLength = 64;
 constexpr size_t kTrayServiceMaxStatusActionCount = 8;
 constexpr size_t kTrayServiceMaxStatusActionNameLength = 32;
@@ -22,6 +23,12 @@ struct TrayServiceStatusActionState {
     BOOL isChecked;
 };
 
+struct TrayServiceTipSessionEvent {
+    DWORD version;
+    DWORD processId;
+    BOOL active;
+};
+
 struct TrayServiceSnapshot {
     DWORD version;
     BOOL visible;
@@ -29,12 +36,6 @@ struct TrayServiceSnapshot {
     char currentInputMethod[kTrayServiceMaxInputMethodLength];
     UINT actionCount;
     TrayServiceStatusActionState actions[kTrayServiceMaxStatusActionCount];
-};
-
-struct TrayServiceFocusEvent {
-    DWORD version;
-    DWORD processId;
-    BOOL active;
 };
 
 template <size_t N>
