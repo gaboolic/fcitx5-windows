@@ -4,7 +4,7 @@
 #include "tsf.h"
 
 #include <atomic>
-#include <fcitx-utils/log.h>
+#include "TsfStubLog.h"
 #include <filesystem>
 #include <iterator>
 #include <fstream>

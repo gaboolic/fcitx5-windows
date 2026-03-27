@@ -3,6 +3,14 @@
 #include "MsctfMingwCompat.h"
 #include <msctf.h>
 
+// MinGW WIDL msctf declares virtual AdviseSink on ITfLangBarItemButton; Windows
+// SDK + Clang often does not, so `override` is invalid there (-Werror).
+#if defined(__MINGW32__) || defined(__MSYS__) || defined(__CYGWIN__)
+#define FCITX_TSF_LBI_SINK_OVERRIDE override
+#else
+#define FCITX_TSF_LBI_SINK_OVERRIDE
+#endif
+
 namespace fcitx {
 
 class Tsf;
@@ -33,8 +41,8 @@ class FcitxLangBarButton final : public ITfLangBarItemButton {
     STDMETHODIMP GetIcon(HICON *phIcon) override;
     STDMETHODIMP GetText(BSTR *pbstrText) override;
     STDMETHODIMP AdviseSink(REFIID riid, IUnknown *punk,
-                            DWORD *pdwCookie) override;
-    STDMETHODIMP UnadviseSink(DWORD dwCookie) override;
+                            DWORD *pdwCookie) FCITX_TSF_LBI_SINK_OVERRIDE;
+    STDMETHODIMP UnadviseSink(DWORD dwCookie) FCITX_TSF_LBI_SINK_OVERRIDE;
 
   private:
     static constexpr DWORD kSinkCookie = 0x50494e47;

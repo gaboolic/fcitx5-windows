@@ -3,7 +3,7 @@
 
 #include <algorithm>
 #include <cstdint>
-#include <fcitx-utils/log.h>
+#include "TsfStubLog.h"
 #include <sstream>
 #include <string>
 #include <utility>

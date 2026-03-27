@@ -16,6 +16,8 @@ add_library(tsf STATIC
 if(NOT MSVC)
     if(WIN32 OR CYGWIN OR MSYS OR CMAKE_SYSTEM_NAME STREQUAL "MSYS")
         target_sources(tsf PRIVATE MsctfMingwCompat.cpp)
+        # GetDpiForWindow (Win10+); MinGW w32api defaults to older _WIN32_WINNT.
+        target_compile_definitions(tsf PRIVATE _WIN32_WINNT=0x0A00)
     endif()
 endif()
 

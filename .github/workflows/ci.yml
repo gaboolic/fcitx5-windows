@@ -64,6 +64,28 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build
 
+      - name: Install Inno Setup 6
+        run: choco install innosetup -y --no-progress
+
+      - name: Stage install tree and build TSF installer (Fcitx5TSF-Setup.exe)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = $env:GITHUB_WORKSPACE
+          $stage = Join-Path $root 'stage-installer'
+          cmake --install (Join-Path $root 'build') --prefix $stage
+          & (Join-Path $root 'scripts/deploy-build-to-portable.ps1') `
+            -BuildDir (Join-Path $root 'build') `
+            -DeployDir $stage `
+            -SkipRegsvr32
+          & (Join-Path $root 'installer/build-installer.ps1') -StageDir $stage
+
+      - name: Upload TSF installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Fcitx5TSF-Setup
+          path: installer/dist/Fcitx5TSF-Setup.exe
+
   build-fcitx5-clang:
     needs: lint
     runs-on: windows-2025
@@ -151,7 +173,9 @@ jobs:
         run: md5sum -c checksum
 
   release:
-    needs: build-fcitx5-clang
+    needs:
+      - build-fcitx5-clang
+      - build-fcitx5-msys
     if: ${{ github.ref == 'refs/heads/master' && !contains(github.event.head_commit.message, '!release') }}
     runs-on: ubuntu-latest
     steps:
@@ -159,6 +183,14 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
+
+      - name: Collect release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find "${GITHUB_WORKSPACE}" -type f \( -name 'Fcitx5-*.tar.bz2' -o -name 'Fcitx5TSF-Setup.exe' \) -exec cp -f {} release-assets/ \;
+          ls -la release-assets/
 
       - name: Create Nightly release
         uses: 'marvinpinto/action-automatic-releases@latest'
@@ -168,4 +200,4 @@ jobs:
           prerelease: true
           title: "Nightly Build"
           files: |
-            Fcitx5-*.tar.bz2
+            release-assets/*
