@@ -60,8 +60,8 @@ Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
 }
 
 Tsf::~Tsf() {
-    if (threadMgr_ || langBarItem_ || shellTrayHostHwnd_ || textEditSinkContext_ ||
-        trayEditContextFallback_) {
+    if (threadMgr_ || langBarItem_ || shellTrayHostHwnd_ ||
+        textEditSinkContext_ || trayEditContextFallback_) {
         Deactivate();
     }
     DllRelease();

@@ -20,11 +20,11 @@
 #include <string>
 
 #include <fcitx-config/iniparser.h>
+#include <fcitx-utils/key.h>
 #include <fcitx-utils/keysym.h>
+#include <fcitx-utils/standardpaths.h>
 #include <fcitx/globalconfig.h>
 #include <fcitx/inputcontextmanager.h>
-#include <fcitx-utils/key.h>
-#include <fcitx-utils/standardpaths.h>
 
 namespace fcitx {
 extern HINSTANCE mainInstanceHandle;
@@ -38,14 +38,14 @@ using fcitx::GlobalConfig;
 using fcitx::Key;
 using fcitx::KeyStates;
 using fcitx::KeyStringFormat;
+using fcitx::mainInstanceHandle;
 using fcitx::PropertyPropagatePolicy;
 using fcitx::PropertyPropagatePolicyToString;
 using fcitx::RawConfig;
-using fcitx::StandardPaths;
-using fcitx::StandardPathsType;
-using fcitx::mainInstanceHandle;
 using fcitx::readAsIni;
 using fcitx::safeSaveAsIni;
+using fcitx::StandardPaths;
+using fcitx::StandardPathsType;
 
 enum CmdId : int {
     IDC_LABEL_HEADER = 1998,
@@ -147,9 +147,10 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::WindowTitle:
         return lang == UiLang::ZhCN ? L"Fcitx5 设置" : L"Fcitx5 Settings";
     case TextId::Header:
-        return lang == UiLang::ZhCN
-                   ? L"全局配置（conf/fcitx5/config）- 与 Linux fcitx5 使用同一套配置"
-                   : L"Global (conf/fcitx5/config) - same schema as Linux fcitx5";
+        return lang == UiLang::ZhCN ? L"全局配置（conf/fcitx5/config）- 与 "
+                                      L"Linux fcitx5 使用同一套配置"
+                                    : L"Global (conf/fcitx5/config) - same "
+                                      L"schema as Linux fcitx5";
     case TextId::Language:
         return lang == UiLang::ZhCN ? L"语言：" : L"Language:";
     case TextId::LangChinese:
@@ -157,19 +158,21 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::LangEnglish:
         return L"English";
     case TextId::CandidatePageSize:
-        return lang == UiLang::ZhCN ? L"候选词每页数量（1-10）：" :
-                                      L"Candidate page size (1-10):";
+        return lang == UiLang::ZhCN ? L"候选词每页数量（1-10）："
+                                    : L"Candidate page size (1-10):";
     case TextId::ActiveByDefault:
         return lang == UiLang::ZhCN ? L"默认启用输入法" : L"Active by default";
     case TextId::ShowPreeditInApplication:
-        return lang == UiLang::ZhCN ? L"在应用中显示预编辑文本" :
-                                      L"Show preedit in application";
+        return lang == UiLang::ZhCN ? L"在应用中显示预编辑文本"
+                                    : L"Show preedit in application";
     case TextId::ShowInputMethodInformation:
-        return lang == UiLang::ZhCN ? L"切换时显示输入法信息" :
-                                      L"Show input method information when switching";
+        return lang == UiLang::ZhCN
+                   ? L"切换时显示输入法信息"
+                   : L"Show input method information when switching";
     case TextId::ResetStateOnFocusIn:
-        return lang == UiLang::ZhCN ? L"获得焦点时重置状态（全部 / 程序 / 不重置）：" :
-                                      L"Reset state on focus in (All / Program / No):";
+        return lang == UiLang::ZhCN
+                   ? L"获得焦点时重置状态（全部 / 程序 / 不重置）："
+                   : L"Reset state on focus in (All / Program / No):";
     case TextId::ResetAll:
         return lang == UiLang::ZhCN ? L"全部" : L"All";
     case TextId::ResetProgram:
@@ -177,40 +180,45 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::ResetNo:
         return lang == UiLang::ZhCN ? L"不重置" : L"No";
     case TextId::AllowInputMethodForPassword:
-        return lang == UiLang::ZhCN ? L"密码框中允许使用输入法" :
-                                      L"Allow input method in password field";
+        return lang == UiLang::ZhCN ? L"密码框中允许使用输入法"
+                                    : L"Allow input method in password field";
     case TextId::ShowPreeditForPassword:
-        return lang == UiLang::ZhCN ? L"输入密码时显示预编辑文本" :
-                                      L"Show preedit when typing password";
+        return lang == UiLang::ZhCN ? L"输入密码时显示预编辑文本"
+                                    : L"Show preedit when typing password";
     case TextId::EnumerateWithTriggerKeys:
-        return lang == UiLang::ZhCN ? L"重复按触发键时轮换输入法" :
-                                      L"Enumerate when pressing trigger key repeatedly";
+        return lang == UiLang::ZhCN
+                   ? L"重复按触发键时轮换输入法"
+                   : L"Enumerate when pressing trigger key repeatedly";
     case TextId::EnumerateSkipFirst:
-        return lang == UiLang::ZhCN ? L"轮换时跳过第一个输入法" :
-                                      L"Skip first IM while enumerating";
+        return lang == UiLang::ZhCN ? L"轮换时跳过第一个输入法"
+                                    : L"Skip first IM while enumerating";
     case TextId::TriggerKeys:
-        return lang == UiLang::ZhCN ? L"触发键（fcitx 语法，空格分隔）：" :
-                                      L"Trigger keys (fcitx syntax, space-separated):";
+        return lang == UiLang::ZhCN
+                   ? L"触发键（fcitx 语法，空格分隔）："
+                   : L"Trigger keys (fcitx syntax, space-separated):";
     case TextId::AltTriggerKeys:
         return lang == UiLang::ZhCN
-                   ? L"辅助触发键（例如 Shift_L，临时切换）：" :
-                     L"Alt trigger keys (e.g. Shift_L - temporary switch):";
+                   ? L"辅助触发键（例如 Shift_L，临时切换）："
+                   : L"Alt trigger keys (e.g. Shift_L - temporary switch):";
     case TextId::EnumerateForwardKeys:
         return lang == UiLang::ZhCN
-                   ? L"向前轮换按键（留空为默认；fcitx portable 语法）：" :
-                     L"Enumerate forward keys (empty = default; fcitx portable key syntax):";
+                   ? L"向前轮换按键（留空为默认；fcitx portable 语法）："
+                   : L"Enumerate forward keys (empty = default; fcitx portable "
+                     L"key syntax):";
     case TextId::EnumerateGroupForward:
-        return lang == UiLang::ZhCN ? L"向前轮换分组（例如 Super+space）：" :
-                                      L"Enumerate group forward (e.g. Super+space):";
+        return lang == UiLang::ZhCN
+                   ? L"向前轮换分组（例如 Super+space）："
+                   : L"Enumerate group forward (e.g. Super+space):";
     case TextId::EnumerateBackwardKeys:
-        return lang == UiLang::ZhCN ? L"向后轮换按键：" :
-                                      L"Enumerate backward keys:";
+        return lang == UiLang::ZhCN ? L"向后轮换按键："
+                                    : L"Enumerate backward keys:";
     case TextId::EnumerateGroupBackward:
-        return lang == UiLang::ZhCN ? L"向后轮换分组：" :
-                                      L"Enumerate group backward:";
+        return lang == UiLang::ZhCN ? L"向后轮换分组："
+                                    : L"Enumerate group backward:";
     case TextId::ProfileRawIni:
-        return lang == UiLang::ZhCN ? L"配置（输入法 / 分组）- 原始 INI" :
-                                      L"Profile (input methods / groups) - raw INI";
+        return lang == UiLang::ZhCN
+                   ? L"配置（输入法 / 分组）- 原始 INI"
+                   : L"Profile (input methods / groups) - raw INI";
     case TextId::SaveAll:
         return lang == UiLang::ZhCN ? L"全部保存" : L"Save all";
     case TextId::ReloadFromDisk:
@@ -220,37 +228,40 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::Record:
         return lang == UiLang::ZhCN ? L"录制" : L"Record";
     case TextId::SaveConfigFailed:
-        return lang == UiLang::ZhCN ? L"无法写入 conf/fcitx5/config。" :
-                                      L"Could not write conf/fcitx5/config.";
+        return lang == UiLang::ZhCN ? L"无法写入 conf/fcitx5/config。"
+                                    : L"Could not write conf/fcitx5/config.";
     case TextId::SaveProfileFailed:
-        return lang == UiLang::ZhCN ? L"无法写入 profile 文件。" :
-                                      L"Could not write profile file.";
+        return lang == UiLang::ZhCN ? L"无法写入 profile 文件。"
+                                    : L"Could not write profile file.";
     case TextId::SaveSuccess:
-        return lang == UiLang::ZhCN
-                   ? L"已保存。如果配置未生效，请重启正在使用 TSF 输入法的应用。"
-                   : L"Saved. Restart apps using the TSF IME if settings do not apply.";
+        return lang == UiLang::ZhCN ? L"已保存。如果配置未生效，请重启正在使用 "
+                                      L"TSF 输入法的应用。"
+                                    : L"Saved. Restart apps using the TSF IME "
+                                      L"if settings do not apply.";
     case TextId::PageSizeInvalid:
-        return lang == UiLang::ZhCN ? L"候选词每页数量必须在 1 到 10 之间。" :
-                                      L"Page size must be 1-10.";
+        return lang == UiLang::ZhCN ? L"候选词每页数量必须在 1 到 10 之间。"
+                                    : L"Page size must be 1-10.";
     case TextId::LoadConfigWarning:
         return lang == UiLang::ZhCN
-                   ? L"无法读取 conf/fcitx5/config（首次运行可在保存时自动创建）。"
-                   : L"Could not read conf/fcitx5/config (first run creates it on save).";
+                   ? L"无法读取 "
+                     L"conf/fcitx5/config（首次运行可在保存时自动创建）。"
+                   : L"Could not read conf/fcitx5/config (first run creates it "
+                     L"on save).";
     case TextId::MessageBoxCaption:
         return lang == UiLang::ZhCN ? L"Fcitx5 设置" : L"Fcitx5 Settings";
     case TextId::KeyCaptureTitle:
-        return lang == UiLang::ZhCN ? L"录制快捷键（WH_KEYBOARD_LL）" :
-                                      L"Record shortcut (WH_KEYBOARD_LL)";
+        return lang == UiLang::ZhCN ? L"录制快捷键（WH_KEYBOARD_LL）"
+                                    : L"Record shortcut (WH_KEYBOARD_LL)";
     case TextId::KeyCaptureHint:
-        return lang == UiLang::ZhCN ? L"按下按键；Esc 关闭且不保存。" :
-                                      L"Press keys; Esc closes without saving.";
+        return lang == UiLang::ZhCN ? L"按下按键；Esc 关闭且不保存。"
+                                    : L"Press keys; Esc closes without saving.";
     case TextId::KeyCaptureCurrent:
         return lang == UiLang::ZhCN ? L"（当前按键）" : L"(current key)";
     case TextId::KeyCaptureQueued:
         return lang == UiLang::ZhCN ? L"已加入：" : L"Queued:";
     case TextId::KeyCaptureEmpty:
-        return lang == UiLang::ZhCN ? L"（空，按键后点“加入”）" :
-                                      L"(empty -- press keys, Append)";
+        return lang == UiLang::ZhCN ? L"（空，按键后点“加入”）"
+                                    : L"(empty -- press keys, Append)";
     case TextId::KeyCaptureAppend:
         return lang == UiLang::ZhCN ? L"加入" : L"Append";
     case TextId::KeyCaptureDone:
@@ -258,21 +269,22 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::KeyCaptureCancel:
         return lang == UiLang::ZhCN ? L"取消" : L"Cancel";
     case TextId::KeyCaptureHookFailed:
-        return lang == UiLang::ZhCN ? L"无法安装键盘钩子。" :
-                                      L"Could not install keyboard hook.";
+        return lang == UiLang::ZhCN ? L"无法安装键盘钩子。"
+                                    : L"Could not install keyboard hook.";
     case TextId::KeyCaptureRegisterFailed:
-        return lang == UiLang::ZhCN ? L"注册快捷键录制窗口类失败。" :
-                                      L"RegisterClass for capture dialog failed.";
+        return lang == UiLang::ZhCN
+                   ? L"注册快捷键录制窗口类失败。"
+                   : L"RegisterClass for capture dialog failed.";
     }
     return L"";
 }
 
 void pinStdPathsToThisExe() {
     HMODULE mod = nullptr;
-    if (!GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCWSTR>(&pinStdPathsToThisExe), &mod) ||
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(&pinStdPathsToThisExe),
+                            &mod) ||
         !mod) {
         return;
     }
@@ -312,11 +324,13 @@ std::string wideToUtf8(std::wstring_view w) {
 
 void setGuiFont(HWND hwnd) {
     SendMessageW(hwnd, WM_SETFONT,
-                 reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)), TRUE);
+                 reinterpret_cast<WPARAM>(GetStockObject(DEFAULT_GUI_FONT)),
+                 TRUE);
 }
 
 std::filesystem::path profilePathForUser() {
-    auto p = StandardPaths::global().locate(StandardPathsType::PkgConfig, "profile");
+    auto p =
+        StandardPaths::global().locate(StandardPathsType::PkgConfig, "profile");
     if (!p.empty()) {
         return p;
     }
@@ -387,10 +401,10 @@ void syncControlsFromGc(HWND hwnd, UiState &st) {
                    st.gc.activeByDefault() ? BST_CHECKED : BST_UNCHECKED);
     CheckDlgButton(hwnd, IDC_CB_PREEDIT,
                    st.gc.preeditEnabledByDefault() ? BST_CHECKED
-                                                    : BST_UNCHECKED);
+                                                   : BST_UNCHECKED);
     CheckDlgButton(hwnd, IDC_CB_IM_INFO,
                    st.gc.showInputMethodInformation() ? BST_CHECKED
-                                                       : BST_UNCHECKED);
+                                                      : BST_UNCHECKED);
     {
         PropertyPropagatePolicy const pol = st.gc.resetStateWhenFocusIn();
         int idx = 2;
@@ -404,10 +418,10 @@ void syncControlsFromGc(HWND hwnd, UiState &st) {
     }
     CheckDlgButton(hwnd, IDC_CB_PWD_IM,
                    st.gc.allowInputMethodForPassword() ? BST_CHECKED
-                                                        : BST_UNCHECKED);
+                                                       : BST_UNCHECKED);
     CheckDlgButton(hwnd, IDC_CB_PWD_PREEDIT,
                    st.gc.showPreeditForPassword() ? BST_CHECKED
-                                                   : BST_UNCHECKED);
+                                                  : BST_UNCHECKED);
     CheckDlgButton(hwnd, IDC_CB_ENUM_TRIG,
                    st.gc.enumerateWithTriggerKeys() ? BST_CHECKED
                                                     : BST_UNCHECKED);
@@ -415,29 +429,26 @@ void syncControlsFromGc(HWND hwnd, UiState &st) {
                    st.gc.enumerateSkipFirst() ? BST_CHECKED : BST_UNCHECKED);
 
     SetWindowTextW(st.editTrig,
-                     utf8ToWide(Key::keyListToString(st.gc.triggerKeys(),
-                                                     KeyStringFormat::Portable))
-                         .c_str());
-    SetWindowTextW(
-        st.editAlt,
-        utf8ToWide(
-            Key::keyListToString(st.gc.altTriggerKeys(), KeyStringFormat::Portable))
-            .c_str());
-    SetWindowTextW(
-        st.editEnumF,
-        utf8ToWide(Key::keyListToString(st.gc.enumerateForwardKeys(),
-                                        KeyStringFormat::Portable))
-            .c_str());
+                   utf8ToWide(Key::keyListToString(st.gc.triggerKeys(),
+                                                   KeyStringFormat::Portable))
+                       .c_str());
+    SetWindowTextW(st.editAlt,
+                   utf8ToWide(Key::keyListToString(st.gc.altTriggerKeys(),
+                                                   KeyStringFormat::Portable))
+                       .c_str());
+    SetWindowTextW(st.editEnumF,
+                   utf8ToWide(Key::keyListToString(st.gc.enumerateForwardKeys(),
+                                                   KeyStringFormat::Portable))
+                       .c_str());
     SetWindowTextW(
         st.editEnumG,
         utf8ToWide(Key::keyListToString(st.gc.enumerateGroupForwardKeys(),
                                         KeyStringFormat::Portable))
             .c_str());
-    SetWindowTextW(
-        st.editEnumB,
-        utf8ToWide(Key::keyListToString(st.gc.enumerateBackwardKeys(),
-                                        KeyStringFormat::Portable))
-            .c_str());
+    SetWindowTextW(st.editEnumB, utf8ToWide(Key::keyListToString(
+                                                st.gc.enumerateBackwardKeys(),
+                                                KeyStringFormat::Portable))
+                                     .c_str());
     SetWindowTextW(
         st.editEnumGroupB,
         utf8ToWide(Key::keyListToString(st.gc.enumerateGroupBackwardKeys(),
@@ -452,34 +463,36 @@ bool saveAll(HWND hwnd, UiState &st) {
         static_cast<int>(SendMessageW(st.spinPage, UDM_GETPOS32, 0, 0));
     if (pos < 1 || pos > 10) {
         MessageBoxW(hwnd, tr(TextId::PageSizeInvalid, st.lang),
-                    tr(TextId::MessageBoxCaption, st.lang),
-                    MB_ICONWARNING);
+                    tr(TextId::MessageBoxCaption, st.lang), MB_ICONWARNING);
         return false;
     }
 
     std::wstring buf;
     buf.resize(static_cast<size_t>(GetWindowTextLengthW(st.editTrig) + 1));
-    GetWindowTextW(st.editTrig, buf.data(),
-                   static_cast<int>(buf.size()));
+    GetWindowTextW(st.editTrig, buf.data(), static_cast<int>(buf.size()));
     buf.resize(wcslen(buf.c_str()));
     const std::string trig = wideToUtf8(buf);
 
-    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editAlt) + 1), L'\0');
+    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editAlt) + 1),
+               L'\0');
     GetWindowTextW(st.editAlt, buf.data(), static_cast<int>(buf.size()));
     buf.resize(wcslen(buf.c_str()));
     const std::string alt = wideToUtf8(buf);
 
-    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumF) + 1), L'\0');
+    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumF) + 1),
+               L'\0');
     GetWindowTextW(st.editEnumF, buf.data(), static_cast<int>(buf.size()));
     buf.resize(wcslen(buf.c_str()));
     const std::string enF = wideToUtf8(buf);
 
-    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumG) + 1), L'\0');
+    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumG) + 1),
+               L'\0');
     GetWindowTextW(st.editEnumG, buf.data(), static_cast<int>(buf.size()));
     buf.resize(wcslen(buf.c_str()));
     const std::string enG = wideToUtf8(buf);
 
-    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumB) + 1), L'\0');
+    buf.assign(static_cast<size_t>(GetWindowTextLengthW(st.editEnumB) + 1),
+               L'\0');
     GetWindowTextW(st.editEnumB, buf.data(), static_cast<int>(buf.size()));
     buf.resize(wcslen(buf.c_str()));
     const std::string enB = wideToUtf8(buf);
@@ -500,25 +513,26 @@ bool saveAll(HWND hwnd, UiState &st) {
     }
 
     // Normalize key lists via parse (drops invalid tokens like core does).
-    const std::string trigNorm =
-        Key::keyListToString(Key::keyListFromString(trig), KeyStringFormat::Portable);
-    const std::string altNorm =
-        Key::keyListToString(Key::keyListFromString(alt), KeyStringFormat::Portable);
-    const std::string enFNorm =
-        Key::keyListToString(Key::keyListFromString(enF), KeyStringFormat::Portable);
-    const std::string enGNorm =
-        Key::keyListToString(Key::keyListFromString(enG), KeyStringFormat::Portable);
-    const std::string enBNorm =
-        Key::keyListToString(Key::keyListFromString(enB), KeyStringFormat::Portable);
-    const std::string enGBNorm =
-        Key::keyListToString(Key::keyListFromString(enGB), KeyStringFormat::Portable);
+    const std::string trigNorm = Key::keyListToString(
+        Key::keyListFromString(trig), KeyStringFormat::Portable);
+    const std::string altNorm = Key::keyListToString(
+        Key::keyListFromString(alt), KeyStringFormat::Portable);
+    const std::string enFNorm = Key::keyListToString(
+        Key::keyListFromString(enF), KeyStringFormat::Portable);
+    const std::string enGNorm = Key::keyListToString(
+        Key::keyListFromString(enG), KeyStringFormat::Portable);
+    const std::string enBNorm = Key::keyListToString(
+        Key::keyListFromString(enB), KeyStringFormat::Portable);
+    const std::string enGBNorm = Key::keyListToString(
+        Key::keyListFromString(enGB), KeyStringFormat::Portable);
 
     RawConfig raw;
     st.gc.save(raw);
     raw.setValueByPath("Behavior/DefaultPageSize", std::to_string(pos));
-    raw.setValueByPath(
-        "Behavior/ActiveByDefault",
-        IsDlgButtonChecked(hwnd, IDC_CB_ACTIVE) == BST_CHECKED ? "True" : "False");
+    raw.setValueByPath("Behavior/ActiveByDefault",
+                       IsDlgButtonChecked(hwnd, IDC_CB_ACTIVE) == BST_CHECKED
+                           ? "True"
+                           : "False");
     raw.setValueByPath("Behavior/PreeditEnabledByDefault",
                        IsDlgButtonChecked(hwnd, IDC_CB_PREEDIT) == BST_CHECKED
                            ? "True"
@@ -529,13 +543,14 @@ bool saveAll(HWND hwnd, UiState &st) {
                            : "False");
     raw.setValueByPath("Behavior/resetStateWhenFocusIn",
                        PropertyPropagatePolicyToString(resetPol));
-    raw.setValueByPath(
-        "Behavior/AllowInputMethodForPassword",
-        IsDlgButtonChecked(hwnd, IDC_CB_PWD_IM) == BST_CHECKED ? "True" : "False");
+    raw.setValueByPath("Behavior/AllowInputMethodForPassword",
+                       IsDlgButtonChecked(hwnd, IDC_CB_PWD_IM) == BST_CHECKED
+                           ? "True"
+                           : "False");
     raw.setValueByPath(
         "Behavior/ShowPreeditForPassword",
         IsDlgButtonChecked(hwnd, IDC_CB_PWD_PREEDIT) == BST_CHECKED ? "True"
-                                                                       : "False");
+                                                                    : "False");
     raw.setValueByPath("Hotkey/EnumerateWithTriggerKeys",
                        IsDlgButtonChecked(hwnd, IDC_CB_ENUM_TRIG) == BST_CHECKED
                            ? "True"
@@ -553,7 +568,7 @@ bool saveAll(HWND hwnd, UiState &st) {
 
     st.gc.load(raw);
     if (!safeSaveAsIni(st.gc.config(), StandardPathsType::PkgConfig,
-                        std::filesystem::path("config"))) {
+                       std::filesystem::path("config"))) {
         MessageBoxW(hwnd, tr(TextId::SaveConfigFailed, st.lang),
                     tr(TextId::MessageBoxCaption, st.lang), MB_ICONERROR);
         return false;
@@ -641,7 +656,8 @@ void applyLanguage(HWND hwnd, UiState &st) {
     }
     reloadLanguageCombo(st);
     setControlText(hwnd, IDC_LABEL_LANG, tr(TextId::Language, st.lang));
-    setControlText(hwnd, IDC_LABEL_PAGE, tr(TextId::CandidatePageSize, st.lang));
+    setControlText(hwnd, IDC_LABEL_PAGE,
+                   tr(TextId::CandidatePageSize, st.lang));
     setControlText(hwnd, IDC_CB_ACTIVE, tr(TextId::ActiveByDefault, st.lang));
     setControlText(hwnd, IDC_CB_PREEDIT,
                    tr(TextId::ShowPreeditInApplication, st.lang));
@@ -828,11 +844,12 @@ void appendLastChord(KeyCaptureUi *ctx) {
         }
         ctx->accumulated += piece;
     }
-    SetWindowTextW(ctx->stAccum,
-                   utf8ToWide(ctx->accumulated.empty()
-                                  ? wideToUtf8(tr(TextId::KeyCaptureEmpty, g_uiLang))
-                                  : ctx->accumulated)
-                       .c_str());
+    SetWindowTextW(
+        ctx->stAccum,
+        utf8ToWide(ctx->accumulated.empty()
+                       ? wideToUtf8(tr(TextId::KeyCaptureEmpty, g_uiLang))
+                       : ctx->accumulated)
+            .c_str());
 }
 
 void finishCapture(KeyCaptureUi *ctx, bool apply) {
@@ -856,7 +873,8 @@ void finishCapture(KeyCaptureUi *ctx, bool apply) {
     DestroyWindow(ctx->dlgHwnd);
 }
 
-LRESULT CALLBACK KeyCapDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+LRESULT CALLBACK KeyCapDlgProc(HWND hwnd, UINT msg, WPARAM wParam,
+                               LPARAM lParam) {
     switch (msg) {
     case WM_CREATE: {
         auto *cs = reinterpret_cast<CREATESTRUCTW *>(lParam);
@@ -866,20 +884,19 @@ LRESULT CALLBACK KeyCapDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam
         g_capUi = ctx;
         const HINSTANCE inst = cs->hInstance;
         label(hwnd, 0, tr(TextId::KeyCaptureHint, g_uiLang), 12, 12, 440, 18);
-        ctx->stPreview =
-            label(hwnd, 0, tr(TextId::KeyCaptureCurrent, g_uiLang), 12, 34, 440, 20);
+        ctx->stPreview = label(hwnd, 0, tr(TextId::KeyCaptureCurrent, g_uiLang),
+                               12, 34, 440, 20);
         label(hwnd, 0, tr(TextId::KeyCaptureQueued, g_uiLang), 12, 58, 120, 18);
-        ctx->stAccum =
-            label(hwnd, 0, tr(TextId::KeyCaptureEmpty, g_uiLang), 12, 78, 440, 20);
-        mkBtn(hwnd, ID_CAP_APPEND, tr(TextId::KeyCaptureAppend, g_uiLang), 12, 108,
-              120, 26);
+        ctx->stAccum = label(hwnd, 0, tr(TextId::KeyCaptureEmpty, g_uiLang), 12,
+                             78, 440, 20);
+        mkBtn(hwnd, ID_CAP_APPEND, tr(TextId::KeyCaptureAppend, g_uiLang), 12,
+              108, 120, 26);
         mkBtn(hwnd, ID_CAP_DONE, tr(TextId::KeyCaptureDone, g_uiLang), 140, 108,
               120, 26);
-        mkBtn(hwnd, ID_CAP_CANCEL, tr(TextId::KeyCaptureCancel, g_uiLang), 268, 108,
-              100, 26);
-        ctx->hook =
-            SetWindowsHookExW(WH_KEYBOARD_LL, KeyCapHookProc,
-                              GetModuleHandleW(nullptr), 0);
+        mkBtn(hwnd, ID_CAP_CANCEL, tr(TextId::KeyCaptureCancel, g_uiLang), 268,
+              108, 100, 26);
+        ctx->hook = SetWindowsHookExW(WH_KEYBOARD_LL, KeyCapHookProc,
+                                      GetModuleHandleW(nullptr), 0);
         if (!ctx->hook) {
             MessageBoxW(hwnd, tr(TextId::KeyCaptureHookFailed, g_uiLang),
                         tr(TextId::MessageBoxCaption, g_uiLang),
@@ -938,10 +955,10 @@ void runKeyCaptureModal(HWND owner, HWND targetEdit, HINSTANCE inst) {
         wc.lpszClassName = L"Fcitx5KeyCapCls";
         wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_3DFACE + 1);
         wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
+        if (!RegisterClassW(&wc) &&
+            GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
             MessageBoxW(owner, tr(TextId::KeyCaptureRegisterFailed, g_uiLang),
-                        tr(TextId::MessageBoxCaption, g_uiLang),
-                        MB_ICONERROR);
+                        tr(TextId::MessageBoxCaption, g_uiLang), MB_ICONERROR);
             return;
         }
         registered = true;
@@ -955,10 +972,11 @@ void runKeyCaptureModal(HWND owner, HWND targetEdit, HINSTANCE inst) {
     const int hh = 175;
     const int x = rr.left + (rr.right - rr.left - ww) / 2;
     const int y = rr.top + (rr.bottom - rr.top - hh) / 2;
-    HWND dlg = CreateWindowExW(
-        WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE, L"Fcitx5KeyCapCls",
-        tr(TextId::KeyCaptureTitle, g_uiLang), WS_POPUP | WS_CAPTION | WS_SYSMENU,
-        x, y, ww, hh, owner, nullptr, inst, ctx);
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME | WS_EX_WINDOWEDGE,
+                               L"Fcitx5KeyCapCls",
+                               tr(TextId::KeyCaptureTitle, g_uiLang),
+                               WS_POPUP | WS_CAPTION | WS_SYSMENU, x, y, ww, hh,
+                               owner, nullptr, inst, ctx);
     if (!dlg) {
         delete ctx;
         EnableWindow(owner, TRUE);
@@ -981,12 +999,14 @@ void runKeyCaptureModal(HWND owner, HWND targetEdit, HINSTANCE inst) {
 
 void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     int y = 12;
-    st.labelHeader = label(hwnd, IDC_LABEL_HEADER, tr(TextId::Header, st.lang), 12,
-                           y, 360, 18);
-    label(hwnd, IDC_LABEL_LANG, tr(TextId::Language, st.lang), 384, y + 2, 52, 18);
+    st.labelHeader = label(hwnd, IDC_LABEL_HEADER, tr(TextId::Header, st.lang),
+                           12, y, 360, 18);
+    label(hwnd, IDC_LABEL_LANG, tr(TextId::Language, st.lang), 384, y + 2, 52,
+          18);
     st.comboLang = CreateWindowExW(
-        0, L"COMBOBOX", L"", WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL,
-        438, y - 2, 74, 120, hwnd,
+        0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 438, y - 2, 74,
+        120, hwnd,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_LANG)), inst,
         nullptr);
     setGuiFont(st.comboLang);
@@ -994,35 +1014,35 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
                  reinterpret_cast<LPARAM>(tr(TextId::LangChinese, st.lang)));
     SendMessageW(st.comboLang, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(tr(TextId::LangEnglish, st.lang)));
-    SendMessageW(st.comboLang, CB_SETCURSEL,
-                 st.lang == UiLang::ZhCN ? 0 : 1, 0);
+    SendMessageW(st.comboLang, CB_SETCURSEL, st.lang == UiLang::ZhCN ? 0 : 1,
+                 0);
     y += 28;
-    label(hwnd, IDC_LABEL_PAGE, tr(TextId::CandidatePageSize, st.lang), 12, y + 2,
-          200, 20);
-    st.buddyPage =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"5",
-                        WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT, 220, y, 48,
-                        22, hwnd,
-                        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_PAGE_BUDDY)),
-                        inst, nullptr);
+    label(hwnd, IDC_LABEL_PAGE, tr(TextId::CandidatePageSize, st.lang), 12,
+          y + 2, 200, 20);
+    st.buddyPage = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"5",
+        WS_CHILD | WS_VISIBLE | ES_NUMBER | ES_RIGHT, 220, y, 48, 22, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_PAGE_BUDDY)),
+        inst, nullptr);
     setGuiFont(st.buddyPage);
     st.spinPage = CreateWindowExW(
         0, UPDOWN_CLASSW, L"",
-        WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT | UDS_ARROWKEYS |
-            UDS_NOTHOUSANDS,
+        WS_CHILD | WS_VISIBLE | UDS_SETBUDDYINT | UDS_ALIGNRIGHT |
+            UDS_ARROWKEYS | UDS_NOTHOUSANDS,
         268, y, 60, 22, hwnd,
         reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_SPIN_PAGE)), inst,
         nullptr);
-    SendMessageW(st.spinPage, UDM_SETBUDDY, reinterpret_cast<WPARAM>(st.buddyPage),
-                 0);
+    SendMessageW(st.spinPage, UDM_SETBUDDY,
+                 reinterpret_cast<WPARAM>(st.buddyPage), 0);
     SendMessageW(st.spinPage, UDM_SETRANGE32, 1, 10);
     y += 32;
 
-#define CB(var, id, txt)                                                                           \
-    st.var = CreateWindowExW(0, L"BUTTON", txt, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 12, y,    \
-                             480, 22, hwnd,                                                        \
-                             reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), inst, nullptr);    \
-    setGuiFont(st.var);                                                                            \
+#define CB(var, id, txt)                                                       \
+    st.var = CreateWindowExW(                                                  \
+        0, L"BUTTON", txt, WS_CHILD | WS_VISIBLE | BS_AUTOCHECKBOX, 12, y,     \
+        480, 22, hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),      \
+        inst, nullptr);                                                        \
+    setGuiFont(st.var);                                                        \
     y += 26
 
     CB(cbActive, IDC_CB_ACTIVE, tr(TextId::ActiveByDefault, st.lang));
@@ -1031,14 +1051,14 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     CB(cbImInfo, IDC_CB_IM_INFO,
        tr(TextId::ShowInputMethodInformation, st.lang));
 
-    label(hwnd, IDC_LABEL_RESET_FOCUS,
-          tr(TextId::ResetStateOnFocusIn, st.lang), 12, y + 2, 270, 20);
+    label(hwnd, IDC_LABEL_RESET_FOCUS, tr(TextId::ResetStateOnFocusIn, st.lang),
+          12, y + 2, 270, 20);
     st.comboResetFocus = CreateWindowExW(
         0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 288, y, 200, 160,
         hwnd,
-        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_RESET_FOCUS)), inst,
-        nullptr);
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_RESET_FOCUS)),
+        inst, nullptr);
     setGuiFont(st.comboResetFocus);
     SendMessageW(st.comboResetFocus, CB_ADDSTRING, 0,
                  reinterpret_cast<LPARAM>(tr(TextId::ResetAll, st.lang)));
@@ -1048,7 +1068,8 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
                  reinterpret_cast<LPARAM>(tr(TextId::ResetNo, st.lang)));
     y += 30;
 
-    CB(cbPwdIm, IDC_CB_PWD_IM, tr(TextId::AllowInputMethodForPassword, st.lang));
+    CB(cbPwdIm, IDC_CB_PWD_IM,
+       tr(TextId::AllowInputMethodForPassword, st.lang));
     CB(cbPwdPreedit, IDC_CB_PWD_PREEDIT,
        tr(TextId::ShowPreeditForPassword, st.lang));
 
@@ -1056,37 +1077,38 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
        tr(TextId::EnumerateWithTriggerKeys, st.lang));
     CB(cbEnumSkip, IDC_CB_ENUM_SKIP, tr(TextId::EnumerateSkipFirst, st.lang));
 
-    label(hwnd, IDC_LABEL_TRIG, tr(TextId::TriggerKeys, st.lang), 12, y, 500, 18);
+    label(hwnd, IDC_LABEL_TRIG, tr(TextId::TriggerKeys, st.lang), 12, y, 500,
+          18);
     y += 20;
-    st.editTrig =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_TRIG)),
-                        inst, nullptr);
+    st.editTrig = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_TRIG)), inst,
+        nullptr);
     setGuiFont(st.editTrig);
-    mkBtn(hwnd, IDC_BTN_REC_TRIG, tr(TextId::Record, st.lang), 418, y - 1, 94, 26);
+    mkBtn(hwnd, IDC_BTN_REC_TRIG, tr(TextId::Record, st.lang), 418, y - 1, 94,
+          26);
     y += 30;
     label(hwnd, IDC_LABEL_ALT, tr(TextId::AltTriggerKeys, st.lang), 12, y, 500,
           18);
     y += 20;
-    st.editAlt =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ALT)),
-                        inst, nullptr);
+    st.editAlt = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ALT)), inst,
+        nullptr);
     setGuiFont(st.editAlt);
-    mkBtn(hwnd, IDC_BTN_REC_ALT, tr(TextId::Record, st.lang), 418, y - 1, 94, 26);
+    mkBtn(hwnd, IDC_BTN_REC_ALT, tr(TextId::Record, st.lang), 418, y - 1, 94,
+          26);
     y += 30;
-    label(
-        hwnd, IDC_LABEL_ENUMF, tr(TextId::EnumerateForwardKeys, st.lang), 12, y,
-        500, 18);
+    label(hwnd, IDC_LABEL_ENUMF, tr(TextId::EnumerateForwardKeys, st.lang), 12,
+          y, 500, 18);
     y += 20;
-    st.editEnumF =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd,
-                        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMF)),
-                        inst, nullptr);
+    st.editEnumF = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMF)), inst,
+        nullptr);
     setGuiFont(st.editEnumF);
     mkBtn(hwnd, IDC_BTN_REC_ENUMF, tr(TextId::Record, st.lang), 418, y - 1, 94,
           26);
@@ -1094,38 +1116,35 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     label(hwnd, IDC_LABEL_ENUMG, tr(TextId::EnumerateGroupForward, st.lang), 12,
           y, 500, 18);
     y += 20;
-    st.editEnumG =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd,
-                        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMG)),
-                        inst, nullptr);
+    st.editEnumG = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMG)), inst,
+        nullptr);
     setGuiFont(st.editEnumG);
     mkBtn(hwnd, IDC_BTN_REC_ENUMG, tr(TextId::Record, st.lang), 418, y - 1, 94,
           26);
     y += 30;
-    label(hwnd, IDC_LABEL_ENUMB, tr(TextId::EnumerateBackwardKeys, st.lang), 12, y,
-          500, 18);
+    label(hwnd, IDC_LABEL_ENUMB, tr(TextId::EnumerateBackwardKeys, st.lang), 12,
+          y, 500, 18);
     y += 20;
-    st.editEnumB =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd,
-                        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMB)),
-                        inst, nullptr);
+    st.editEnumB = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMB)), inst,
+        nullptr);
     setGuiFont(st.editEnumB);
     mkBtn(hwnd, IDC_BTN_REC_ENUMB, tr(TextId::Record, st.lang), 418, y - 1, 94,
           26);
     y += 30;
-    label(hwnd, IDC_LABEL_ENUMGB, tr(TextId::EnumerateGroupBackward, st.lang), 12,
-          y, 500, 18);
+    label(hwnd, IDC_LABEL_ENUMGB, tr(TextId::EnumerateGroupBackward, st.lang),
+          12, y, 500, 18);
     y += 20;
-    st.editEnumGroupB =
-        CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
-                        WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 12, y, 400, 24,
-                        hwnd,
-                        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMGB)),
-                        inst, nullptr);
+    st.editEnumGroupB = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"", WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL,
+        12, y, 400, 24, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_ENUMGB)), inst,
+        nullptr);
     setGuiFont(st.editEnumGroupB);
     mkBtn(hwnd, IDC_BTN_REC_ENUMGB, tr(TextId::Record, st.lang), 418, y - 1, 94,
           26);
@@ -1145,15 +1164,16 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     y += 188;
 
     mkBtn(hwnd, IDC_BTN_SAVE, tr(TextId::SaveAll, st.lang), 12, y, 120, 28);
-    mkBtn(hwnd, IDC_BTN_RELOAD, tr(TextId::ReloadFromDisk, st.lang), 140, y, 140,
-          28);
-    mkBtn(hwnd, IDC_BTN_FOLDER, tr(TextId::OpenConfigFolder, st.lang), 290, y, 160,
-          28);
+    mkBtn(hwnd, IDC_BTN_RELOAD, tr(TextId::ReloadFromDisk, st.lang), 140, y,
+          140, 28);
+    mkBtn(hwnd, IDC_BTN_FOLDER, tr(TextId::OpenConfigFolder, st.lang), 290, y,
+          160, 28);
 #undef CB
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
-    auto *st = reinterpret_cast<UiState *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto *st =
+        reinterpret_cast<UiState *>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     switch (msg) {
     case WM_CREATE: {
         pinStdPathsToThisExe();
@@ -1163,7 +1183,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         InitCommonControlsEx(&icc);
 
         auto *state = new UiState{};
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(state));
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(state));
         try {
             loadGcFromDisk(*state);
         } catch (...) {
@@ -1183,7 +1204,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         }
         const int id = LOWORD(wParam);
-        if (id == IDC_COMBO_LANG && HIWORD(wParam) == CBN_SELCHANGE && st->comboLang) {
+        if (id == IDC_COMBO_LANG && HIWORD(wParam) == CBN_SELCHANGE &&
+            st->comboLang) {
             const LRESULT sel = SendMessageW(st->comboLang, CB_GETCURSEL, 0, 0);
             st->lang = sel == 1 ? UiLang::English : UiLang::ZhCN;
             applyLanguage(hwnd, *st);
@@ -1202,16 +1224,16 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             return 0;
         }
         if (id == IDC_BTN_FOLDER) {
-            const auto dir =
-                StandardPaths::global().userDirectory(StandardPathsType::PkgConfig);
+            const auto dir = StandardPaths::global().userDirectory(
+                StandardPathsType::PkgConfig);
             if (!dir.empty()) {
                 ShellExecuteW(hwnd, L"explore", dir.wstring().c_str(), nullptr,
                               nullptr, SW_SHOWNORMAL);
             }
             return 0;
         }
-        const HINSTANCE inst =
-            reinterpret_cast<HINSTANCE>(GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
+        const HINSTANCE inst = reinterpret_cast<HINSTANCE>(
+            GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
         if (id == IDC_BTN_REC_TRIG) {
             keycap::runKeyCaptureModal(hwnd, st->editTrig, inst);
             return 0;
@@ -1263,8 +1285,8 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
 
     HWND hwnd = CreateWindowExW(
         WS_EX_APPWINDOW, cls, tr(TextId::WindowTitle, g_uiLang),
-        WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX,
-        CW_USEDEFAULT, CW_USEDEFAULT, 560, 900, nullptr, nullptr, hInst, nullptr);
+        WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, CW_USEDEFAULT,
+        CW_USEDEFAULT, 560, 900, nullptr, nullptr, hInst, nullptr);
     ShowWindow(hwnd, SW_SHOW);
 
     MSG msg{};

@@ -1,1 +1,4 @@
 IndentWidth:     4
+# Windows headers must stay before shellapi/commctrl/msctf; default SortIncludes
+# reorders them alphabetically and breaks MinGW/Clang builds.
+SortIncludes:    Never

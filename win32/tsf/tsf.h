@@ -3,14 +3,14 @@
 #include "CandidateWindow.h"
 #include "ImeEngine.h"
 
-#include <msctf.h>
 #include "MsctfMingwCompat.h"
+#include <msctf.h>
 #include <wrl/client.h>
 
 #include <Windows.h>
 #include <filesystem>
-#include <sstream>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -84,11 +84,11 @@ inline bool currentProcessUsesMinimalTsfMode() {
 }
 
 /// Start fcitx5-tray-helper at most once per explorer.exe load. Avoids repeated
-/// FindWindow/CreateProcess during MSCTF focus/ActivateEx bursts (faults in MSCTF.dll).
+/// FindWindow/CreateProcess during MSCTF focus/ActivateEx bursts (faults in
+/// MSCTF.dll).
 bool explorerTrayHelperPrimedOnce();
 
-template <typename T>
-using ComPtr = Microsoft::WRL::ComPtr<T>;
+template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
 class FcitxLangBarButton;
 class Tsf : public ITfTextInputProcessorEx,
             public ITfActiveLanguageProfileNotifySink,
@@ -99,7 +99,8 @@ class Tsf : public ITfTextInputProcessorEx,
             public ITfCompositionSink,
             public ITfEditSession {
   public:
-    /// When \p engine is null, uses `makeStubImeEngine()` (tests / DLL default).
+    /// When \p engine is null, uses `makeStubImeEngine()` (tests / DLL
+    /// default).
     explicit Tsf(std::unique_ptr<ImeEngine> engine = nullptr);
     ~Tsf();
 
@@ -153,13 +154,14 @@ class Tsf : public ITfTextInputProcessorEx,
 
     // ITfCompositionSink
     STDMETHODIMP OnCompositionTerminated(TfEditCookie ecWrite,
-                                       ITfComposition *pComposition) override;
+                                         ITfComposition *pComposition) override;
 
     // ITfEditSession
     STDMETHODIMP DoEditSession(TfEditCookie ec) override;
 
     void langBarScheduleToggleChinese();
-    /// Tray / LangBar menu: switch to Chinese (true) or English pass-through (false).
+    /// Tray / LangBar menu: switch to Chinese (true) or English pass-through
+    /// (false).
     void langBarScheduleSetChineseMode(bool wantChinese);
     void langBarScheduleActivateInputMethod(const std::string &uniqueName);
     void langBarNotifyIconUpdate();
@@ -167,9 +169,12 @@ class Tsf : public ITfTextInputProcessorEx,
     bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
     bool sharedTrayStatusActionRequestPending() const;
-    bool scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext = nullptr);
-    bool scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext = nullptr);
-    bool scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext = nullptr);
+    bool scheduleSharedTrayChineseModeRequest(
+        ITfContext *preferredContext = nullptr);
+    bool scheduleSharedTrayInputMethodRequest(
+        ITfContext *preferredContext = nullptr);
+    bool scheduleSharedTrayStatusActionRequest(
+        ITfContext *preferredContext = nullptr);
     HWND shellTrayHostHwnd() const { return shellTrayHostHwnd_; }
 
   private:
@@ -200,7 +205,8 @@ class Tsf : public ITfTextInputProcessorEx,
     void cancelShellTrayRetry();
     void showShellTrayContextMenu();
     void showShellTrayContextMenuAt(POINT pt, HWND owner);
-    void persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
+    void
+    persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
     void clearSharedTrayInputMethodRequest() const;
     void persistSharedTrayStatusActionState() const;
     void clearSharedTrayStatusActionRequest() const;
@@ -209,7 +215,8 @@ class Tsf : public ITfTextInputProcessorEx,
 
     bool initThreadMgrEventSink();
     void uninitThreadMgrEventSink();
-    /// Coalesce shared-tray file sync from rapid OnSetFocus bursts (TSF focus churn).
+    /// Coalesce shared-tray file sync from rapid OnSetFocus bursts (TSF focus
+    /// churn).
     void flushSharedTrayScheduleFromFocusIfPending();
     ComPtr<ITfThreadMgr> threadMgr_;
     ComPtr<ITfInputProcessorProfileMgr> profileMgr_;
@@ -222,9 +229,11 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initTextEditSink(ITfDocumentMgr *documentMgr);
     DWORD textEditSinkCookie_ = TF_INVALID_COOKIE;
     ComPtr<ITfContext> textEditSinkContext_;
-    /// Kept when TSF sink clears on tray focus loss; used to run tray toggle edit session.
+    /// Kept when TSF sink clears on tray focus loss; used to run tray toggle
+    /// edit session.
     ComPtr<ITfContext> trayEditContextFallback_;
-    /// Last successful scheduleSharedTray* from OnSetFocus; 0 = not yet this session.
+    /// Last successful scheduleSharedTray* from OnSetFocus; 0 = not yet this
+    /// session.
     ULONGLONG sharedTrayFocusScheduleTick_{0};
     bool sharedTrayFocusSchedulePending_{false};
 
@@ -241,7 +250,8 @@ class Tsf : public ITfTextInputProcessorEx,
 
     // Composition + candidates: logic in ImeEngine (default Stub).
     CandidateWindow candidateWin_;
-    // Start in Chinese mode: letters go to fcitx; Ctrl+Space toggles to pass-through English.
+    // Start in Chinese mode: letters go to fcitx; Ctrl+Space toggles to
+    // pass-through English.
     bool chineseActive_ = true;
     FcitxLangBarButton *langBarItem_ = nullptr;
     HWND shellTrayHostHwnd_ = nullptr;
@@ -293,7 +303,8 @@ class Tsf : public ITfTextInputProcessorEx,
     void drainCommitsAfterEngine(TfEditCookie ec);
     void afterFcitxEngineKey(TfEditCookie ec);
     void resetCompositionState();
-    // TSF geometry: composition/insertion range → screen coords; false → use caret fallback.
+    // TSF geometry: composition/insertion range → screen coords; false → use
+    // caret fallback.
     bool queryCandidateAnchor(TfEditCookie ec, POINT *screenPt);
 };
 } // namespace fcitx

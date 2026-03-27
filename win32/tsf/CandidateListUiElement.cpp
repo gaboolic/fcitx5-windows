@@ -7,7 +7,8 @@ namespace fcitx {
 
 CandidateListUiElement::CandidateListUiElement(Tsf *owner) : owner_(owner) {}
 
-STDMETHODIMP CandidateListUiElement::QueryInterface(REFIID riid, void **ppvObject) {
+STDMETHODIMP CandidateListUiElement::QueryInterface(REFIID riid,
+                                                    void **ppvObject) {
     if (ppvObject == nullptr) {
         return E_INVALIDARG;
     }
@@ -24,9 +25,7 @@ STDMETHODIMP CandidateListUiElement::QueryInterface(REFIID riid, void **ppvObjec
     return E_NOINTERFACE;
 }
 
-STDMETHODIMP_(ULONG) CandidateListUiElement::AddRef() {
-    return ++refCount_;
-}
+STDMETHODIMP_(ULONG) CandidateListUiElement::AddRef() { return ++refCount_; }
 
 STDMETHODIMP_(ULONG) CandidateListUiElement::Release() {
     const LONG n = --refCount_;
@@ -121,8 +120,7 @@ STDMETHODIMP CandidateListUiElement::GetPageIndex(UINT *pIndex, UINT uSize,
     if (!pIndex || !puPageCnt || !owner_ || !owner_->engine_) {
         return E_INVALIDARG;
     }
-    const UINT n =
-        static_cast<UINT>(owner_->engine_->candidates().size());
+    const UINT n = static_cast<UINT>(owner_->engine_->candidates().size());
     if (uSize < n) {
         return E_INVALIDARG;
     }

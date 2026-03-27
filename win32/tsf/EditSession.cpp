@@ -1,9 +1,9 @@
 #include "CandidateListUiElement.h"
 #include "tsf.h"
 
-#include <fcitx-utils/log.h>
 #include <algorithm>
 #include <cstdint>
+#include <fcitx-utils/log.h>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -21,7 +21,8 @@ bool tsfChordHasCtrlOrAlt() {
            (GetKeyState(VK_MENU) & 0x8000) != 0;
 }
 
-/// AltGr is LeftCtrl+RightAlt — not a Ctrl+Alt editor shortcut; Latin must reach IME.
+/// AltGr is LeftCtrl+RightAlt — not a Ctrl+Alt editor shortcut; Latin must
+/// reach IME.
 bool tsfIsAltGrPhysicalDown() {
     return (GetAsyncKeyState(VK_LCONTROL) & 0x8000) != 0 &&
            (GetAsyncKeyState(VK_RMENU) & 0x8000) != 0;
@@ -36,13 +37,13 @@ bool tsfLatinKeyShouldPassToApp() {
     }
     const bool ctrlDown = (GetKeyState(VK_CONTROL) & 0x8000) &&
                           (GetAsyncKeyState(VK_CONTROL) & 0x8000);
-    const bool altDown = (GetKeyState(VK_MENU) & 0x8000) &&
-                         (GetAsyncKeyState(VK_MENU) & 0x8000);
+    const bool altDown =
+        (GetKeyState(VK_MENU) & 0x8000) && (GetAsyncKeyState(VK_MENU) & 0x8000);
     return ctrlDown || altDown;
 }
 
-/// VK_A..VK_Z → Latin character; matches Windows (Shift XOR Caps Lock), same idea
-/// as Weasel's KeyEvent with SHIFT_MASK + letter.
+/// VK_A..VK_Z → Latin character; matches Windows (Shift XOR Caps Lock), same
+/// idea as Weasel's KeyEvent with SHIFT_MASK + letter.
 wchar_t tsfLatinLetterFromVk(unsigned vk) {
     if (vk < static_cast<unsigned>('A') || vk > static_cast<unsigned>('Z')) {
         return L'\0';
@@ -55,17 +56,18 @@ wchar_t tsfLatinLetterFromVk(unsigned vk) {
 }
 
 /// Caret in client coords of hwndCaret → screen. Many hosts return empty
-/// ITfContextView::GetTextExt; GUI thread caret matches the real insertion point.
-/// US-keyboard punctuation keys: must reach fcitx (punctuation addon) instead of the host.
+/// ITfContextView::GetTextExt; GUI thread caret matches the real insertion
+/// point. US-keyboard punctuation keys: must reach fcitx (punctuation addon)
+/// instead of the host.
 bool tsfIsChineseModePunctuationVk(unsigned vk) {
     switch (vk) {
-    case VK_OEM_1:   // ; :
-    case VK_OEM_2:   // / ?
-    case VK_OEM_3:   // ` ~
-    case VK_OEM_4:   // [ {
-    case VK_OEM_5:   // \ |
-    case VK_OEM_6:   // ] }
-    case VK_OEM_7:   // ' "
+    case VK_OEM_1: // ; :
+    case VK_OEM_2: // / ?
+    case VK_OEM_3: // ` ~
+    case VK_OEM_4: // [ {
+    case VK_OEM_5: // \ |
+    case VK_OEM_6: // ] }
+    case VK_OEM_7: // ' "
     case VK_OEM_PLUS:
     case VK_OEM_COMMA:
     case VK_OEM_MINUS:
@@ -113,8 +115,10 @@ wchar_t tsfShiftNumberFallbackSymbol(unsigned vk) {
 }
 
 bool tsfCanAttemptRawImeKey(unsigned vk) {
-    if ((vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9')) ||
-        (vk >= static_cast<unsigned>('A') && vk <= static_cast<unsigned>('Z'))) {
+    if ((vk >= static_cast<unsigned>('0') &&
+         vk <= static_cast<unsigned>('9')) ||
+        (vk >= static_cast<unsigned>('A') &&
+         vk <= static_cast<unsigned>('Z'))) {
         return true;
     }
     switch (vk) {
@@ -162,9 +166,9 @@ void tsfTraceCandidateSnapshot(const char *where) {
     POINT cur = {};
     GetCursorPos(&cur);
     fcitx::tsfTrace(
-        std::string("candidatePos snapshot ") + where +
-        " imeTid=" + std::to_string(static_cast<unsigned long>(imeTid)) +
-        " focusHwnd=" + std::to_string(reinterpret_cast<std::uintptr_t>(focus)) +
+        std::string("candidatePos snapshot ") + where + " imeTid=" +
+        std::to_string(static_cast<unsigned long>(imeTid)) + " focusHwnd=" +
+        std::to_string(reinterpret_cast<std::uintptr_t>(focus)) +
         " focusTid=" + std::to_string(static_cast<unsigned long>(focusTid)) +
         " fgHwnd=" + std::to_string(reinterpret_cast<std::uintptr_t>(fg)) +
         " fgTid=" + std::to_string(static_cast<unsigned long>(fgTid)) +
@@ -175,8 +179,10 @@ void tsfTraceCandidateSnapshot(const char *where) {
 /// **Weasel** `CGetTextExtentEditSession` uses a **collapsed** range (caret /
 /// selection), not the full composition span — **GetTextExt** on the full range
 /// often maps to the wrong box in Chromium / QQ.
-bool tsfCloneRangeCollapsedAtPreeditCaret(TfEditCookie ec, ITfRange *compositionRange,
-                                           int caretUtf16, ComPtr<ITfRange> *outRange) {
+bool tsfCloneRangeCollapsedAtPreeditCaret(TfEditCookie ec,
+                                          ITfRange *compositionRange,
+                                          int caretUtf16,
+                                          ComPtr<ITfRange> *outRange) {
     if (!compositionRange || !outRange) {
         return false;
     }
@@ -202,10 +208,12 @@ bool tsfCloneRangeCollapsedAtPreeditCaret(TfEditCookie ec, ITfRange *composition
 
 /// Map **ITfContextView::GetTextExt** rect to a screen anchor (bottom-left).
 /// Follows Weasel **Composition.cpp** `CGetTextExtentEditSession`: reject CUAS
-/// garbage **(0,0)**; optional **enhanced** rect when top-left is outside fg hwnd.
-/// Hosts often return **rw=0, rh>0** (caret strip / vertical line) — Weasel accepts
-/// that; only **both** dimensions non-positive is truly degenerate.
-bool tsfTextExtRectToCandidateAnchor(RECT rc, POINT *out, const char *traceTag) {
+/// garbage **(0,0)**; optional **enhanced** rect when top-left is outside fg
+/// hwnd. Hosts often return **rw=0, rh>0** (caret strip / vertical line) —
+/// Weasel accepts that; only **both** dimensions non-positive is truly
+/// degenerate.
+bool tsfTextExtRectToCandidateAnchor(RECT rc, POINT *out,
+                                     const char *traceTag) {
     if (!out) {
         return false;
     }
@@ -218,15 +226,13 @@ bool tsfTextExtRectToCandidateAnchor(RECT rc, POINT *out, const char *traceTag) 
         return false;
     }
     if (rw <= 0 && rh > 0) {
-        fcitx::tsfTrace(
-            std::string("candidatePos ") + traceTag +
-            " textExt caretLine rw=0 rh=" + std::to_string(rh) +
-            " (Weasel accepts; anchor left,bottom)");
+        fcitx::tsfTrace(std::string("candidatePos ") + traceTag +
+                        " textExt caretLine rw=0 rh=" + std::to_string(rh) +
+                        " (Weasel accepts; anchor left,bottom)");
     } else if (rh <= 0 && rw > 0) {
-        fcitx::tsfTrace(
-            std::string("candidatePos ") + traceTag +
-            " textExt thinLine rh=0 rw=" + std::to_string(rw) +
-            " anchor left,bottom");
+        fcitx::tsfTrace(std::string("candidatePos ") + traceTag +
+                        " textExt thinLine rh=0 rw=" + std::to_string(rw) +
+                        " anchor left,bottom");
     }
     if (rc.left == 0 && rc.top == 0) {
         fcitx::tsfTrace(std::string("candidatePos ") + traceTag +
@@ -238,21 +244,21 @@ bool tsfTextExtRectToCandidateAnchor(RECT rc, POINT *out, const char *traceTag) 
     if (fg) {
         RECT wr = {};
         if (GetWindowRect(fg, &wr)) {
-            if (rc.left < wr.left || rc.left > wr.right ||
-                rc.top < wr.top || rc.top > wr.bottom) {
+            if (rc.left < wr.left || rc.left > wr.right || rc.top < wr.top ||
+                rc.top > wr.bottom) {
                 POINT cp = {};
                 const BOOL hasCaret = GetCaretPos(&cp);
                 const int offsetx = static_cast<int>(wr.left) - rc.left +
                                     (hasCaret ? static_cast<int>(cp.x) : 0);
                 const int offsety = static_cast<int>(wr.top) - rc.top +
                                     (hasCaret ? static_cast<int>(cp.y) : 0);
-                fcitx::tsfTrace(
-                    std::string("candidatePos ") + traceTag +
-                    " textExt outsideFg applyOffset hasCaret=" +
-                    std::string(hasCaret ? "1" : "0") + " cp=" +
-                    std::to_string(static_cast<long>(cp.x)) + "," +
-                    std::to_string(static_cast<long>(cp.y)) + " off=" +
-                    std::to_string(offsetx) + "," + std::to_string(offsety));
+                fcitx::tsfTrace(std::string("candidatePos ") + traceTag +
+                                " textExt outsideFg applyOffset hasCaret=" +
+                                std::string(hasCaret ? "1" : "0") + " cp=" +
+                                std::to_string(static_cast<long>(cp.x)) + "," +
+                                std::to_string(static_cast<long>(cp.y)) +
+                                " off=" + std::to_string(offsetx) + "," +
+                                std::to_string(offsety));
                 rc.left += offsetx;
                 rc.right += offsetx;
                 rc.top += offsety;
@@ -262,9 +268,10 @@ bool tsfTextExtRectToCandidateAnchor(RECT rc, POINT *out, const char *traceTag) 
     }
     out->x = rc.left;
     out->y = rc.bottom;
-    fcitx::tsfTrace(std::string("candidatePos ") + traceTag + " textExt ok anchor=" +
-                    std::to_string(static_cast<long>(out->x)) + "," +
-                    std::to_string(static_cast<long>(out->y)));
+    fcitx::tsfTrace(
+        std::string("candidatePos ") + traceTag +
+        " textExt ok anchor=" + std::to_string(static_cast<long>(out->x)) +
+        "," + std::to_string(static_cast<long>(out->y)));
     return true;
 }
 
@@ -280,20 +287,19 @@ bool tsfTryGetTextExtForAnchor(TfEditCookie ec, ITfContextView *view,
                         " GetWnd failed rangeMode=" + rangeMode);
         return false;
     }
-    RECT rc {};
+    RECT rc{};
     BOOL clipped = FALSE;
     const HRESULT hrExt = view->GetTextExt(ec, extentRange, &rc, &clipped);
     const int rw = rc.right - rc.left;
     const int rh = rc.bottom - rc.top;
-    fcitx::tsfTrace(
-        std::string("candidatePos ") + traceTag + " GetTextExt hr=" +
-        tsfHresultString(hrExt) + " clipped=" + (clipped ? "1" : "0") +
-        " rangeMode=" + rangeMode + " rcLTRB=" +
-        std::to_string(static_cast<long>(rc.left)) + "," +
-        std::to_string(static_cast<long>(rc.top)) + "," +
-        std::to_string(static_cast<long>(rc.right)) + "," +
-        std::to_string(static_cast<long>(rc.bottom)) + " rw=" +
-        std::to_string(rw) + " rh=" + std::to_string(rh));
+    fcitx::tsfTrace(std::string("candidatePos ") + traceTag +
+                    " GetTextExt hr=" + tsfHresultString(hrExt) + " clipped=" +
+                    (clipped ? "1" : "0") + " rangeMode=" + rangeMode +
+                    " rcLTRB=" + std::to_string(static_cast<long>(rc.left)) +
+                    "," + std::to_string(static_cast<long>(rc.top)) + "," +
+                    std::to_string(static_cast<long>(rc.right)) + "," +
+                    std::to_string(static_cast<long>(rc.bottom)) +
+                    " rw=" + std::to_string(rw) + " rh=" + std::to_string(rh));
     if (!SUCCEEDED(hrExt)) {
         return false;
     }
@@ -315,9 +321,8 @@ bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
     const int cw = gti.rcCaret.right - gti.rcCaret.left;
     const int ch = gti.rcCaret.bottom - gti.rcCaret.top;
     if (cw <= 0 && ch <= 0) {
-        fcitx::tsfTrace(
-            "candidatePos guiThread zeroCaret tid=" +
-            std::to_string(static_cast<unsigned long>(threadId)));
+        fcitx::tsfTrace("candidatePos guiThread zeroCaret tid=" +
+                        std::to_string(static_cast<unsigned long>(threadId)));
         return false;
     }
     out->x = gti.rcCaret.left;
@@ -326,17 +331,16 @@ bool tsfScreenPtFromCaretGuiThread(DWORD threadId, POINT *out) {
         fcitx::tsfTrace("candidatePos guiThread ClientToScreen failed");
         return false;
     }
-    fcitx::tsfTrace(
-        "candidatePos guiThread ok tid=" +
-        std::to_string(static_cast<unsigned long>(threadId)) + " pt=" +
-        std::to_string(static_cast<long>(out->x)) + "," +
-        std::to_string(static_cast<long>(out->y)));
+    fcitx::tsfTrace("candidatePos guiThread ok tid=" +
+                    std::to_string(static_cast<unsigned long>(threadId)) +
+                    " pt=" + std::to_string(static_cast<long>(out->x)) + "," +
+                    std::to_string(static_cast<long>(out->y)));
     return true;
 }
 
-/// When **EnumViews** is **E_NOTIMPL** or empty, **ITfContextView::GetTextExt** is
-/// unavailable; **ImmGetCompositionWindow** still often tracks the composition
-/// caret (QQ / Chromium hosts that do not fill **GUITHREADINFO**).
+/// When **EnumViews** is **E_NOTIMPL** or empty, **ITfContextView::GetTextExt**
+/// is unavailable; **ImmGetCompositionWindow** still often tracks the
+/// composition caret (QQ / Chromium hosts that do not fill **GUITHREADINFO**).
 bool tsfScreenPtImmCompositionAnchor(POINT *out) {
     if (!out) {
         return false;
@@ -365,19 +369,17 @@ bool tsfScreenPtImmCompositionAnchor(POINT *out) {
     switch (cf.dwStyle) {
     case CFS_POINT:
         *out = cf.ptCurrentPos;
-        fcitx::tsfTrace(
-            std::string("candidatePos immCompWin CFS_POINT pt=") +
-            std::to_string(static_cast<long>(out->x)) + "," +
-            std::to_string(static_cast<long>(out->y)));
+        fcitx::tsfTrace(std::string("candidatePos immCompWin CFS_POINT pt=") +
+                        std::to_string(static_cast<long>(out->x)) + "," +
+                        std::to_string(static_cast<long>(out->y)));
         return true;
     case CFS_RECT: {
         const RECT &r = cf.rcArea;
         const int rw = r.right - r.left;
         const int rh = r.bottom - r.top;
         if (rw <= 0 || rh <= 0) {
-            fcitx::tsfTrace(
-                "candidatePos immCompWin CFS_RECT degenerate rw=" +
-                std::to_string(rw) + " rh=" + std::to_string(rh));
+            fcitx::tsfTrace("candidatePos immCompWin CFS_RECT degenerate rw=" +
+                            std::to_string(rw) + " rh=" + std::to_string(rh));
             return false;
         }
         POINT p = {};
@@ -387,10 +389,9 @@ bool tsfScreenPtImmCompositionAnchor(POINT *out) {
             return false;
         }
         *out = p;
-        fcitx::tsfTrace(
-            std::string("candidatePos immCompWin CFS_RECT pt=") +
-            std::to_string(static_cast<long>(out->x)) + "," +
-            std::to_string(static_cast<long>(out->y)));
+        fcitx::tsfTrace(std::string("candidatePos immCompWin CFS_RECT pt=") +
+                        std::to_string(static_cast<long>(out->x)) + "," +
+                        std::to_string(static_cast<long>(out->y)));
         return true;
     }
     case CFS_DEFAULT: {
@@ -399,10 +400,9 @@ bool tsfScreenPtImmCompositionAnchor(POINT *out) {
             return false;
         }
         *out = p;
-        fcitx::tsfTrace(
-            std::string("candidatePos immCompWin CFS_DEFAULT pt=") +
-            std::to_string(static_cast<long>(out->x)) + "," +
-            std::to_string(static_cast<long>(out->y)));
+        fcitx::tsfTrace(std::string("candidatePos immCompWin CFS_DEFAULT pt=") +
+                        std::to_string(static_cast<long>(out->x)) + "," +
+                        std::to_string(static_cast<long>(out->y)));
         return true;
     }
     default:
@@ -422,16 +422,17 @@ bool tsfScreenPtImmCompositionAnchor(POINT *out) {
     }
     fcitx::tsfTrace(
         "candidatePos immCompWin noAnchor style=" +
-        std::to_string(static_cast<unsigned long>(cf.dwStyle)) + " ptCur=" +
-        std::to_string(static_cast<long>(cf.ptCurrentPos.x)) + "," +
+        std::to_string(static_cast<unsigned long>(cf.dwStyle)) +
+        " ptCur=" + std::to_string(static_cast<long>(cf.ptCurrentPos.x)) + "," +
         std::to_string(static_cast<long>(cf.ptCurrentPos.y)));
     return false;
 }
 
-/// Chromium / Electron often fail **ITfContext::EnumViews**; **GetGUIThreadInfo** on
-/// another thread needs **AttachThreadInput** (IME thread != editor GUI thread).
-/// Prefer **GetFocus()** (real editor surface) over **GetForegroundWindow()** (shell
-/// / root), so the caret thread matches the typing target.
+/// Chromium / Electron often fail **ITfContext::EnumViews**;
+/// **GetGUIThreadInfo** on another thread needs **AttachThreadInput** (IME
+/// thread != editor GUI thread). Prefer **GetFocus()** (real editor surface)
+/// over **GetForegroundWindow()** (shell / root), so the caret thread matches
+/// the typing target.
 bool tsfScreenPtForegroundCaretAttach(POINT *out) {
     if (!out) {
         return false;
@@ -507,11 +508,10 @@ bool tsfScreenPtForegroundCaretAttach(POINT *out) {
         fcitx::tsfTrace("candidatePos fgAttach ClientToScreen failed");
         return false;
     }
-    fcitx::tsfTrace(
-        "candidatePos fgAttach ok tid=" +
-        std::to_string(static_cast<unsigned long>(tid)) + " pt=" +
-        std::to_string(static_cast<long>(out->x)) + "," +
-        std::to_string(static_cast<long>(out->y)));
+    fcitx::tsfTrace("candidatePos fgAttach ok tid=" +
+                    std::to_string(static_cast<unsigned long>(tid)) +
+                    " pt=" + std::to_string(static_cast<long>(out->x)) + "," +
+                    std::to_string(static_cast<long>(out->y)));
     return true;
 }
 
@@ -543,8 +543,8 @@ bool tsfScreenPtFocusClientBottomCenter(POINT *out) {
     *out = p;
     fcitx::tsfTrace(
         std::string("candidatePos approxClientBottomLeftish hwnd=") +
-        std::to_string(reinterpret_cast<std::uintptr_t>(w)) + " pt=" +
-        std::to_string(static_cast<long>(out->x)) + "," +
+        std::to_string(reinterpret_cast<std::uintptr_t>(w)) +
+        " pt=" + std::to_string(static_cast<long>(out->x)) + "," +
         std::to_string(static_cast<long>(out->y)));
     return true;
 }
@@ -564,10 +564,10 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         if (!tsfCloneRangeCollapsedAtPreeditCaret(ec, compositionRange_.Get(),
                                                   caretUtf16, &extentRange) ||
             !extentRange) {
-            fcitx::tsfTrace(
-                "candidatePos query caretClone failed; fallback compositionFull "
-                "caretUtf16=" +
-                std::to_string(caretUtf16));
+            fcitx::tsfTrace("candidatePos query caretClone failed; fallback "
+                            "compositionFull "
+                            "caretUtf16=" +
+                            std::to_string(caretUtf16));
             extentRange = compositionRange_;
             rangeMode = "compositionFull_fallback";
         } else {
@@ -586,7 +586,8 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
             fcitx::tsfTrace("candidatePos query no ITfInsertAtSelection");
             return false;
         }
-        if (FAILED(ias->InsertTextAtSelection(ec, TF_IAS_QUERYONLY, nullptr, 0,
+        if (FAILED(ias->InsertTextAtSelection(
+                ec, TF_IAS_QUERYONLY, nullptr, 0,
                 extentRange.ReleaseAndGetAddressOf())) ||
             !extentRange) {
             fcitx::tsfTrace("candidatePos query IAS QUERYONLY failed");
@@ -595,12 +596,13 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
     }
 
     tsfTraceCandidateSnapshot("queryBegin");
-    // Weasel **Composition.cpp** `_UpdateCompositionWindow`: `GetActiveView` then
-    // `GetTextExt` on the **active** view (not `EnumViews`). Chromium often returns
+    // Weasel **Composition.cpp** `_UpdateCompositionWindow`: `GetActiveView`
+    // then `GetTextExt` on the **active** view (not `EnumViews`). Chromium
+    // often returns
     // **E_NOTIMPL** for `EnumViews` but still implements `GetActiveView`.
     ComPtr<ITfContextView> activeView;
-    const HRESULT hrActive =
-        textEditSinkContext_->GetActiveView(activeView.ReleaseAndGetAddressOf());
+    const HRESULT hrActive = textEditSinkContext_->GetActiveView(
+        activeView.ReleaseAndGetAddressOf());
     if (FAILED(hrActive) || !activeView) {
         fcitx::tsfTrace(
             "candidatePos GetActiveView hr=" + tsfHresultString(hrActive) +
@@ -615,16 +617,17 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
                 "candidatePos GetActiveView ok hwnd=" +
                 std::to_string(reinterpret_cast<std::uintptr_t>(avHwnd)) +
                 " (Weasel path; try GetTextExt before EnumViews)");
-            if (tsfTryGetTextExtForAnchor(ec, activeView.Get(), extentRange.Get(),
-                                          "weaselActiveView", rangeMode, screenPt)) {
+            if (tsfTryGetTextExtForAnchor(ec, activeView.Get(),
+                                          extentRange.Get(), "weaselActiveView",
+                                          rangeMode, screenPt)) {
                 return true;
             }
         }
     }
 
     ComPtr<IEnumTfContextViews> enumViews;
-    const HRESULT hrEnum = textEditSinkContext_->EnumViews(
-        enumViews.ReleaseAndGetAddressOf());
+    const HRESULT hrEnum =
+        textEditSinkContext_->EnumViews(enumViews.ReleaseAndGetAddressOf());
     if (FAILED(hrEnum) || !enumViews) {
         fcitx::tsfTrace(
             "candidatePos EnumViews hr=" + tsfHresultString(hrEnum) +
@@ -661,17 +664,16 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
     }
     const HWND fg = GetForegroundWindow();
     std::stable_partition(
-        viewEntries.begin(), viewEntries.end(),
-        [fg](const ViewEntry &e) {
+        viewEntries.begin(), viewEntries.end(), [fg](const ViewEntry &e) {
             if (!fg || !e.hwnd) {
                 return false;
             }
             return e.hwnd == fg || IsChild(fg, e.hwnd) != FALSE;
         });
-    fcitx::tsfTrace("candidatePos enumViews count=" +
-                    std::to_string(viewEntries.size()) + " hrEnum=" +
-                    tsfHresultString(hrEnum) + " fgHwnd=" +
-                    std::to_string(reinterpret_cast<std::uintptr_t>(fg)));
+    fcitx::tsfTrace(
+        "candidatePos enumViews count=" + std::to_string(viewEntries.size()) +
+        " hrEnum=" + tsfHresultString(hrEnum) +
+        " fgHwnd=" + std::to_string(reinterpret_cast<std::uintptr_t>(fg)));
     if (viewEntries.empty()) {
         fcitx::tsfTrace("candidatePos enumViews empty (no views)");
         if (tsfScreenPtImmCompositionAnchor(screenPt)) {
@@ -687,11 +689,11 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
         if (caretThread == 0) {
             caretThread = GetWindowThreadProcessId(ent.hwnd, nullptr);
         }
-        const bool fgAssoc =
-            fg && ent.hwnd &&
-            (ent.hwnd == fg || IsChild(fg, ent.hwnd) != FALSE);
-        const std::string tag = std::string("view[") + std::to_string(ent.index) +
-                                "]" + (fgAssoc ? " fgAssoc" : "");
+        const bool fgAssoc = fg && ent.hwnd &&
+                             (ent.hwnd == fg || IsChild(fg, ent.hwnd) != FALSE);
+        const std::string tag = std::string("view[") +
+                                std::to_string(ent.index) + "]" +
+                                (fgAssoc ? " fgAssoc" : "");
         if (tsfTryGetTextExtForAnchor(ec, ent.view.Get(), extentRange.Get(),
                                       tag.c_str(), rangeMode, screenPt)) {
             return true;
@@ -708,7 +710,8 @@ bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
     if (tsfScreenPtForegroundCaretAttach(screenPt)) {
         return true;
     }
-    fcitx::tsfTrace("candidatePos query exhausted; syncCandidateWindow fallbacks");
+    fcitx::tsfTrace(
+        "candidatePos query exhausted; syncCandidateWindow fallbacks");
     return false;
 }
 
@@ -801,7 +804,7 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
     endCandidateListUiElement();
     if (compositionRange_) {
         compositionRange_->SetText(ec, 0, text.c_str(),
-                                  static_cast<LONG>(text.size()));
+                                   static_cast<LONG>(text.size()));
         if (textEditSinkContext_ && !text.empty()) {
             ComPtr<ITfRange> caretAfter;
             if (SUCCEEDED(compositionRange_->Clone(
@@ -824,8 +827,7 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
             if (SUCCEEDED(ias->InsertTextAtSelection(
                     ec, 0, text.c_str(), static_cast<LONG>(text.size()),
                     inserted.ReleaseAndGetAddressOf())) &&
-                inserted &&
-                SUCCEEDED(inserted->Collapse(ec, TF_ANCHOR_END))) {
+                inserted && SUCCEEDED(inserted->Collapse(ec, TF_ANCHOR_END))) {
                 TF_SELECTION sel{};
                 sel.range = inserted.Get();
                 sel.style.ase = TF_AE_NONE;
@@ -968,8 +970,9 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
             labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
         }
     }
-    // Do not seed with GetCursorPos: if queryCandidateAnchor fails without writing
-    // pt, we must not show the candidate list at the mouse (common in Electron).
+    // Do not seed with GetCursorPos: if queryCandidateAnchor fails without
+    // writing pt, we must not show the candidate list at the mouse (common in
+    // Electron).
     POINT pt = {};
     tsfTraceCandidateSnapshot("syncBegin");
     bool anchorOk = queryCandidateAnchor(ec, &pt);
@@ -1008,7 +1011,8 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
             if (!tsfScreenPtFocusClientBottomCenter(&pt)) {
                 GetCursorPos(&pt);
                 fcitx::tsfTrace(
-                    std::string("candidatePos sync fallback lastResort mouse=") +
+                    std::string(
+                        "candidatePos sync fallback lastResort mouse=") +
                     std::to_string(static_cast<long>(pt.x)) + "," +
                     std::to_string(static_cast<long>(pt.y)));
                 fallbackWinner = "lastResortMouse";
@@ -1016,20 +1020,19 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
                 fallbackWinner = "approxClientBottomLeftish";
             }
         }
-        fcitx::tsfTrace(
-            std::string("candidatePos sync fallbackChosen=") + fallbackWinner +
-            " finalPt=" + std::to_string(static_cast<long>(pt.x)) + "," +
-            std::to_string(static_cast<long>(pt.y)));
+        fcitx::tsfTrace(std::string("candidatePos sync fallbackChosen=") +
+                        fallbackWinner +
+                        " finalPt=" + std::to_string(static_cast<long>(pt.x)) +
+                        "," + std::to_string(static_cast<long>(pt.y)));
     } else {
         fcitx::tsfTrace(
             std::string("candidatePos sync chosen=queryAnchor pt=") +
             std::to_string(static_cast<long>(pt.x)) + "," +
             std::to_string(static_cast<long>(pt.y)));
     }
-    fcitx::tsfTrace(
-        std::string("candidatePos sync show pt=") +
-        std::to_string(static_cast<long>(pt.x)) + "," +
-        std::to_string(static_cast<long>(pt.y)));
+    fcitx::tsfTrace(std::string("candidatePos sync show pt=") +
+                    std::to_string(static_cast<long>(pt.x)) + "," +
+                    std::to_string(static_cast<long>(pt.y)));
     candidateWin_.show(pt.x, pt.y, labels, engine_->highlightIndex());
     syncCandidateListUiElement();
 }
@@ -1042,8 +1045,8 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
         return true;
     }
-    if (engine_->imManagerHotkeyWouldEat(
-            vk, static_cast<std::uintptr_t>(lParam))) {
+    if (engine_->imManagerHotkeyWouldEat(vk,
+                                         static_cast<std::uintptr_t>(lParam))) {
         return true;
     }
     if (tsfChordHasCtrlOrAlt() && tsfCanAttemptRawImeKey(vk)) {
@@ -1058,7 +1061,8 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     if (vk == VK_RETURN || vk == VK_BACK || vk == VK_ESCAPE) {
         engine_->syncInputPanelFromIme();
     }
-    const bool hasPanel = !engine_->preedit().empty() || !engine_->candidates().empty();
+    const bool hasPanel =
+        !engine_->preedit().empty() || !engine_->candidates().empty();
     const bool composing = composition_ != nullptr;
     // Do not eat Backspace/Enter/Escape when there is nothing to edit — let the
     // app handle lone Enter, etc.
@@ -1089,7 +1093,7 @@ bool Tsf::keyWouldBeHandled(WPARAM wParam, LPARAM lParam) {
     if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
         ((((vk >= '0' && vk <= '9') &&
            (GetKeyState(VK_SHIFT) & 0x8000) == 0)) ||
-          vk == VK_UP || vk == VK_DOWN)) {
+         vk == VK_UP || vk == VK_DOWN)) {
         return true;
     }
     if (vk >= 'A' && vk <= 'Z') {
@@ -1201,8 +1205,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     // 处理数字键选择候选词（仅在未按 Shift 时）
     if (!engine_->candidates().empty() && !tsfChordHasCtrlOrAlt() &&
-        vk >= '0' && vk <= '9' &&
-        (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
+        vk >= '0' && vk <= '9' && (GetKeyState(VK_SHIFT) & 0x8000) == 0) {
         const int idx = (vk == '0') ? 9 : (static_cast<int>(vk - '1'));
         if (idx >= 0 && engine_->hasCandidate(static_cast<size_t>(idx))) {
             pendingKeyHandled_ = true;
@@ -1319,7 +1322,8 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     // 处理 Shift+数字键 输入中文标点符号（如 Shift+1 输入 "！"）
     if (tsfIsChineseModeShiftNumberSymbolVk(vk)) {
-        FCITX_INFO() << "Shift+number key: vk=" << vk << " shift state=" << (GetKeyState(VK_SHIFT) & 0x8000);
+        FCITX_INFO() << "Shift+number key: vk=" << vk
+                     << " shift state=" << (GetKeyState(VK_SHIFT) & 0x8000);
         if (tsfChordHasCtrlOrAlt()) {
             drainCommitsAfterEngine(ec);
             return S_OK;
@@ -1362,7 +1366,8 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     if (!pendingTrayStatusAction_.empty()) {
         const auto actionName = std::move(pendingTrayStatusAction_);
         pendingTrayStatusAction_.clear();
-        const bool fromSharedRequest = pendingTrayStatusActionFromSharedRequest_;
+        const bool fromSharedRequest =
+            pendingTrayStatusActionFromSharedRequest_;
         pendingTrayStatusActionFromSharedRequest_ = false;
         const bool activated = engine_->activateTrayStatusAction(actionName);
         if (fromSharedRequest && activated) {
@@ -1377,8 +1382,9 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         pendingTrayInputMethod_.clear();
         const bool fromSharedRequest = pendingTrayInputMethodFromSharedRequest_;
         pendingTrayInputMethodFromSharedRequest_ = false;
-        tsfTrace("DoEditSession pending tray target=" + uniqueName +
-                 " fromShared=" + std::string(fromSharedRequest ? "true" : "false"));
+        tsfTrace(
+            "DoEditSession pending tray target=" + uniqueName +
+            " fromShared=" + std::string(fromSharedRequest ? "true" : "false"));
         FCITX_INFO() << "DoEditSession pending tray input method target="
                      << uniqueName << " fromShared=" << fromSharedRequest
                      << " pid=" << GetCurrentProcessId();
@@ -1400,7 +1406,8 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         if (fromSharedRequest && activated) {
             deferredSharedTrayInputMethod_.clear();
             clearSharedTrayInputMethodRequest();
-            tsfTrace("DoEditSession cleared shared tray request target=" + uniqueName);
+            tsfTrace("DoEditSession cleared shared tray request target=" +
+                     uniqueName);
             FCITX_INFO() << "DoEditSession cleared shared tray request target="
                          << uniqueName << " pid=" << GetCurrentProcessId();
         } else if (fromSharedRequest && !activated) {
@@ -1433,7 +1440,8 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     const bool isRelease = pendingKeyIsRelease_;
     pendingKeyIsRelease_ = false;
     pendingKeyHandled_ = false;
-    return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_, isRelease);
+    return runKeyEditSession(ec, pendingKeyWParam_, pendingKeyLParam_,
+                             isRelease);
 }
 
 } // namespace fcitx

@@ -17,7 +17,8 @@ class TsfInputContext final : public InputContext {
 
     void commitStringImpl(const std::string &text) override;
     void forwardKeyImpl(const ForwardKeyEvent & /*key*/) override {}
-    void deleteSurroundingTextImpl(int /*offset*/, unsigned int /*size*/) override {}
+    void deleteSurroundingTextImpl(int /*offset*/,
+                                   unsigned int /*size*/) override {}
     void updatePreeditImpl() override {}
 
   private:

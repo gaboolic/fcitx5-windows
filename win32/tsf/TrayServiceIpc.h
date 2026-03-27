@@ -9,11 +9,14 @@ namespace fcitx {
 
 constexpr wchar_t kStandaloneTrayHelperWindowClass[] =
     L"Fcitx5StandaloneTrayHelperWindow";
-/// Legacy: full snapshot (visible + status). Prefer **Ui** + **Status** messages.
+/// Legacy: full snapshot (visible + status). Prefer **Ui** + **Status**
+/// messages.
 constexpr ULONG_PTR kTrayServiceCopyDataSnapshot = 0x46545331ULL;
-/// Engine-level tray visibility (LangBar / profile), independent of tip session.
+/// Engine-level tray visibility (LangBar / profile), independent of tip
+/// session.
 constexpr ULONG_PTR kTrayServiceCopyDataUi = 0x46545332ULL;
-/// Per-process TSF TIP ActivateEx/Deactivate (focus / session validity for helper).
+/// Per-process TSF TIP ActivateEx/Deactivate (focus / session validity for
+/// helper).
 constexpr ULONG_PTR kTrayServiceCopyDataTipSession = 0x46545333ULL;
 constexpr ULONG_PTR kTrayServiceCopyDataFocus = kTrayServiceCopyDataTipSession;
 /// Chinese mode, current IM label, status actions (no visibility bit).
@@ -114,15 +117,15 @@ inline bool sendTrayServiceCopyData(HWND hwnd, ULONG_PTR kind, const void *data,
     cds.lpData = const_cast<void *>(data);
     DWORD_PTR result = 0;
     // Brief retries: tray helper can be busy during Explorer/TSF focus churn;
-    // a dropped WM_COPYDATA leaves the tip-session ref stuck and the icon visible.
+    // a dropped WM_COPYDATA leaves the tip-session ref stuck and the icon
+    // visible.
     for (int attempt = 0; attempt < 6; ++attempt) {
         if (attempt > 0) {
             Sleep(static_cast<DWORD>(5 * attempt));
         }
-        if (SendMessageTimeoutW(hwnd, WM_COPYDATA, 0,
-                                reinterpret_cast<LPARAM>(&cds),
-                                SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, &result) !=
-            0) {
+        if (SendMessageTimeoutW(
+                hwnd, WM_COPYDATA, 0, reinterpret_cast<LPARAM>(&cds),
+                SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, &result) != 0) {
             return true;
         }
     }

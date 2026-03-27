@@ -15,7 +15,8 @@ bool chordCtrlOrAltDown() {
            (GetKeyState(VK_MENU) & 0x8000) != 0;
 }
 
-/// True if the *other* Shift is still held (not the one releasing in this message).
+/// True if the *other* Shift is still held (not the one releasing in this
+/// message).
 bool otherShiftStillHeld(WPARAM vk, LPARAM lp) {
     const unsigned sc = (static_cast<unsigned>(lp) >> 16) & 0xFFu;
     if (vk == VK_LSHIFT) {
@@ -31,7 +32,8 @@ bool otherShiftStillHeld(WPARAM vk, LPARAM lp) {
         if (sc == 0x36u) {
             return (GetAsyncKeyState(VK_LSHIFT) & 0x8000) != 0;
         }
-        // Unknown scan: do not block toggle (both-side check would rarely be true).
+        // Unknown scan: do not block toggle (both-side check would rarely be
+        // true).
         return false;
     }
     return false;
@@ -83,8 +85,8 @@ void Tsf::trackShiftToggleKeyDown(WPARAM wParam, LPARAM lParam) {
         shiftTapTrackedScanCode_ = sc;
         return;
     }
-    // Lost Shift KeyUp (unrecognized vk/sc) would leave shiftTapTrack_ stuck and
-    // break later gestures — clear when Shift is no longer held.
+    // Lost Shift KeyUp (unrecognized vk/sc) would leave shiftTapTrack_ stuck
+    // and break later gestures — clear when Shift is no longer held.
     if (shiftTapTrack_ && !(GetKeyState(VK_SHIFT) & 0x8000)) {
         resetShiftToggleGesture();
     } else if (shiftTapTrack_ && (GetKeyState(VK_SHIFT) & 0x8000)) {
@@ -97,7 +99,8 @@ void Tsf::trackShiftToggleKeyUp(WPARAM wParam, LPARAM lParam) {
         return;
     }
     const bool doToggle = shiftTapTrack_ && !shiftTapInvalidated_ &&
-                          !chordCtrlOrAltDown() && !otherShiftStillHeld(wParam, lParam);
+                          !chordCtrlOrAltDown() &&
+                          !otherShiftStillHeld(wParam, lParam);
     shiftTapTrack_ = false;
     shiftTapInvalidated_ = false;
     shiftTapTrackedWParam_ = 0;
@@ -107,8 +110,8 @@ void Tsf::trackShiftToggleKeyUp(WPARAM wParam, LPARAM lParam) {
 bool Tsf::initKeyEventSink() {
     ComPtr<ITfKeystrokeMgr> keystrokeMgr;
     if (FAILED(threadMgr_->QueryInterface(
-            IID_ITfKeystrokeMgr,
-            reinterpret_cast<void **>(keystrokeMgr.ReleaseAndGetAddressOf())))) {
+            IID_ITfKeystrokeMgr, reinterpret_cast<void **>(
+                                     keystrokeMgr.ReleaseAndGetAddressOf())))) {
         return false;
     }
     return keystrokeMgr->AdviseKeyEventSink(clientId_, (ITfKeyEventSink *)this,
@@ -121,8 +124,8 @@ void Tsf::uninitKeyEventSink() {
         return;
     }
     if (FAILED(threadMgr_->QueryInterface(
-            IID_ITfKeystrokeMgr,
-            reinterpret_cast<void **>(keystrokeMgr.ReleaseAndGetAddressOf())))) {
+            IID_ITfKeystrokeMgr, reinterpret_cast<void **>(
+                                     keystrokeMgr.ReleaseAndGetAddressOf())))) {
         return;
     }
     keystrokeMgr->UnadviseKeyEventSink(clientId_);

@@ -20,11 +20,10 @@ bool Tsf::initProfileActivationSink() {
         return true;
     }
     if (!profileMgr_) {
-        const HRESULT hrCreate =
-            CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
-                             CLSCTX_INPROC_SERVER,
-                             IID_ITfInputProcessorProfileMgr,
-                             reinterpret_cast<void **>(profileMgr_.GetAddressOf()));
+        const HRESULT hrCreate = CoCreateInstance(
+            CLSID_TF_InputProcessorProfiles, nullptr, CLSCTX_INPROC_SERVER,
+            IID_ITfInputProcessorProfileMgr,
+            reinterpret_cast<void **>(profileMgr_.GetAddressOf()));
         if (FAILED(hrCreate) || !profileMgr_) {
             tsfTrace("initProfileActivationSink CoCreateInstance failed hr=0x" +
                      std::to_string(static_cast<unsigned long>(hrCreate)));
@@ -60,7 +59,8 @@ bool Tsf::initActiveLanguageProfileNotifySink() {
     }
     ComPtr<ITfSource> source;
     if (FAILED(threadMgr_.As(&source)) || !source) {
-        tsfTrace("initActiveLanguageProfileNotifySink missing threadMgr ITfSource");
+        tsfTrace(
+            "initActiveLanguageProfileNotifySink missing threadMgr ITfSource");
         return false;
     }
     const HRESULT hr = source->AdviseSink(
@@ -90,7 +90,8 @@ void Tsf::uninitProfileActivationSink() {
 }
 
 void Tsf::uninitActiveLanguageProfileNotifySink() {
-    if (!threadMgr_ || activeLanguageProfileNotifySinkCookie_ == TF_INVALID_COOKIE) {
+    if (!threadMgr_ ||
+        activeLanguageProfileNotifySinkCookie_ == TF_INVALID_COOKIE) {
         activeLanguageProfileNotifySinkCookie_ = TF_INVALID_COOKIE;
         return;
     }
@@ -173,7 +174,8 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
     }
     if (currentProcessIsExplorerForMinimalTray()) {
         // MSCTF + explorer.exe: ActivateEx bursts; tray ensure is shared with
-        // initShellTrayIcon / langBarNotifyIconUpdate via explorerTrayHelperPrimedOnce().
+        // initShellTrayIcon / langBarNotifyIconUpdate via
+        // explorerTrayHelperPrimedOnce().
         initShellTrayIcon();
         tsfTrace("ActivateEx explorer minimal ensure-helper-only no threadMgr");
         return S_OK;

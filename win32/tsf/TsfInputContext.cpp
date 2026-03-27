@@ -4,7 +4,7 @@
 namespace fcitx {
 
 TsfInputContext::TsfInputContext(Fcitx5ImeEngine *engine,
-                               InputContextManager &mgr)
+                                 InputContextManager &mgr)
     : InputContext(mgr, "tsf"), engine_(engine) {
     created();
 }

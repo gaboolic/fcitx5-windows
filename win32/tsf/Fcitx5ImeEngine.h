@@ -14,8 +14,8 @@ namespace fcitx {
 class Instance;
 class TsfInputContext;
 
-/// Try to create an engine backed by in-process `fcitx::Instance` + dynamic addons.
-/// Returns nullptr if initialization fails (caller should use stub).
+/// Try to create an engine backed by in-process `fcitx::Instance` + dynamic
+/// addons. Returns nullptr if initialization fails (caller should use stub).
 std::unique_ptr<ImeEngine> makeFcitx5ImeEngineAttempt();
 
 class Fcitx5ImeEngine : public ImeEngine {
@@ -50,8 +50,7 @@ class Fcitx5ImeEngine : public ImeEngine {
 
     bool imManagerHotkeyWouldEat(unsigned vk,
                                  std::uintptr_t lParam) const override;
-    bool tryConsumeImManagerHotkey(unsigned vk,
-                                   std::uintptr_t lParam) override;
+    bool tryConsumeImManagerHotkey(unsigned vk, std::uintptr_t lParam) override;
 
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
@@ -69,7 +68,8 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool rebuildForInputMethod(const std::string &preferredInputMethod);
     bool sendKeySym(KeySym sym);
     void syncUiFromIc();
-    void activatePreferredInputMethod(const std::string &preferredInputMethod = {});
+    void
+    activatePreferredInputMethod(const std::string &preferredInputMethod = {});
 
     bool loggingAttached_ = false;
 

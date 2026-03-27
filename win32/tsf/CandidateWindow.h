@@ -8,7 +8,8 @@
 
 namespace fcitx {
 
-// Popup window: numbered candidates, highlight, mouse pick (keyboard handled in Tsf).
+// Popup window: numbered candidates, highlight, mouse pick (keyboard handled in
+// Tsf).
 class CandidateWindow {
   public:
     CandidateWindow() = default;
@@ -17,7 +18,9 @@ class CandidateWindow {
     CandidateWindow(const CandidateWindow &) = delete;
     CandidateWindow &operator=(const CandidateWindow &) = delete;
 
-    void setOnPick(std::function<void(int index)> cb) { onPick_ = std::move(cb); }
+    void setOnPick(std::function<void(int index)> cb) {
+        onPick_ = std::move(cb);
+    }
 
     void show(int screenX, int screenY, const std::vector<std::wstring> &labels,
               int highlightIndex);

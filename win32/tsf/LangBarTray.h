@@ -1,7 +1,7 @@
 #pragma once
 
-#include <msctf.h>
 #include "MsctfMingwCompat.h"
+#include <msctf.h>
 
 namespace fcitx {
 
@@ -26,12 +26,14 @@ class FcitxLangBarButton final : public ITfLangBarItemButton {
     STDMETHODIMP GetTooltipString(BSTR *pbstrToolTip) override;
 
     // ITfLangBarItemButton
-    STDMETHODIMP OnClick(TfLBIClick click, POINT pt, const RECT *prcArea) override;
+    STDMETHODIMP OnClick(TfLBIClick click, POINT pt,
+                         const RECT *prcArea) override;
     STDMETHODIMP InitMenu(ITfMenu *pMenu) override;
     STDMETHODIMP OnMenuSelect(UINT wID) override;
     STDMETHODIMP GetIcon(HICON *phIcon) override;
     STDMETHODIMP GetText(BSTR *pbstrText) override;
-    STDMETHODIMP AdviseSink(REFIID riid, IUnknown *punk, DWORD *pdwCookie) override;
+    STDMETHODIMP AdviseSink(REFIID riid, IUnknown *punk,
+                            DWORD *pdwCookie) override;
     STDMETHODIMP UnadviseSink(DWORD dwCookie) override;
 
   private:

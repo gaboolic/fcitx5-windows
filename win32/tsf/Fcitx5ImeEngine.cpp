@@ -2,25 +2,25 @@
 #include "TsfInputContext.h"
 #include "tsf.h"
 
+#include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/environ.h>
+#include <fcitx-utils/event.h>
 #include <fcitx-utils/key.h>
+#include <fcitx/action.h>
 #include <fcitx/addonmanager.h>
 #include <fcitx/event.h>
-#include <fcitx-utils/event.h>
 #include <fcitx/globalconfig.h>
-#include <fcitx/instance.h>
-#include <fcitx/inputmethodentry.h>
 #include <fcitx/inputmethodengine.h>
+#include <fcitx/inputmethodentry.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
-#include <fcitx/action.h>
+#include <fcitx/instance.h>
 #include <fcitx/statusarea.h>
 #include <fcitx/userinterfacemanager.h>
-#include <fcitx-config/rawconfig.h>
 
-#include <fcitx-utils/log.h>
 #include <fcitx-utils/keysym.h>
+#include <fcitx-utils/log.h>
 #include <fcitx/event.h>
 
 #include <uv.h>
@@ -61,8 +61,8 @@ void flushLibuvLoopForIme(fcitx::EventLoop &loop) {
 
 namespace fcitx {
 
-// Fcitx5Utils (standardpaths_p_win.cpp): pin portable layout to the IME DLL, not
-// the host process .exe (Notepad, etc.).
+// Fcitx5Utils (standardpaths_p_win.cpp): pin portable layout to the IME DLL,
+// not the host process .exe (Notepad, etc.).
 extern HINSTANCE mainInstanceHandle;
 
 namespace {
@@ -144,8 +144,7 @@ bool trayStatusActionChecked(std::string_view actionName,
     return false;
 }
 
-std::wstring trayStatusActionLabel(std::string_view actionName,
-                                   bool checked) {
+std::wstring trayStatusActionLabel(std::string_view actionName, bool checked) {
     if (actionName == "punctuation") {
         return checked ? L"\x4e2d\x6587\x6807\x70b9\xff1a\x5f00"
                        : L"\x4e2d\x6587\x6807\x70b9\xff1a\x5173";
@@ -163,10 +162,9 @@ std::wstring trayStatusActionLabel(std::string_view actionName,
 
 std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     HMODULE mod = nullptr;
-    if (!GetModuleHandleExW(
-            GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
-                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
-            reinterpret_cast<LPCWSTR>(addr), &mod) ||
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                                GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(addr), &mod) ||
         !mod) {
         return {};
     }
@@ -218,8 +216,8 @@ bool shouldDisableRimeForCurrentHost() {
 }
 
 std::filesystem::path imeBinDir() {
-    auto root = dllInstallRootFromAddress(
-        reinterpret_cast<const void *>(&utf8ToWide));
+    auto root =
+        dllInstallRootFromAddress(reinterpret_cast<const void *>(&utf8ToWide));
     if (root.empty()) {
         return {};
     }
@@ -246,13 +244,13 @@ class ScopedDllDirectory {
 };
 
 void setupDefaultTsLogPath() {
-    // TSF runs inside arbitrary host processes. Do not set up FCITX_TS_LOG here:
-    // attaching glog in transient hosts has caused unload-time crashes.
+    // TSF runs inside arbitrary host processes. Do not set up FCITX_TS_LOG
+    // here: attaching glog in transient hosts has caused unload-time crashes.
 }
 
 void setupImeFcitxEnvironment() {
-    auto root = dllInstallRootFromAddress(
-        reinterpret_cast<const void *>(&utf8ToWide));
+    auto root =
+        dllInstallRootFromAddress(reinterpret_cast<const void *>(&utf8ToWide));
     if (root.empty()) {
         return;
     }
@@ -262,8 +260,8 @@ void setupImeFcitxEnvironment() {
     // TSF runs inside arbitrary host processes such as QQ. Do not prepend the
     // portable bin/ to PATH here: child processes (e.g. crashpad_handler.exe)
     // inherit PATH and may accidentally load our libglog-2.dll. Keep only the
-    // addon/data env vars here; DLL directory changes are scoped narrowly around
-    // addon initialization in `Fcitx5ImeEngine::init()`.
+    // addon/data env vars here; DLL directory changes are scoped narrowly
+    // around addon initialization in `Fcitx5ImeEngine::init()`.
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
     setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
@@ -396,8 +394,8 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         }
         return Key(static_cast<KeySym>(FcitxKey_a + (c - L'a')), st);
     }
-    // US QWERTY OEM keys → keysyms so punctuation / libime see real symbols (not
-    // raw VK with FcitxKey_None).
+    // US QWERTY OEM keys → keysyms so punctuation / libime see real symbols
+    // (not raw VK with FcitxKey_None).
     {
         const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         KeyStates stOut = st;
@@ -420,7 +418,8 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
             return Key(shiftDown ? FcitxKey_braceright : FcitxKey_bracketright,
                        stOut);
         case VK_OEM_7:
-            return Key(shiftDown ? FcitxKey_quotedbl : FcitxKey_apostrophe, stOut);
+            return Key(shiftDown ? FcitxKey_quotedbl : FcitxKey_apostrophe,
+                       stOut);
         case VK_OEM_PLUS:
             return Key(shiftDown ? FcitxKey_plus : FcitxKey_equal, stOut);
         case VK_OEM_COMMA:
@@ -451,14 +450,13 @@ bool isChineseToggleVk(unsigned vk) {
     return vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000);
 }
 
-bool envTruthy(const char *v) {
-    return v && v[0] && std::strcmp(v, "0") != 0;
-}
+bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
 
-/// Optional TSF IME logging: `Log::setLogStream` is process-global; refcount when
-/// multiple engines exist. Lines are UTF-8; converted for OutputDebugStringW.
+/// Optional TSF IME logging: `Log::setLogStream` is process-global; refcount
+/// when multiple engines exist. Lines are UTF-8; converted for
+/// OutputDebugStringW.
 class FcitxTsfLogBuf final : public std::streambuf {
-public:
+  public:
     explicit FcitxTsfLogBuf(bool mirrorDebug) : mirrorDebug_(mirrorDebug) {}
 
     void openFileUtf8(const char *utf8Path) {
@@ -491,7 +489,7 @@ public:
     FcitxTsfLogBuf(const FcitxTsfLogBuf &) = delete;
     FcitxTsfLogBuf &operator=(const FcitxTsfLogBuf &) = delete;
 
-protected:
+  protected:
     int_type overflow(int_type ch) override {
         if (ch == traits_type::eof()) {
             return traits_type::not_eof(ch);
@@ -512,14 +510,14 @@ protected:
         return 0;
     }
 
-private:
+  private:
     void flushPending() {
         if (pending_.empty()) {
             return;
         }
         if (fileOpen_) {
             file_.sputn(pending_.data(),
-                         static_cast<std::streamsize>(pending_.size()));
+                        static_cast<std::streamsize>(pending_.size()));
         }
         if (mirrorDebug_) {
             std::wstring w = utf8ToWide(pending_);
@@ -557,7 +555,8 @@ bool tsImeTryAttachLogging() {
     if (rule && rule[0]) {
         Log::setLogRule(rule);
     } else {
-        // key_trace / addons use Debug; without this, FCITX_TS_LOG alone shows almost nothing.
+        // key_trace / addons use Debug; without this, FCITX_TS_LOG alone shows
+        // almost nothing.
         Log::setLogRule("*=5");
     }
 
@@ -610,23 +609,24 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
     }
 }
 
-bool Fcitx5ImeEngine::init() {
-    return initWithInputMethod({});
-}
+bool Fcitx5ImeEngine::init() { return initWithInputMethod({}); }
 
-bool Fcitx5ImeEngine::initWithInputMethod(const std::string &preferredInputMethod) {
+bool Fcitx5ImeEngine::initWithInputMethod(
+    const std::string &preferredInputMethod) {
     loggingAttached_ = false;
     try {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
         const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
         if (disableRimeForHost) {
-            tsfTrace("Fcitx5ImeEngine::init disabling rime addon for risky host");
+            tsfTrace(
+                "Fcitx5ImeEngine::init disabling rime addon for risky host");
         }
         InstanceArgv instanceArgv(disableRimeForHost);
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
-        tsfTrace(std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
-                 (std::getenv("FCITX_TS_LOG") ? std::getenv("FCITX_TS_LOG") : ""));
+        tsfTrace(
+            std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
+            (std::getenv("FCITX_TS_LOG") ? std::getenv("FCITX_TS_LOG") : ""));
         tsfTrace("Fcitx5ImeEngine::init skip FCITX_TS_LOG in TSF host");
         tsfTrace(std::string("Fcitx5ImeEngine::init loggingAttached=") +
                  (loggingAttached_ ? "true" : "false"));
@@ -635,17 +635,18 @@ bool Fcitx5ImeEngine::initWithInputMethod(const std::string &preferredInputMetho
                 FCITX_INFO() << "Fcitx5 TSF log file (FCITX_TS_LOG): " << lp;
             }
         }
-        instance_ = std::make_unique<Instance>(instanceArgv.argc(), instanceArgv.data());
+        instance_ = std::make_unique<Instance>(instanceArgv.argc(),
+                                               instanceArgv.data());
         instance_->addonManager().registerDefaultLoader(nullptr);
         instance_->initialize();
         tsfTrace("Fcitx5ImeEngine::init instance initialized");
 
-        ic_ = std::make_unique<TsfInputContext>(this,
-                                                instance_->inputContextManager());
+        ic_ = std::make_unique<TsfInputContext>(
+            this, instance_->inputContextManager());
         ic_->setEnablePreedit(true);
-        ic_->setCapabilityFlags(
-            CapabilityFlags{CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
-                            CapabilityFlag::ClientSideInputPanel});
+        ic_->setCapabilityFlags(CapabilityFlags{
+            CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
+            CapabilityFlag::ClientSideInputPanel});
         ic_->focusIn();
         tsfTrace("Fcitx5ImeEngine::init input context focused");
 
@@ -666,7 +667,8 @@ bool Fcitx5ImeEngine::initWithInputMethod(const std::string &preferredInputMetho
     }
 }
 
-bool Fcitx5ImeEngine::rebuildForInputMethod(const std::string &preferredInputMethod) {
+bool Fcitx5ImeEngine::rebuildForInputMethod(
+    const std::string &preferredInputMethod) {
     tsfTrace("rebuildForInputMethod begin target=" + preferredInputMethod);
     ic_.reset();
     instance_.reset();
@@ -774,8 +776,9 @@ void Fcitx5ImeEngine::syncUiFromIc() {
     if (!ic_) {
         return;
     }
-    // Addons may set only clientPreedit (keyboard, quickphrase) or only preedit()
-    // (e.g. pinyin when Preedit capability is off). TSF draws one composition line.
+    // Addons may set only clientPreedit (keyboard, quickphrase) or only
+    // preedit() (e.g. pinyin when Preedit capability is off). TSF draws one
+    // composition line.
     const auto &clientTxt = ic_->inputPanel().clientPreedit();
     const auto &serverTxt = ic_->inputPanel().preedit();
     std::string clientU8 = clientTxt.toString();
@@ -783,8 +786,9 @@ void Fcitx5ImeEngine::syncUiFromIc() {
     std::string preU8;
     int cursorBytes = -1;
     if (!clientU8.empty() && !serverU8.empty()) {
-        // Pinyin CommitPreview (and similar): client = preview Chinese, server =
-        // composing pinyin. Kimpanel can show both; merge for a single TSF string.
+        // Pinyin CommitPreview (and similar): client = preview Chinese, server
+        // = composing pinyin. Kimpanel can show both; merge for a single TSF
+        // string.
         preU8 = std::move(clientU8) + serverU8;
         const int sc = serverTxt.cursor();
         const int maxB = static_cast<int>(preU8.size());
@@ -847,9 +851,11 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
     if (loggingAttached_ && instance_) {
         const auto &panel = ic_->inputPanel();
         FCITX_INFO() << "tsf sendKeySym sym=" << static_cast<unsigned>(sym)
-                     << " keyEventRet=" << keyOk << " icFocus=" << ic_->hasFocus()
+                     << " keyEventRet=" << keyOk
+                     << " icFocus=" << ic_->hasFocus()
                      << " im=" << instance_->inputMethod(ic_.get())
-                     << " clientPreU8=" << panel.clientPreedit().toString().size()
+                     << " clientPreU8="
+                     << panel.clientPreedit().toString().size()
                      << " preeditU8=" << panel.preedit().toString().size()
                      << " syncWidePre=" << preeditWide_.size()
                      << " syncCands=" << candidatesWide_.size();
@@ -1072,7 +1078,8 @@ bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
     return ev.accepted();
 }
 
-std::vector<ProfileInputMethodItem> Fcitx5ImeEngine::profileInputMethods() const {
+std::vector<ProfileInputMethodItem>
+Fcitx5ImeEngine::profileInputMethods() const {
     std::vector<ProfileInputMethodItem> items;
     if (!instance_ || !ic_) {
         return items;
@@ -1090,19 +1097,22 @@ std::vector<ProfileInputMethodItem> Fcitx5ImeEngine::profileInputMethods() const
         if (displayName.empty()) {
             displayName = utf8ToWide(entry->uniqueName());
         }
-        items.push_back(ProfileInputMethodItem{
-            entry->uniqueName(), std::move(displayName),
-            entry->uniqueName() == current});
+        items.push_back(ProfileInputMethodItem{entry->uniqueName(),
+                                               std::move(displayName),
+                                               entry->uniqueName() == current});
     }
     return items;
 }
 
-bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) {
+bool Fcitx5ImeEngine::activateProfileInputMethod(
+    const std::string &uniqueName) {
     if (!instance_ || !ic_) {
-        tsfTrace("activateProfileInputMethod aborted missing instance/ic target=" +
-                 uniqueName);
-        FCITX_WARN() << "activateProfileInputMethod aborted: instance/ic missing target="
-                     << uniqueName << " pid=" << GetCurrentProcessId();
+        tsfTrace(
+            "activateProfileInputMethod aborted missing instance/ic target=" +
+            uniqueName);
+        FCITX_WARN()
+            << "activateProfileInputMethod aborted: instance/ic missing target="
+            << uniqueName << " pid=" << GetCurrentProcessId();
         return false;
     }
     auto &imm = instance_->inputMethodManager();
@@ -1130,9 +1140,9 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     };
     if (!addon.empty()) {
         auto *addonInstance = instance_->addonManager().addon(addon, true);
-        tsfTrace("activateProfileInputMethod addon request target=" + uniqueName +
-                 " addon=" + addon + " loaded=" +
-                 std::string(addonInstance ? "true" : "false") +
+        tsfTrace("activateProfileInputMethod addon request target=" +
+                 uniqueName + " addon=" + addon +
+                 " loaded=" + std::string(addonInstance ? "true" : "false") +
                  " loadedAddons=" + loadedAddonSummary());
         if (!addonInstance && !rebuildForInputMethod(uniqueName)) {
             tsfTrace("activateProfileInputMethod rebuild failed target=" +
@@ -1144,16 +1154,18 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     // may switch while addonManager never loads `rime` in the focused app.
     auto *targetEngine = instance_->inputMethodEngine(uniqueName);
     if (!targetEngine) {
-        tsfTrace("activateProfileInputMethod inputMethodEngine returned null target=" +
-                 uniqueName + " addon=" + addon + " loadedAddons=" +
-                 loadedAddonSummary());
+        tsfTrace("activateProfileInputMethod inputMethodEngine returned null "
+                 "target=" +
+                 uniqueName + " addon=" + addon +
+                 " loadedAddons=" + loadedAddonSummary());
         FCITX_ERROR() << "activateProfileInputMethod failed to load engine for "
                       << uniqueName << " addon=" << addon
                       << " pid=" << GetCurrentProcessId();
         return false;
     }
     tsfTrace("activateProfileInputMethod begin target=" + uniqueName +
-             " addon=" + addon + " current=" + instance_->inputMethod(ic_.get()));
+             " addon=" + addon +
+             " current=" + instance_->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod begin target=" << uniqueName
                  << " addon=" << addon
                  << " current=" << instance_->inputMethod(ic_.get())
@@ -1166,12 +1178,12 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     instance_->setCurrentInputMethod(ic_.get(), uniqueName, false);
     auto *engine = instance_->inputMethodEngine(uniqueName);
     if (!engine || instance_->inputMethod(ic_.get()) != uniqueName) {
-        tsfTrace("activateProfileInputMethod switch failed target=" + uniqueName +
-                 " addon=" + addon +
+        tsfTrace("activateProfileInputMethod switch failed target=" +
+                 uniqueName + " addon=" + addon +
                  " current=" + instance_->inputMethod(ic_.get()));
         FCITX_ERROR() << "activateProfileInputMethod switch failed target="
-                      << uniqueName << " addon=" << addon << " current="
-                      << instance_->inputMethod(ic_.get())
+                      << uniqueName << " addon=" << addon
+                      << " current=" << instance_->inputMethod(ic_.get())
                       << " engineLoaded=" << (engine != nullptr)
                       << " pid=" << GetCurrentProcessId();
         return false;
@@ -1179,7 +1191,8 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(const std::string &uniqueName) 
     instance_->save();
     syncUiFromIc();
     tsfTrace("activateProfileInputMethod success target=" + uniqueName +
-             " addon=" + addon + " current=" + instance_->inputMethod(ic_.get()));
+             " addon=" + addon +
+             " current=" + instance_->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod success target=" << uniqueName
                  << " addon=" << addon
                  << " current=" << instance_->inputMethod(ic_.get())

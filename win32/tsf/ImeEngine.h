@@ -25,14 +25,17 @@ class ImeEngine {
   public:
     virtual ~ImeEngine() = default;
 
-    /// Refresh cached preedit/candidates from IME (fcitx InputPanel); no-op for stub.
+    /// Refresh cached preedit/candidates from IME (fcitx InputPanel); no-op for
+    /// stub.
     virtual void syncInputPanelFromIme() {}
 
     virtual void clear() = 0;
 
     virtual const std::wstring &preedit() const = 0;
     /// Caret offset in UTF-16 code units within `preedit()` (TSF composition).
-    virtual int preeditCaretUtf16() const { return static_cast<int>(preedit().size()); }
+    virtual int preeditCaretUtf16() const {
+        return static_cast<int>(preedit().size());
+    }
     virtual const std::vector<std::wstring> &candidates() const = 0;
     virtual int highlightIndex() const = 0;
     virtual void setHighlightIndex(int index) = 0;
@@ -46,28 +49,34 @@ class ImeEngine {
     virtual std::wstring candidateText(size_t index) const = 0;
     virtual std::wstring highlightedCandidateText() const = 0;
 
-    /// Commits produced by fcitx core (`InputContext::commitString`) between TSF
-    /// edit-session steps. Default: none (stub engine).
+    /// Commits produced by fcitx core (`InputContext::commitString`) between
+    /// TSF edit-session steps. Default: none (stub engine).
     virtual std::wstring drainNextCommit();
 
-    /// If true, mouse pick is handled by the engine (fcitx digit keys). If false,
-    /// TSF commits `candidateText(index)` (stub).
+    /// If true, mouse pick is handled by the engine (fcitx digit keys). If
+    /// false, TSF commits `candidateText(index)` (stub).
     virtual bool feedCandidatePick(size_t index);
 
-    /// Forward Up/Down/Space/Return/digit to fcitx when the candidate window is up.
+    /// Forward Up/Down/Space/Return/digit to fcitx when the candidate window is
+    /// up.
     virtual bool tryForwardCandidateKey(unsigned vk);
     /// Forward Return to fcitx when there is preedit but no candidate list.
     virtual bool tryForwardPreeditCommit();
 
-    /// Keys bound in global `profile` (enumerate IM / enumerate group). Stub: never.
-    virtual bool imManagerHotkeyWouldEat(unsigned vk, std::uintptr_t lParam) const;
-    /// Apply hotkey if it matches `GlobalConfig`; returns true if the key was consumed.
+    /// Keys bound in global `profile` (enumerate IM / enumerate group). Stub:
+    /// never.
+    virtual bool imManagerHotkeyWouldEat(unsigned vk,
+                                         std::uintptr_t lParam) const;
+    /// Apply hotkey if it matches `GlobalConfig`; returns true if the key was
+    /// consumed.
     virtual bool tryConsumeImManagerHotkey(unsigned vk, std::uintptr_t lParam);
 
-    /// Modifier-only shortcuts (`triggerKeys` / `altTriggerKeys` / …) need KeyDown+KeyUp
-    /// delivered as `fcitx::KeyEvent`; TSF otherwise never calls `OnKeyUp`. Stub: false.
+    /// Modifier-only shortcuts (`triggerKeys` / `altTriggerKeys` / …) need
+    /// KeyDown+KeyUp delivered as `fcitx::KeyEvent`; TSF otherwise never calls
+    /// `OnKeyUp`. Stub: false.
     virtual bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const;
-    /// Forward one key to fcitx `Instance` key watcher; returns KeyEvent::accepted().
+    /// Forward one key to fcitx `Instance` key watcher; returns
+    /// KeyEvent::accepted().
     virtual bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
                                          bool isRelease);
 

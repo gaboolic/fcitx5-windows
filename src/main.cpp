@@ -24,7 +24,8 @@ void setenv(const char *name, const std::string &value) {
 
 void setupRimeUserDirEnv() {
     char existing[MAX_PATH] = {};
-    if (GetEnvironmentVariableA("FCITX_RIME_USER_DIR", existing, MAX_PATH) > 0) {
+    if (GetEnvironmentVariableA("FCITX_RIME_USER_DIR", existing, MAX_PATH) >
+        0) {
         return;
     }
     char appData[MAX_PATH] = {};

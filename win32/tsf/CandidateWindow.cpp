@@ -47,7 +47,8 @@ LRESULT CALLBACK CandidateWindow::staticWndProc(HWND hwnd, UINT msg, WPARAM wp,
     if (msg == WM_NCCREATE) {
         auto *cs = reinterpret_cast<CREATESTRUCTW *>(lp);
         auto *self = static_cast<CandidateWindow *>(cs->lpCreateParams);
-        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA,
+                          reinterpret_cast<LONG_PTR>(self));
         return TRUE;
     }
     auto *self = reinterpret_cast<CandidateWindow *>(
@@ -58,7 +59,8 @@ LRESULT CALLBACK CandidateWindow::staticWndProc(HWND hwnd, UINT msg, WPARAM wp,
     return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
-LRESULT CandidateWindow::handleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+LRESULT CandidateWindow::handleMessage(HWND hwnd, UINT msg, WPARAM wp,
+                                       LPARAM lp) {
     switch (msg) {
     case WM_DESTROY:
         hwnd_ = nullptr;
@@ -76,7 +78,8 @@ LRESULT CandidateWindow::handleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
         SetBkMode(hdc, TRANSPARENT);
         for (size_t i = 0; i < labels_.size(); ++i) {
             RECT line = cr;
-            line.top = static_cast<LONG>(padY_ + static_cast<int>(i) * lineHeight_);
+            line.top =
+                static_cast<LONG>(padY_ + static_cast<int>(i) * lineHeight_);
             line.bottom = line.top + lineHeight_;
             if (static_cast<int>(i) == highlight_) {
                 HBRUSH hi = CreateSolidBrush(RGB(200, 220, 255));
@@ -85,8 +88,9 @@ LRESULT CandidateWindow::handleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp
             }
             RECT textRc = line;
             textRc.left += padX_;
-            DrawTextW(hdc, labels_[i].c_str(), static_cast<int>(labels_[i].size()),
-                      &textRc, DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
+            DrawTextW(hdc, labels_[i].c_str(),
+                      static_cast<int>(labels_[i].size()), &textRc,
+                      DT_SINGLELINE | DT_VCENTER | DT_NOPREFIX);
         }
         if (old) {
             SelectObject(hdc, old);
@@ -190,10 +194,10 @@ void CandidateWindow::show(int screenX, int screenY,
     }
     ensureClass();
     if (!hwnd_) {
-        hwnd_ =
-            CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                            kClassName, L"", WS_POPUP | WS_BORDER, screenX, screenY,
-                            100, 100, nullptr, nullptr, dllInstance, this);
+        hwnd_ = CreateWindowExW(
+            WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClassName,
+            L"", WS_POPUP | WS_BORDER, screenX, screenY, 100, 100, nullptr,
+            nullptr, dllInstance, this);
     }
     const UINT dpi = GetDpiForWindow(hwnd_);
     if (!font_ || lastFontDpi_ != dpi) {
@@ -205,9 +209,9 @@ void CandidateWindow::show(int screenX, int screenY,
         const int fontPx =
             MulDiv(14, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
         font_ = CreateFontW(-fontPx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
-                            CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE,
-                            L"Segoe UI");
+                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     }
     layoutAndPaint();
     clampToWorkArea(&screenX, &screenY);

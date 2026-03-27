@@ -6,7 +6,8 @@ bool Tsf::initTextEditSink(ITfDocumentMgr *documentMgr) {
     // clear out any previous sink first
     if (textEditSinkCookie_ != TF_INVALID_COOKIE) {
         if (SUCCEEDED(textEditSinkContext_->QueryInterface(
-                IID_ITfSource, reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
+                IID_ITfSource,
+                reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
             source->UnadviseSink(textEditSinkCookie_);
         }
         textEditSinkContext_.Reset();
@@ -15,7 +16,8 @@ bool Tsf::initTextEditSink(ITfDocumentMgr *documentMgr) {
     if (documentMgr == nullptr) {
         return true; // caller just wanted to clear the previous sink
     }
-    if (FAILED(documentMgr->GetTop(textEditSinkContext_.ReleaseAndGetAddressOf()))) {
+    if (FAILED(documentMgr->GetTop(
+            textEditSinkContext_.ReleaseAndGetAddressOf()))) {
         return false;
     }
     if (!textEditSinkContext_) {
@@ -24,8 +26,10 @@ bool Tsf::initTextEditSink(ITfDocumentMgr *documentMgr) {
     source.Reset();
     bool ret = false;
     if (SUCCEEDED(textEditSinkContext_->QueryInterface(
-            IID_ITfSource, reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
-        if (SUCCEEDED(source->AdviseSink(IID_ITfTextEditSink, (ITfTextEditSink *)this,
+            IID_ITfSource,
+            reinterpret_cast<void **>(source.ReleaseAndGetAddressOf())))) {
+        if (SUCCEEDED(source->AdviseSink(IID_ITfTextEditSink,
+                                         (ITfTextEditSink *)this,
                                          &textEditSinkCookie_))) {
             ret = true;
         } else {

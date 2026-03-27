@@ -1,8 +1,8 @@
 #pragma once
 
+#include "MsctfMingwCompat.h"
 #include <Windows.h>
 #include <msctf.h>
-#include "MsctfMingwCompat.h"
 
 namespace fcitx {
 
@@ -31,7 +31,8 @@ class CandidateListUiElement final : public ITfCandidateListUIElement {
     STDMETHODIMP GetCount(UINT *puCount) override;
     STDMETHODIMP GetSelection(UINT *puIndex) override;
     STDMETHODIMP GetString(UINT uIndex, BSTR *pstr) override;
-    STDMETHODIMP GetPageIndex(UINT *pIndex, UINT uSize, UINT *puPageCnt) override;
+    STDMETHODIMP GetPageIndex(UINT *pIndex, UINT uSize,
+                              UINT *puPageCnt) override;
     STDMETHODIMP SetPageIndex(UINT *pIndex, UINT uPageCnt) override;
     STDMETHODIMP GetCurrentPage(UINT *puPage) override;
 
