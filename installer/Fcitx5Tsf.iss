@@ -34,8 +34,8 @@ WizardSizePercent=110,100
 DisableWelcomePage=no
 
 [Languages]
+; English only: chocolatey innosetup omits compiler:Languages\*.isl packs.
 Name: "english"; MessagesFile: "compiler:Default.isl"
-Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Tasks]
 Name: "desktopuninstall"; Description: "Create desktop shortcut to uninstall"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
