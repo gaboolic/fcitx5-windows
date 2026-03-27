@@ -59,8 +59,8 @@ inline std::wstring getEnvironmentVariableWide(const wchar_t *name) {
         return {};
     }
     wchar_t buf[32767];
-    const DWORD n = GetEnvironmentVariableW(
-        name, buf, static_cast<DWORD>(std::size(buf)));
+    const DWORD n =
+        GetEnvironmentVariableW(name, buf, static_cast<DWORD>(std::size(buf)));
     if (n == 0 || n >= std::size(buf)) {
         return {};
     }
