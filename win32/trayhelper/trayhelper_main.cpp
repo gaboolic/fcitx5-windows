@@ -45,8 +45,9 @@ struct TrayStatusActionItem {
 constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kReopenContextMenuMessage = WM_APP + 89;
 constexpr UINT_PTR kRetryTimerId = 1;
-constexpr UINT_PTR kExplorerRefreshTimerId = 2;
+constexpr UINT_PTR kHideDelayTimerId = 2;
 constexpr UINT kRetryDelayMs = 1500;
+constexpr UINT kHideDelayMs = 300;
 constexpr UINT kShellTrayUid = 1;
 constexpr wchar_t kMutexName[] = L"Local\\Fcitx5StandaloneTrayHelperMutex";
 
@@ -84,15 +85,19 @@ bool g_lastChineseMode = true;
 std::string g_lastCurrentIm;
 POINT g_reopenMenuPoint = {};
 bool g_reopenMenuPending = false;
-bool g_pendingExplorerVisible = false;
-bool g_pendingExplorerRefresh = false;
+bool g_contextMenuShowing = false;
+bool g_hideDelayPending = false;
 
 struct TrayServiceState {
     bool hasSnapshot = false;
     bool visible = false;
+    bool hasRecentFocusEvent = false;
+    DWORD recentFocusProcessId = 0;
+    bool recentFocusActive = false;
     bool chineseMode = true;
     std::string currentInputMethod;
     std::vector<TrayStatusActionItem> statusActions;
+    std::unordered_map<DWORD, bool> activeFocusByProcess;
 };
 
 TrayServiceState g_trayState;
@@ -377,9 +382,6 @@ std::vector<TrayStatusActionItem> readSharedTrayStatusActions() {
 
 void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
     g_trayState.hasSnapshot = true;
-    if (snapshot.visible != FALSE) {
-        g_trayState.visible = true;
-    }
     g_trayState.chineseMode = snapshot.chineseMode != FALSE;
     g_trayState.currentInputMethod =
         fcitx::trayServiceUtf8FromBuffer(snapshot.currentInputMethod);
@@ -402,9 +404,75 @@ void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
     }
 }
 
-void applyTrayServiceExplorerRefresh(bool visible) {
-    g_trayState.hasSnapshot = true;
-    g_trayState.visible = visible;
+bool isProcessStillRunning(DWORD processId) {
+    HANDLE process = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION,
+                                 FALSE, processId);
+    if (!process) {
+        return false;
+    }
+    const DWORD waitResult = WaitForSingleObject(process, 0);
+    CloseHandle(process);
+    return waitResult == WAIT_TIMEOUT;
+}
+
+void pruneInactiveFocusSources() {
+    for (auto it = g_trayState.activeFocusByProcess.begin();
+         it != g_trayState.activeFocusByProcess.end();) {
+        if (!it->second || !isProcessStillRunning(it->first)) {
+            if (it->second) {
+                trayHelperTrace("dropping stale active focus source pid=" +
+                                std::to_string(
+                                    static_cast<unsigned long>(it->first)));
+            }
+            it = g_trayState.activeFocusByProcess.erase(it);
+            continue;
+        }
+        ++it;
+    }
+}
+
+void cancelDelayedHide() {
+    if (!g_hideDelayPending) {
+        return;
+    }
+    g_hideDelayPending = false;
+    KillTimer(g_hwnd, kHideDelayTimerId);
+    trayHelperTrace("cancelled delayed hide");
+}
+
+void scheduleDelayedHide() {
+    if (g_hideDelayPending) {
+        KillTimer(g_hwnd, kHideDelayTimerId);
+    }
+    if (!g_hwnd) {
+        return;
+    }
+    g_hideDelayPending = true;
+    SetTimer(g_hwnd, kHideDelayTimerId, kHideDelayMs, nullptr);
+    trayHelperTrace("scheduled delayed hide delayMs=" +
+                    std::to_string(static_cast<unsigned long>(kHideDelayMs)));
+}
+
+void applyTrayServiceFocusEvent(const fcitx::TrayServiceFocusEvent &event) {
+    g_trayState.hasRecentFocusEvent = true;
+    g_trayState.recentFocusProcessId = event.processId;
+    g_trayState.recentFocusActive = event.active != FALSE;
+    if (g_trayState.recentFocusActive) {
+        cancelDelayedHide();
+        g_trayState.activeFocusByProcess[event.processId] = true;
+    } else {
+        if (g_contextMenuShowing) {
+            trayHelperTrace("ignored inactive focus during context menu pid=" +
+                            std::to_string(
+                                static_cast<unsigned long>(event.processId)));
+            return;
+        }
+        g_trayState.activeFocusByProcess.erase(event.processId);
+        pruneInactiveFocusSources();
+        if (g_trayState.activeFocusByProcess.empty()) {
+            scheduleDelayedHide();
+        }
+    }
 }
 
 std::string trayServiceCurrentInputMethodState() {
@@ -929,10 +997,20 @@ bool updateTrayTooltip(bool chineseMode) {
 
 // Mirror WeaselTrayIcon::Refresh(): decide visibility first, then update icon.
 bool shouldShowTrayIcon() {
-    if (g_trayState.hasSnapshot) {
+    if (g_contextMenuShowing) {
+        return true;
+    }
+    pruneInactiveFocusSources();
+    if (g_hideDelayPending) {
+        g_trayState.visible = true;
+        return true;
+    }
+    if (g_trayState.hasRecentFocusEvent) {
+        g_trayState.visible = !g_trayState.activeFocusByProcess.empty();
         return g_trayState.visible;
     }
-    trayHelperTrace("shouldShowTrayIcon missing tray snapshot");
+    g_trayState.visible = false;
+    trayHelperTrace("shouldShowTrayIcon missing focus event");
     return false;
 }
 
@@ -1206,10 +1284,12 @@ void showContextMenu() {
                     L"\x6253\x5f00 Fcitx5 \x65e5\x5fd7\x76ee\x5f55");
 
         SetForegroundWindow(g_hwnd);
+        g_contextMenuShowing = true;
         const UINT cmd =
             TrackPopupMenu(menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD |
                                       TPM_NONOTIFY,
                            pt.x, pt.y, 0, g_hwnd, nullptr);
+        g_contextMenuShowing = false;
         trayHelperTrace("showContextMenu selected cmd=" +
                         std::to_string(static_cast<unsigned long>(cmd)) + " (" +
                         trayMenuCommandName(cmd) + ")");
@@ -1314,43 +1394,29 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
         if (snapshot->version != 1) {
             return false;
         }
-        KillTimer(g_hwnd, kExplorerRefreshTimerId);
-        g_pendingExplorerRefresh = false;
         applyTrayServiceSnapshot(*snapshot);
         trayHelperTrace("received tray snapshot snapshotVisible=" +
                         std::string(snapshot->visible != FALSE ? "true" : "false") +
-                        " effectiveVisible=" +
-                        std::string(g_trayState.visible ? "true" : "false") +
                         " chinese=" +
                         std::string(g_trayState.chineseMode ? "true" : "false") +
                         " current=" + g_trayState.currentInputMethod);
         refreshTrayState();
         return true;
     }
-    if (cds->dwData == fcitx::kTrayServiceCopyDataExplorerRefresh &&
-        cds->cbData == sizeof(fcitx::TrayServiceExplorerRefresh)) {
-        const auto *refresh =
-            reinterpret_cast<const fcitx::TrayServiceExplorerRefresh *>(cds->lpData);
-        if (refresh->version != 1) {
+    if (cds->dwData == fcitx::kTrayServiceCopyDataFocusEvent &&
+        cds->cbData == sizeof(fcitx::TrayServiceFocusEvent)) {
+        const auto *event =
+            reinterpret_cast<const fcitx::TrayServiceFocusEvent *>(cds->lpData);
+        if (event->version != 1) {
             return false;
         }
-        g_pendingExplorerVisible = refresh->visible != FALSE;
-        KillTimer(g_hwnd, kExplorerRefreshTimerId);
-        if (refresh->delayMs > 0) {
-            SetTimer(g_hwnd, kExplorerRefreshTimerId, refresh->delayMs, nullptr);
-            g_pendingExplorerRefresh = true;
-            trayHelperTrace("scheduled explorer refresh visible=" +
-                            std::string(g_pendingExplorerVisible ? "true"
-                                                                 : "false") +
-                            " delayMs=" +
-                            std::to_string(
-                                static_cast<unsigned long>(refresh->delayMs)));
-        } else {
-            applyTrayServiceExplorerRefresh(g_pendingExplorerVisible);
-            trayHelperTrace("applied explorer refresh visible=" +
-                            std::string(g_trayState.visible ? "true" : "false"));
-            refreshTrayState();
-        }
+        applyTrayServiceFocusEvent(*event);
+        trayHelperTrace("received tray focus event active=" +
+                        std::string(event->active != FALSE ? "true" : "false") +
+                        " pid=" +
+                        std::to_string(
+                            static_cast<unsigned long>(event->processId)));
+        refreshTrayState();
         return true;
     }
     return false;
@@ -1393,12 +1459,10 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             refreshTrayState();
             return 0;
         }
-        if (wp == kExplorerRefreshTimerId) {
-            KillTimer(hwnd, kExplorerRefreshTimerId);
-            g_pendingExplorerRefresh = false;
-            applyTrayServiceExplorerRefresh(g_pendingExplorerVisible);
-            trayHelperTrace("timer applied explorer refresh visible=" +
-                            std::string(g_trayState.visible ? "true" : "false"));
+        if (wp == kHideDelayTimerId) {
+            KillTimer(hwnd, kHideDelayTimerId);
+            g_hideDelayPending = false;
+            trayHelperTrace("delayed hide timer fired");
             refreshTrayState();
             return 0;
         }
@@ -1413,7 +1477,7 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         trayHelperTrace("wndproc WM_DESTROY");
         KillTimer(hwnd, kRetryTimerId);
-        KillTimer(hwnd, kExplorerRefreshTimerId);
+        KillTimer(hwnd, kHideDelayTimerId);
         removeTrayIcon();
         PostQuitMessage(0);
         return 0;

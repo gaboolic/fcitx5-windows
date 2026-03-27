@@ -1577,7 +1577,7 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
     return true;
 }
 
-void Tsf::pushTrayServiceStateSnapshot(bool visible) const {
+void Tsf::pushTrayServiceStateSnapshot() const {
     if (currentProcessIsExplorer()) {
         return;
     }
@@ -1591,7 +1591,7 @@ void Tsf::pushTrayServiceStateSnapshot(bool visible) const {
     }
     fcitx::TrayServiceSnapshot snapshot = {};
     snapshot.version = 1;
-    snapshot.visible = visible ? TRUE : FALSE;
+    snapshot.visible = TRUE;
     snapshot.chineseMode = chineseActive_ ? TRUE : FALSE;
     const auto current =
         engine_ ? engine_->currentInputMethod() : std::string{};
@@ -1616,37 +1616,33 @@ void Tsf::pushTrayServiceStateSnapshot(bool visible) const {
         tsfTrace("pushTrayServiceStateSnapshot SendMessageTimeout failed");
         return;
     }
-    tsfTrace("pushTrayServiceStateSnapshot sent visible=" +
-             std::string(visible ? "true" : "false") + " chinese=" +
+    tsfTrace("pushTrayServiceStateSnapshot sent chinese=" +
              std::string(chineseActive_ ? "true" : "false") + " current=" +
              current);
 }
 
-void Tsf::pushTrayServiceExplorerRefreshHint(bool visible, UINT delayMs) const {
-    if (!currentProcessIsExplorer()) {
-        return;
-    }
+void Tsf::pushTrayServiceFocusEvent(bool active) const {
     if (!ensureStandaloneTrayHelperRunning()) {
         return;
     }
     const HWND helper = standaloneTrayHelperWindow();
     if (!helper) {
-        tsfTrace("pushTrayServiceExplorerRefreshHint missing helper window");
+        tsfTrace("pushTrayServiceFocusEvent missing helper window");
         return;
     }
-    fcitx::TrayServiceExplorerRefresh refresh = {};
-    refresh.version = 1;
-    refresh.visible = visible ? TRUE : FALSE;
-    refresh.delayMs = delayMs;
+    fcitx::TrayServiceFocusEvent event = {};
+    event.version = 1;
+    event.processId = GetCurrentProcessId();
+    event.active = active ? TRUE : FALSE;
     if (!fcitx::sendTrayServiceCopyData(helper,
-                                        fcitx::kTrayServiceCopyDataExplorerRefresh,
-                                        &refresh, sizeof(refresh))) {
-        tsfTrace("pushTrayServiceExplorerRefreshHint SendMessageTimeout failed");
+                                        fcitx::kTrayServiceCopyDataFocusEvent,
+                                        &event, sizeof(event))) {
+        tsfTrace("pushTrayServiceFocusEvent SendMessageTimeout failed");
         return;
     }
-    tsfTrace("pushTrayServiceExplorerRefreshHint sent visible=" +
-             std::string(visible ? "true" : "false") + " delayMs=" +
-             std::to_string(static_cast<unsigned long>(delayMs)));
+    tsfTrace("pushTrayServiceFocusEvent sent active=" +
+             std::string(active ? "true" : "false") + " pid=" +
+             std::to_string(static_cast<unsigned long>(event.processId)));
 }
 
 void Tsf::langBarNotifyIconUpdate() {
@@ -1665,7 +1661,7 @@ void Tsf::langBarNotifyIconUpdate() {
             }
         }
         persistSharedTrayStatusActionState();
-        pushTrayServiceStateSnapshot(true);
+        pushTrayServiceStateSnapshot();
     }
     updateShellTrayTooltip();
     if (langBarItem_) {

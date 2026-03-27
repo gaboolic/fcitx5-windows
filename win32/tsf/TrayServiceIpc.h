@@ -3,7 +3,6 @@
 #include <Windows.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <string>
 
 namespace fcitx {
@@ -11,8 +10,7 @@ namespace fcitx {
 constexpr wchar_t kStandaloneTrayHelperWindowClass[] =
     L"Fcitx5StandaloneTrayHelperWindow";
 constexpr ULONG_PTR kTrayServiceCopyDataSnapshot = 0x46545331ULL;
-constexpr ULONG_PTR kTrayServiceCopyDataExplorerRefresh = 0x46545332ULL;
-constexpr UINT kTrayServiceExplorerRefreshDelayMs = 100;
+constexpr ULONG_PTR kTrayServiceCopyDataFocusEvent = 0x46545332ULL;
 constexpr size_t kTrayServiceMaxInputMethodLength = 64;
 constexpr size_t kTrayServiceMaxStatusActionCount = 8;
 constexpr size_t kTrayServiceMaxStatusActionNameLength = 32;
@@ -33,10 +31,10 @@ struct TrayServiceSnapshot {
     TrayServiceStatusActionState actions[kTrayServiceMaxStatusActionCount];
 };
 
-struct TrayServiceExplorerRefresh {
+struct TrayServiceFocusEvent {
     DWORD version;
-    BOOL visible;
-    UINT delayMs;
+    DWORD processId;
+    BOOL active;
 };
 
 template <size_t N>

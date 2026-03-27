@@ -85,7 +85,6 @@ inline bool currentProcessUsesMinimalTsfMode() {
 
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
-bool queryActiveFcitxTipForExplorer(bool *active);
 class FcitxLangBarButton;
 class Tsf : public ITfTextInputProcessorEx,
             public ITfActiveLanguageProfileNotifySink,
@@ -187,9 +186,8 @@ class Tsf : public ITfTextInputProcessorEx,
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
     void uninitShellTrayIcon();
-    void pushTrayServiceStateSnapshot(bool visible = true) const;
-    void pushTrayServiceExplorerRefreshHint(bool visible,
-                                            UINT delayMs = 0) const;
+    void pushTrayServiceStateSnapshot() const;
+    void pushTrayServiceFocusEvent(bool active) const;
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
     void scheduleShellTrayRetry(UINT delayMs = 1000);
