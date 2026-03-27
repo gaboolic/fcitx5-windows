@@ -46,6 +46,13 @@ constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kReopenContextMenuMessage = WM_APP + 89;
 constexpr UINT_PTR kRetryTimerId = 1;
 constexpr UINT kRetryDelayMs = 1500;
+/// Coalesce snapshot + tip-session IPC into one Shell_NotifyIcon pass (reduces
+/// remove/add jitter during TSF ActivateEx bursts; same idea as debouncing UI).
+constexpr UINT_PTR kTrayRefreshDebounceTimerId = 2;
+constexpr UINT kTrayRefreshDebounceMs = 85;
+/// Reconcile stale tip-session PIDs if a Deactivate IPC was dropped.
+constexpr UINT_PTR kPeriodicTipSessionTimerId = 3;
+constexpr UINT kPeriodicTipSessionMs = 45000;
 constexpr UINT kShellTrayUid = 1;
 constexpr wchar_t kMutexName[] = L"Local\\Fcitx5StandaloneTrayHelperMutex";
 
@@ -1009,6 +1016,15 @@ void refreshTrayState() {
     g_lastCurrentIm = current;
 }
 
+void queueDebouncedTrayRefresh() {
+    if (!g_hwnd) {
+        return;
+    }
+    KillTimer(g_hwnd, kTrayRefreshDebounceTimerId);
+    SetTimer(g_hwnd, kTrayRefreshDebounceTimerId, kTrayRefreshDebounceMs,
+             nullptr);
+}
+
 HICON loadPenguinIconNearExe(unsigned cx, unsigned cy) {
     const auto iconPath = helperExePath().parent_path() / L"penguin.ico";
     HICON icon = reinterpret_cast<HICON>(LoadImageW(
@@ -1383,7 +1399,7 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
                         " chinese=" +
                         std::string(g_trayState.chineseMode ? "true" : "false") +
                         " current=" + g_trayState.currentInputMethod);
-        refreshTrayState();
+        queueDebouncedTrayRefresh();
         return true;
     }
     if (cds->dwData == fcitx::kTrayServiceCopyDataTipSession &&
@@ -1398,7 +1414,7 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
             "received tip session active=" +
             std::string(event->active != FALSE ? "true" : "false") + " pid=" +
             std::to_string(static_cast<unsigned long>(event->processId)));
-        refreshTrayState();
+        queueDebouncedTrayRefresh();
         return true;
     }
     return false;
@@ -1445,11 +1461,22 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_CREATE:
         trayHelperTrace("wndproc WM_CREATE");
         refreshTrayState();
+        SetTimer(hwnd, kPeriodicTipSessionTimerId, kPeriodicTipSessionMs, nullptr);
         return 0;
     case WM_TIMER:
         if (wp == kRetryTimerId) {
             g_retryPending = false;
             KillTimer(hwnd, kRetryTimerId);
+            refreshTrayState();
+            return 0;
+        }
+        if (wp == kTrayRefreshDebounceTimerId) {
+            KillTimer(hwnd, kTrayRefreshDebounceTimerId);
+            refreshTrayState();
+            return 0;
+        }
+        if (wp == kPeriodicTipSessionTimerId) {
+            pruneInactiveTipSessions();
             refreshTrayState();
             return 0;
         }
@@ -1464,6 +1491,8 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     case WM_DESTROY:
         trayHelperTrace("wndproc WM_DESTROY");
         KillTimer(hwnd, kRetryTimerId);
+        KillTimer(hwnd, kTrayRefreshDebounceTimerId);
+        KillTimer(hwnd, kPeriodicTipSessionTimerId);
         removeTrayIcon();
         PostQuitMessage(0);
         return 0;

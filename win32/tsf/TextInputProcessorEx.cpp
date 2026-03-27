@@ -1,5 +1,7 @@
 #include "tsf.h"
 
+#include <atomic>
+
 namespace fcitx {
 namespace {
 bool currentProcessIsExplorerForMinimalTray() {
@@ -144,6 +146,9 @@ STDAPI Tsf::Deactivate() {
         tsfTrace("Deactivate explorer minimal bootstrap-only");
         return S_OK;
     }
+    flushSharedTrayScheduleFromFocusIfPending();
+    sharedTrayFocusScheduleTick_ = 0;
+    sharedTrayFocusSchedulePending_ = false;
     pushTrayServiceTipSessionEvent(false);
     candidateWin_.hide();
     resetCompositionState();
@@ -169,10 +174,23 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
         return S_OK;
     }
     if (currentProcessIsExplorerForMinimalTray()) {
-        const bool helperReady = initShellTrayIcon();
-        tsfTrace(std::string("ActivateEx explorer minimal helperReady=") +
-                 (helperReady ? "true" : "false") +
-                 " ensure-helper-only no threadMgr");
+        // MSCTF + explorer.exe: ActivateEx/Deactivate can fire in bursts when the
+        // foreground moves to the shell/desktop. Only touch the tray helper until
+        // the first successful ensure — repeated FindWindow / launch during focus
+        // churn stresses Explorer + the notification area (see Weasel-style: avoid
+        // redundant work on the shell TIP path).
+        static std::atomic<bool> s_explorerTrayHelperPrimed{false};
+        if (!s_explorerTrayHelperPrimed.load(std::memory_order_relaxed)) {
+            const bool helperReady = initShellTrayIcon();
+            if (helperReady) {
+                s_explorerTrayHelperPrimed.store(true, std::memory_order_relaxed);
+            }
+            tsfTrace(std::string("ActivateEx explorer minimal helperReady=") +
+                     (helperReady ? "true" : "false") +
+                     " ensure-helper-only no threadMgr");
+        } else {
+            tsfTrace("ActivateEx explorer minimal skipped (helper already primed)");
+        }
         return S_OK;
     }
     threadMgr_ = pThreadMgr;

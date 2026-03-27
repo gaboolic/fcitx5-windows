@@ -94,9 +94,20 @@ inline bool sendTrayServiceCopyData(HWND hwnd, ULONG_PTR kind, const void *data,
     cds.cbData = sizeBytes;
     cds.lpData = const_cast<void *>(data);
     DWORD_PTR result = 0;
-    return SendMessageTimeoutW(hwnd, WM_COPYDATA, 0,
-                               reinterpret_cast<LPARAM>(&cds),
-                               SMTO_ABORTIFHUNG | SMTO_BLOCK, 200, &result) != 0;
+    // Brief retries: tray helper can be busy during Explorer/TSF focus churn;
+    // a dropped WM_COPYDATA leaves the tip-session ref stuck and the icon visible.
+    for (int attempt = 0; attempt < 6; ++attempt) {
+        if (attempt > 0) {
+            Sleep(static_cast<DWORD>(5 * attempt));
+        }
+        if (SendMessageTimeoutW(hwnd, WM_COPYDATA, 0,
+                                reinterpret_cast<LPARAM>(&cds),
+                                SMTO_ABORTIFHUNG | SMTO_BLOCK, 250, &result) !=
+            0) {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace fcitx

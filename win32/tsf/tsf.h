@@ -203,6 +203,8 @@ class Tsf : public ITfTextInputProcessorEx,
 
     bool initThreadMgrEventSink();
     void uninitThreadMgrEventSink();
+    /// Coalesce shared-tray file sync from rapid OnSetFocus bursts (TSF focus churn).
+    void flushSharedTrayScheduleFromFocusIfPending();
     ComPtr<ITfThreadMgr> threadMgr_;
     ComPtr<ITfInputProcessorProfileMgr> profileMgr_;
     TfClientId clientId_ = TF_CLIENTID_NULL;
@@ -216,6 +218,9 @@ class Tsf : public ITfTextInputProcessorEx,
     ComPtr<ITfContext> textEditSinkContext_;
     /// Kept when TSF sink clears on tray focus loss; used to run tray toggle edit session.
     ComPtr<ITfContext> trayEditContextFallback_;
+    /// Last successful scheduleSharedTray* from OnSetFocus; 0 = not yet this session.
+    ULONGLONG sharedTrayFocusScheduleTick_{0};
+    bool sharedTrayFocusSchedulePending_{false};
 
     // ITfKeyEventSink
     bool initKeyEventSink();

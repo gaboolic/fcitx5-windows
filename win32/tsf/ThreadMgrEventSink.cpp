@@ -38,9 +38,31 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
     tsfTrace("OnSetFocus document manager focus changed");
     initTextEditSink(pDocMgrFocus);
     deferredSharedTrayInputMethod_.clear();
+    // Throttle shared-tray sync from document-mgr focus storms (Explorer/desktop
+    // switches can deliver many OnSetFocus calls). Key path still runs above;
+    // tray sync is eventual. Deactivate() flushes if a burst ended while pending.
+    constexpr ULONGLONG kSharedTrayFocusThrottleMs = 80;
+    const ULONGLONG now = GetTickCount64();
+    if (sharedTrayFocusScheduleTick_ == 0ULL ||
+        now - sharedTrayFocusScheduleTick_ >= kSharedTrayFocusThrottleMs) {
+        sharedTrayFocusScheduleTick_ = now;
+        sharedTrayFocusSchedulePending_ = false;
+        scheduleSharedTrayChineseModeRequest();
+        scheduleSharedTrayStatusActionRequest();
+    } else {
+        sharedTrayFocusSchedulePending_ = true;
+    }
+    return S_OK;
+}
+
+void Tsf::flushSharedTrayScheduleFromFocusIfPending() {
+    if (!sharedTrayFocusSchedulePending_) {
+        return;
+    }
+    sharedTrayFocusSchedulePending_ = false;
+    sharedTrayFocusScheduleTick_ = GetTickCount64();
     scheduleSharedTrayChineseModeRequest();
     scheduleSharedTrayStatusActionRequest();
-    return S_OK;
 }
 
 STDMETHODIMP Tsf::OnPushContext(ITfContext *pContext) { return S_OK; }
