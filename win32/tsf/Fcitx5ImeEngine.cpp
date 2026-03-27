@@ -858,11 +858,13 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
 }
 
 void Fcitx5ImeEngine::appendLatinLowercase(wchar_t ch) {
-    if (ch < L'a' || ch > L'z') {
+    if (ch >= L'a' && ch <= L'z') {
+        sendKeySym(static_cast<KeySym>(FcitxKey_a + (ch - L'a')));
         return;
     }
-    const auto sym = static_cast<KeySym>(FcitxKey_a + (ch - L'a'));
-    sendKeySym(sym);
+    if (ch >= L'A' && ch <= L'Z') {
+        sendKeySym(static_cast<KeySym>(FcitxKey_A + (ch - L'A')));
+    }
 }
 
 void Fcitx5ImeEngine::backspace() { sendKeySym(FcitxKey_BackSpace); }

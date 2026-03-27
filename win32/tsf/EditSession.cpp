@@ -33,6 +33,19 @@ bool tsfLatinKeyShouldPassToApp() {
     return ctrlDown || altDown;
 }
 
+/// VK_A..VK_Z → Latin character; matches Windows (Shift XOR Caps Lock), same idea
+/// as Weasel's KeyEvent with SHIFT_MASK + letter.
+wchar_t tsfLatinLetterFromVk(unsigned vk) {
+    if (vk < static_cast<unsigned>('A') || vk > static_cast<unsigned>('Z')) {
+        return L'\0';
+    }
+    const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    const bool capsLock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
+    const bool upper = shiftDown ^ capsLock;
+    return upper ? static_cast<wchar_t>(vk)
+                 : static_cast<wchar_t>(vk - L'A' + L'a');
+}
+
 /// Caret in client coords of hwndCaret → screen. Many hosts return empty
 /// ITfContextView::GetTextExt; GUI thread caret matches the real insertion point.
 /// US-keyboard punctuation keys: must reach fcitx (punctuation addon) instead of the host.
@@ -747,7 +760,11 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        wchar_t ch = static_cast<wchar_t>(vk - L'A' + L'a');
+        const wchar_t ch = tsfLatinLetterFromVk(vk);
+        if (ch == L'\0') {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
         if (engine_->preedit().size() < 32) {
             pendingKeyHandled_ = true;
             engine_->appendLatinLowercase(ch);

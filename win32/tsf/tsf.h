@@ -83,6 +83,10 @@ inline bool currentProcessUsesMinimalTsfMode() {
            currentProcessIsStandaloneTrayHelper();
 }
 
+/// Start fcitx5-tray-helper at most once per explorer.exe load. Avoids repeated
+/// FindWindow/CreateProcess during MSCTF focus/ActivateEx bursts (faults in MSCTF.dll).
+bool explorerTrayHelperPrimedOnce();
+
 template <typename T>
 using ComPtr = Microsoft::WRL::ComPtr<T>;
 class FcitxLangBarButton;

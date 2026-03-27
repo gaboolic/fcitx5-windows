@@ -14,6 +14,7 @@
 #include <windows.h>
 #include <unordered_map>
 #include <memory>
+#include <atomic>
 
 #ifndef CONNECT_E_NOCONNECTION
 #define CONNECT_E_NOCONNECTION static_cast<HRESULT>(0x80040200L)
@@ -1024,6 +1025,19 @@ void appendRadioMenuItem(HMENU menu, UINT id, const wchar_t *label) {
 
 } // namespace
 
+static std::atomic<bool> g_explorerTrayHelperPrimed{false};
+
+bool explorerTrayHelperPrimedOnce() {
+    if (g_explorerTrayHelperPrimed.load(std::memory_order_relaxed)) {
+        return true;
+    }
+    if (!ensureStandaloneTrayHelperRunning()) {
+        return false;
+    }
+    g_explorerTrayHelperPrimed.store(true, std::memory_order_relaxed);
+    return true;
+}
+
 FcitxLangBarButton::FcitxLangBarButton(Tsf *tsf)
     : tsf_(tsf), ref_(1), status_(0), sink_(nullptr) {
     DllAddRef();
@@ -1765,6 +1779,12 @@ LRESULT CALLBACK Tsf::shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
 }
 
 bool Tsf::initShellTrayIcon() {
+    if (currentProcessIsExplorer()) {
+        const bool helperReady = explorerTrayHelperPrimedOnce();
+        tsfTrace(std::string("initShellTrayIcon explorer helperReady=") +
+                 (helperReady ? "true" : "false"));
+        return helperReady;
+    }
     const bool helperReady = ensureStandaloneTrayHelperRunning();
     tsfTrace(std::string("initShellTrayIcon standalone helperReady=") +
              (helperReady ? "true" : "false"));
@@ -1812,16 +1832,24 @@ void Tsf::cancelShellTrayRetry() {
 }
 
 void Tsf::updateShellTrayTooltip() {
+    if (currentProcessIsExplorer()) {
+        explorerTrayHelperPrimedOnce();
+        return;
+    }
     ensureStandaloneTrayHelperRunning();
 }
 
 void Tsf::recreateShellTrayIcon() {
+    if (currentProcessIsExplorer()) {
+        explorerTrayHelperPrimedOnce();
+        return;
+    }
     ensureStandaloneTrayHelperRunning();
 }
 
 void Tsf::showShellTrayContextMenu() {
     if (currentProcessIsExplorer()) {
-        ensureStandaloneTrayHelperRunning();
+        explorerTrayHelperPrimedOnce();
         return;
     }
     POINT pt;
@@ -1835,7 +1863,7 @@ void Tsf::showShellTrayContextMenu() {
 
 void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
     if (currentProcessIsExplorer()) {
-        ensureStandaloneTrayHelperRunning();
+        explorerTrayHelperPrimedOnce();
         return;
     }
     ScopedDllPin menuPin;
