@@ -3,9 +3,11 @@
 #include <shlobj.h>
 
 #include "../tsf/TrayServiceIpc.h"
+#include "../tsf/Win32GnuApiCompat.h"
 
 #include <cwchar>
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <sstream>
 #include <string>
@@ -165,7 +167,7 @@ void updateForegroundTrayValidityState() {
     std::wstring base;
     g_foregroundTrayValidity.foregroundIsShellOrHelper =
         queryProcessImageBaseName(pid, &base) &&
-        (_wcsicmp(base.c_str(), L"explorer.exe") == 0);
+        (fcitx::wideStringCompareI(base.c_str(), L"explorer.exe") == 0);
 }
 
 struct RimeDeployMonitorData {
@@ -913,8 +915,9 @@ void exploreRimeLogDir() {
 }
 
 std::filesystem::path fcitx5RimeUserDir() {
-    const wchar_t *envDir = _wgetenv(L"FCITX_RIME_USER_DIR");
-    if (envDir && *envDir) {
+    const std::wstring envDir =
+        fcitx::getEnvironmentVariableWide(L"FCITX_RIME_USER_DIR");
+    if (!envDir.empty()) {
         return envDir;
     }
     return appDataRoot() / L"rime";
@@ -953,15 +956,15 @@ void populateTrayNid(NOTIFYICONDATAW *nid, bool useGuid, bool chineseMode) {
     nid->uCallbackMessage = kShellTrayCallback;
     nid->hIcon = g_icon;
     if (chineseMode) {
-        wcsncpy_s(nid->szTip,
-                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
-                  L"\x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
+        fcitx::wideStringCopyTruncate(
+            nid->szTip, std::size(nid->szTip),
+            L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
+            L"\x5207\x6362\x4e2d/\x82f1");
     } else {
-        wcsncpy_s(nid->szTip,
-                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
-                  L"\x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
+        fcitx::wideStringCopyTruncate(
+            nid->szTip, std::size(nid->szTip),
+            L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
+            L"\x5207\x6362\x4e2d/\x82f1");
     }
 }
 
@@ -974,8 +977,9 @@ void showTrayBalloon(const wchar_t *title, const wchar_t *text,
     fillShellTrayNidIdentity(&nid, g_useGuidIdentity);
     nid.uFlags |= NIF_INFO;
     nid.dwInfoFlags = infoFlags;
-    wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
-    wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+    fcitx::wideStringCopyTruncate(nid.szInfoTitle, std::size(nid.szInfoTitle),
+                                  title);
+    fcitx::wideStringCopyTruncate(nid.szInfo, std::size(nid.szInfo), text);
     nid.uTimeout = 3000;
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }
@@ -1065,15 +1069,15 @@ bool updateTrayTooltip(bool chineseMode) {
     nid.uFlags |= NIF_TIP | NIF_SHOWTIP | NIF_ICON;
     nid.hIcon = g_icon;
     if (chineseMode) {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
-                  L"\x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
+        fcitx::wideStringCopyTruncate(
+            nid.szTip, std::size(nid.szTip),
+            L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
+            L"\x5207\x6362\x4e2d/\x82f1");
     } else {
-        wcsncpy_s(nid.szTip,
-                  L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
-                  L"\x5207\x6362\x4e2d/\x82f1",
-                  _TRUNCATE);
+        fcitx::wideStringCopyTruncate(
+            nid.szTip, std::size(nid.szTip),
+            L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
+            L"\x5207\x6362\x4e2d/\x82f1");
     }
     if (Shell_NotifyIconW(NIM_MODIFY, &nid)) {
         return true;

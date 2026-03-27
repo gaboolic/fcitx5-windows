@@ -4,6 +4,7 @@
 #include "ImeEngine.h"
 
 #include "MsctfMingwCompat.h"
+#include "Win32GnuApiCompat.h"
 #include <msctf.h>
 #include <wrl/client.h>
 
@@ -51,7 +52,8 @@ inline std::string currentProcessExeBaseNameUtf8() {
 
 inline void tsfTrace(const std::string &message) {
     const auto path = tsfTraceLogPath();
-    HANDLE file = CreateFileW(path.c_str(), FILE_APPEND_DATA,
+    const std::wstring wpath = pathAsWide(path);
+    HANDLE file = CreateFileW(wpath.c_str(), FILE_APPEND_DATA,
                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
                               OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     if (file == INVALID_HANDLE_VALUE) {
@@ -71,7 +73,7 @@ inline void tsfTrace(const std::string &message) {
 inline bool currentProcessExeBaseNameEquals(const wchar_t *expected) {
     const std::wstring baseName = currentProcessExeBaseName();
     return !baseName.empty() && expected &&
-           _wcsicmp(baseName.c_str(), expected) == 0;
+           wideStringCompareI(baseName.c_str(), expected) == 0;
 }
 
 inline bool currentProcessIsStandaloneTrayHelper() {

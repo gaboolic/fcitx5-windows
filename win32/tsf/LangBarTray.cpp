@@ -6,6 +6,7 @@
 #include <atomic>
 #include <fcitx-utils/log.h>
 #include <filesystem>
+#include <iterator>
 #include <fstream>
 #include <memory>
 #include <windows.h>
@@ -111,7 +112,8 @@ bool currentProcessIsExplorer() {
     const size_t pos = path.find_last_of(L"\\/");
     const std::wstring_view file =
         pos == std::wstring_view::npos ? path : path.substr(pos + 1);
-    return _wcsicmp(std::wstring(file).c_str(), L"explorer.exe") == 0;
+    return fcitx::wideStringCompareI(std::wstring(file).c_str(),
+                                     L"explorer.exe") == 0;
 }
 
 bool launchDetachedProcess(const std::wstring &application,
@@ -487,15 +489,17 @@ void showTrayBalloon(HWND hostHwnd, const wchar_t *title, const wchar_t *text,
     fillShellTrayNidIdentity(&nid, hostHwnd, true);
     nid.uFlags |= NIF_INFO;
     nid.dwInfoFlags = infoFlags;
-    wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
-    wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+    fcitx::wideStringCopyTruncate(nid.szInfoTitle, std::size(nid.szInfoTitle),
+                                  title);
+    fcitx::wideStringCopyTruncate(nid.szInfo, std::size(nid.szInfo), text);
     nid.uTimeout = 3000;
     if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) {
         fillShellTrayNidIdentity(&nid, hostHwnd, false);
         nid.uFlags |= NIF_INFO;
         nid.dwInfoFlags = infoFlags;
-        wcsncpy_s(nid.szInfoTitle, title, _TRUNCATE);
-        wcsncpy_s(nid.szInfo, text, _TRUNCATE);
+        fcitx::wideStringCopyTruncate(nid.szInfoTitle,
+                                      std::size(nid.szInfoTitle), title);
+        fcitx::wideStringCopyTruncate(nid.szInfo, std::size(nid.szInfo), text);
         nid.uTimeout = 3000;
         Shell_NotifyIconW(NIM_MODIFY, &nid);
     }
@@ -509,15 +513,15 @@ bool shellTrayNotifyAdd(HWND hostHwnd, HICON icon, bool chineseMode,
         nid->uCallbackMessage = kShellTrayCallback;
         nid->hIcon = icon;
         if (chineseMode) {
-            wcsncpy_s(nid->szTip,
-                      L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
-                      L"\x5207\x6362\x4e2d/\x82f1",
-                      _TRUNCATE);
+            fcitx::wideStringCopyTruncate(
+                nid->szTip, std::size(nid->szTip),
+                L"Fcitx5 \x2014 \x4e2d\x6587\nShift / Ctrl+Space "
+                L"\x5207\x6362\x4e2d/\x82f1");
         } else {
-            wcsncpy_s(nid->szTip,
-                      L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
-                      L"\x5207\x6362\x4e2d/\x82f1",
-                      _TRUNCATE);
+            fcitx::wideStringCopyTruncate(
+                nid->szTip, std::size(nid->szTip),
+                L"Fcitx5 \x2014 English\nShift / Ctrl+Space "
+                L"\x5207\x6362\x4e2d/\x82f1");
         }
     };
 
@@ -574,8 +578,9 @@ HICON loadPenguinIconNearDll(unsigned cx, unsigned cy) {
     }
     std::filesystem::path p(dllPath);
     p = p.parent_path() / L"penguin.ico";
+    const std::wstring pwide = fcitx::pathAsWide(p);
     return reinterpret_cast<HICON>(
-        LoadImageW(nullptr, p.c_str(), IMAGE_ICON, static_cast<int>(cx),
+        LoadImageW(nullptr, pwide.c_str(), IMAGE_ICON, static_cast<int>(cx),
                    static_cast<int>(cy), LR_LOADFROMFILE));
 }
 
@@ -591,8 +596,9 @@ void launchSettingsGui() {
         launchDetachedProcess(exeStr, L"", exe.parent_path().wstring());
         return;
     }
-    ShellExecuteW(nullptr, L"open", exeStr.c_str(), nullptr,
-                  exe.parent_path().c_str(), SW_SHOWNORMAL);
+    const std::wstring exeDir = fcitx::pathAsWide(exe.parent_path());
+    ShellExecuteW(nullptr, L"open", exeStr.c_str(), nullptr, exeDir.c_str(),
+                  SW_SHOWNORMAL);
 }
 
 std::filesystem::path fcitxPortableRoot() {
@@ -701,8 +707,9 @@ std::filesystem::path userRimeConfigPath() {
 std::filesystem::path fcitx5RimeUserDir() {
     // 获取 Fcitx5 的 Rime 用户目录
     // 首先检查环境变量，如果没有设置则使用默认路径
-    const wchar_t *envDir = _wgetenv(L"FCITX_RIME_USER_DIR");
-    if (envDir && *envDir) {
+    const std::wstring envDir =
+        fcitx::getEnvironmentVariableWide(L"FCITX_RIME_USER_DIR");
+    if (!envDir.empty()) {
         return envDir;
     }
 
@@ -1117,7 +1124,8 @@ STDMETHODIMP FcitxLangBarButton::GetInfo(TF_LANGBARITEMINFO *pInfo) {
     pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU |
                      TF_LBI_STYLE_SHOWNINTRAY;
     pInfo->ulSort = 0;
-    wcsncpy_s(pInfo->szDescription, TF_LBI_DESC_MAXLEN, L"Fcitx5", _TRUNCATE);
+    fcitx::wideStringCopyTruncate(pInfo->szDescription, TF_LBI_DESC_MAXLEN,
+                                  L"Fcitx5");
     return S_OK;
 }
 

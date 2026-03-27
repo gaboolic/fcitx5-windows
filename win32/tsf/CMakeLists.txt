@@ -12,8 +12,11 @@ add_library(tsf STATIC
     StubImeEngine.cpp
 )
 
-if(WIN32 AND NOT MSVC)
-    target_sources(tsf PRIVATE MsctfMingwCompat.cpp)
+# MSYS2 job uses /usr/bin/g++ (often CMAKE_SYSTEM_NAME=MSYS, not WIN32).
+if(NOT MSVC)
+    if(WIN32 OR CYGWIN OR MSYS OR CMAKE_SYSTEM_NAME STREQUAL "MSYS")
+        target_sources(tsf PRIVATE MsctfMingwCompat.cpp)
+    endif()
 endif()
 
 if(WIN32)

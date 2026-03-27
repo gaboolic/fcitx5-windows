@@ -1,4 +1,4 @@
-#if defined(__MINGW32__)
+#if defined(__MINGW32__) || defined(__MSYS__)
 
 #include <initguid.h>
 #include <msctf.h>

@@ -6,9 +6,9 @@
 #include <msctf.h>
 
 // MinGW/WIDL msctf.h is incomplete vs the Windows SDK. Fill gaps needed by the
-// TSF IME.
+// TSF IME. MSYS2 /usr/bin/g++ defines __MSYS__ but not __MINGW32__.
 
-#if defined(__MINGW32__)
+#if defined(__MINGW32__) || defined(__MSYS__)
 
 #ifndef TF_CLIENTID_NULL
 #define TF_CLIENTID_NULL ((TfClientId)0)
@@ -25,9 +25,9 @@
 #define TF_CLUIE_CURRENTPAGE 0x00000020
 #endif
 
-#endif /* __MINGW32__ */
+#endif /* __MINGW32__ || __MSYS__ */
 
-#if defined(__MINGW32__) &&                                                    \
+#if (defined(__MINGW32__) || defined(__MSYS__)) &&                             \
     !defined(__ITfTextInputProcessorEx_INTERFACE_DEFINED__)
 #define __ITfTextInputProcessorEx_INTERFACE_DEFINED__
 
@@ -44,7 +44,7 @@ ITfTextInputProcessorEx : public ITfTextInputProcessor {
 
 #endif /* ITfTextInputProcessorEx */
 
-#if defined(__MINGW32__) &&                                                    \
+#if (defined(__MINGW32__) || defined(__MSYS__)) &&                             \
     !defined(__ITfCandidateListUIElement_INTERFACE_DEFINED__)
 #define __ITfCandidateListUIElement_INTERFACE_DEFINED__
 

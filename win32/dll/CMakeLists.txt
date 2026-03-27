@@ -32,8 +32,10 @@ if(NOT MSVC)
 endif()
 
 target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32 shell32)
-if(WIN32 AND NOT MSVC)
-  target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
+if(NOT MSVC)
+  if(WIN32 OR CYGWIN OR MSYS OR CMAKE_SYSTEM_NAME STREQUAL "MSYS")
+    target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
+  endif()
 endif()
 # tsf (Fcitx5ImeEngine) calls uv_run; static lib does not propagate -luv to this DLL.
 if(TARGET Fcitx5Core AND NOT MSVC)
@@ -63,7 +65,13 @@ if(TARGET Fcitx5Core AND TARGET Fcitx5Utils)
   # MinGW/Clang (e.g. MSYS2 CLANG64): libc++ and libFcitx5Utils deps are separate DLLs.
   # regsvr32 loads the IME from deploy bin — those must sit next to libfcitx5-x86_64.dll.
   if(NOT MSVC)
-    get_filename_component(_IME_COMPILER_BINDIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    # Cross-build: driver may live under clang64 while sysroot is clangarm64;
+    # runtime DLLs must match the target (ARM64), not the host compiler dir.
+    if(CMAKE_SYSROOT AND IS_DIRECTORY "${CMAKE_SYSROOT}/bin")
+      set(_IME_COMPILER_BINDIR "${CMAKE_SYSROOT}/bin")
+    else()
+      get_filename_component(_IME_COMPILER_BINDIR "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    endif()
     # libIMECore / libIMEPinyin (pinyin addon) link libzstd; must be next to IME for TSF.
     set(_IME_RUNTIME_DLLS
       libc++.dll

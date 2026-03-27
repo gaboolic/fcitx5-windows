@@ -85,7 +85,7 @@ BOOL RegisterProfiles() {
 // GUID_TFCAT_TIPCAP_SYSTRAYSUPPORT (25504fb4-...) so RegisterCategory is not
 // called twice with the same id (second call can fail with
 // TF_E_ALREADY_EXISTS).
-#if defined(__MINGW32__)
+#if defined(__MINGW32__) || defined(__MSYS__)
 namespace {
 const GUID kRegisterTipCategories[] = {
     {0x534c48c1,
@@ -187,7 +187,7 @@ BOOL RegisterCategories() {
     CoCreateInstance(CLSID_TF_CategoryMgr, nullptr, CLSCTX_INPROC_SERVER,
                      IID_ITfCategoryMgr, reinterpret_cast<void **>(&mgr));
     HRESULT hr = S_OK;
-#if defined(__MINGW32__)
+#if defined(__MINGW32__) || defined(__MSYS__)
     for (const auto &guid : kRegisterTipCategories) {
 #else
     for (const auto &guid : Categories) {

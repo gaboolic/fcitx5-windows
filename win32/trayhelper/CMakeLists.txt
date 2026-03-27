@@ -1,7 +1,9 @@
 add_executable(fcitx5-tray-helper WIN32 trayhelper_main.cpp)
 target_link_libraries(fcitx5-tray-helper PRIVATE shell32)
-if(WIN32 AND NOT MSVC)
-  target_link_options(fcitx5-tray-helper PRIVATE -mwindows -municode)
+if(NOT MSVC)
+  if(WIN32 OR CYGWIN OR MSYS OR CMAKE_SYSTEM_NAME STREQUAL "MSYS")
+    target_link_options(fcitx5-tray-helper PRIVATE -mwindows -municode)
+  endif()
 endif()
 install(TARGETS fcitx5-tray-helper RUNTIME DESTINATION "${CMAKE_INSTALL_BINDIR}")
 
