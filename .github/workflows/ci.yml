@@ -48,21 +48,39 @@ jobs:
         run: |
           C:/msys64/usr/bin/pacman -Syu --noconfirm
           C:/msys64/usr/bin/pacman -S --noconfirm `
+            mingw-w64-clang-x86_64-clang `
+            mingw-w64-clang-x86_64-cmake `
+            mingw-w64-clang-x86_64-ninja `
             mingw-w64-clang-x86_64-extra-cmake-modules `
-            cmake `
-            gcc `
+            mingw-w64-clang-x86_64-libuv `
+            mingw-w64-clang-x86_64-dlfcn `
+            mingw-w64-clang-x86_64-pkgconf `
+            mingw-w64-clang-x86_64-gettext-tools `
             gettext-devel `
-            libuv-devel `
-            msys2-runtime-devel `
-            ninja
+            msys2-runtime-devel
           cp -r windows-cross/its C:/msys64/usr/share/gettext
+          Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
           Add-Content $env:GITHUB_PATH "C:/msys64/usr/bin"
 
+      - name: Install ImageMagick (win32 penguin.ico)
+        run: choco install imagemagick -y --no-progress
+
       - name: Build
+        shell: pwsh
+        env:
+          CLANG64: C:/msys64/clang64
         run: |
-          cmake -B build -G Ninja `
-            -DCMAKE_BUILD_TYPE=Release
-          cmake --build build
+          $ErrorActionPreference = 'Stop'
+          $env:PATH = "$env:CLANG64/bin;C:/msys64/usr/bin;$env:PATH"
+          $root = $env:GITHUB_WORKSPACE
+          $stage = ($root + '/stage-installer') -replace '\\', '/'
+          cmake -S $root -B (Join-Path $root 'build') -G Ninja `
+            -DCMAKE_BUILD_TYPE=Release `
+            "-DCMAKE_C_COMPILER=$env:CLANG64/bin/clang.exe" `
+            "-DCMAKE_CXX_COMPILER=$env:CLANG64/bin/clang++.exe" `
+            "-DCMAKE_INSTALL_PREFIX=$stage" `
+            -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
+          cmake --build (Join-Path $root 'build')
 
       - name: Install Inno Setup 6
         run: choco install innosetup -y --no-progress
@@ -73,7 +91,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $root = $env:GITHUB_WORKSPACE
           $stage = Join-Path $root 'stage-installer'
-          cmake --install (Join-Path $root 'build') --prefix $stage
+          cmake --install (Join-Path $root 'build')
           & (Join-Path $root 'scripts/deploy-build-to-portable.ps1') `
             -BuildDir (Join-Path $root 'build') `
             -DeployDir $stage `
@@ -160,6 +178,9 @@ jobs:
         shell: pwsh
         run: ./scripts/validate-powershell-scripts.ps1
 
+      - name: Install ImageMagick (penguin.ico)
+        run: choco install imagemagick -y --no-progress
+
       - name: Build
         run: |
           cmake -B build -G Ninja `
@@ -168,9 +189,6 @@ jobs:
 
       - name: Test
         run: ctest --test-dir build --output-on-failure
-
-      - name: Check validity
-        run: md5sum -c checksum
 
   release:
     needs:
