@@ -1591,7 +1591,7 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
     return true;
 }
 
-void Tsf::pushTrayServiceStateSnapshot() const {
+void Tsf::pushTrayServiceUiEvent() const {
     if (currentProcessIsExplorer()) {
         return;
     }
@@ -1600,39 +1600,66 @@ void Tsf::pushTrayServiceStateSnapshot() const {
     }
     const HWND helper = standaloneTrayHelperWindow();
     if (!helper) {
-        tsfTrace("pushTrayServiceStateSnapshot missing helper window");
+        tsfTrace("pushTrayServiceUiEvent missing helper window");
         return;
     }
-    fcitx::TrayServiceSnapshot snapshot = {};
-    snapshot.version = 1;
-    snapshot.visible = TRUE;
-    snapshot.chineseMode = chineseActive_ ? TRUE : FALSE;
+    fcitx::TrayServiceUiEvent ui = {};
+    ui.version = 1;
+    ui.engineTrayVisible = TRUE;
+    if (!fcitx::sendTrayServiceCopyData(helper, fcitx::kTrayServiceCopyDataUi,
+                                        &ui, sizeof(ui))) {
+        tsfTrace("pushTrayServiceUiEvent SendMessageTimeout failed");
+        return;
+    }
+    tsfTrace("pushTrayServiceUiEvent sent visible=true");
+}
+
+void Tsf::pushTrayServiceStatusEvent() const {
+    if (currentProcessIsExplorer()) {
+        return;
+    }
+    if (!ensureStandaloneTrayHelperRunning()) {
+        return;
+    }
+    const HWND helper = standaloneTrayHelperWindow();
+    if (!helper) {
+        tsfTrace("pushTrayServiceStatusEvent missing helper window");
+        return;
+    }
+    fcitx::TrayServiceStatusEvent status = {};
+    status.version = 1;
+    status.chineseMode = chineseActive_ ? TRUE : FALSE;
     const auto current =
         engine_ ? engine_->currentInputMethod() : std::string{};
-    fcitx::trayServiceCopyUtf8(snapshot.currentInputMethod, current);
+    fcitx::trayServiceCopyUtf8(status.currentInputMethod, current);
     if (engine_) {
         const auto actions = engine_->trayStatusActions();
-        snapshot.actionCount = static_cast<UINT>(
+        status.actionCount = static_cast<UINT>(
             (actions.size() > fcitx::kTrayServiceMaxStatusActionCount)
                 ? fcitx::kTrayServiceMaxStatusActionCount
                 : actions.size());
-        for (UINT i = 0; i < snapshot.actionCount; ++i) {
-            fcitx::trayServiceCopyUtf8(snapshot.actions[i].uniqueName,
+        for (UINT i = 0; i < status.actionCount; ++i) {
+            fcitx::trayServiceCopyUtf8(status.actions[i].uniqueName,
                                        actions[i].uniqueName);
-            fcitx::trayServiceCopyWide(snapshot.actions[i].displayName,
+            fcitx::trayServiceCopyWide(status.actions[i].displayName,
                                        actions[i].displayName);
-            snapshot.actions[i].isChecked = actions[i].isChecked ? TRUE : FALSE;
+            status.actions[i].isChecked = actions[i].isChecked ? TRUE : FALSE;
         }
     }
     if (!fcitx::sendTrayServiceCopyData(helper,
-                                        fcitx::kTrayServiceCopyDataSnapshot,
-                                        &snapshot, sizeof(snapshot))) {
-        tsfTrace("pushTrayServiceStateSnapshot SendMessageTimeout failed");
+                                        fcitx::kTrayServiceCopyDataStatus,
+                                        &status, sizeof(status))) {
+        tsfTrace("pushTrayServiceStatusEvent SendMessageTimeout failed");
         return;
     }
-    tsfTrace("pushTrayServiceStateSnapshot sent chinese=" +
+    tsfTrace("pushTrayServiceStatusEvent sent chinese=" +
              std::string(chineseActive_ ? "true" : "false") + " current=" +
              current);
+}
+
+void Tsf::pushTrayServiceStateSnapshot() const {
+    pushTrayServiceUiEvent();
+    pushTrayServiceStatusEvent();
 }
 
 void Tsf::pushTrayServiceTipSessionEvent(bool active) const {
@@ -1661,22 +1688,18 @@ void Tsf::pushTrayServiceTipSessionEvent(bool active) const {
 
 void Tsf::langBarNotifyIconUpdate() {
     if (currentProcessIsExplorer()) {
-        if (!shellTrayHostHwnd_) {
-            const bool recreated = initShellTrayIcon();
-            tsfTrace(std::string("langBarNotifyIconUpdate recreated explorer tray host=") +
-                     (recreated ? "true" : "false"));
-        }
-    } else {
-        persistSharedTrayChineseModeState(chineseActive_);
-        if (engine_) {
-            const auto current = engine_->currentInputMethod();
-            if (!current.empty()) {
-                persistSharedTrayCurrentInputMethodState(current);
-            }
-        }
-        persistSharedTrayStatusActionState();
-        pushTrayServiceStateSnapshot();
+        explorerTrayHelperPrimedOnce();
+        return;
     }
+    persistSharedTrayChineseModeState(chineseActive_);
+    if (engine_) {
+        const auto current = engine_->currentInputMethod();
+        if (!current.empty()) {
+            persistSharedTrayCurrentInputMethodState(current);
+        }
+    }
+    persistSharedTrayStatusActionState();
+    pushTrayServiceStateSnapshot();
     updateShellTrayTooltip();
     if (langBarItem_) {
         langBarItem_->notifyModeChanged();

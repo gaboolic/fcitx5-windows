@@ -4,6 +4,7 @@
 
 #include "../tsf/TrayServiceIpc.h"
 
+#include <cwchar>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
@@ -46,7 +47,7 @@ constexpr UINT kShellTrayCallback = WM_APP + 88;
 constexpr UINT kReopenContextMenuMessage = WM_APP + 89;
 constexpr UINT_PTR kRetryTimerId = 1;
 constexpr UINT kRetryDelayMs = 1500;
-/// Coalesce snapshot + tip-session IPC into one Shell_NotifyIcon pass (reduces
+/// Coalesce ui/status + focus IPC into one Shell_NotifyIcon pass (reduces
 /// remove/add jitter during TSF ActivateEx bursts; same idea as debouncing UI).
 constexpr UINT_PTR kTrayRefreshDebounceTimerId = 2;
 constexpr UINT kTrayRefreshDebounceMs = 85;
@@ -93,8 +94,11 @@ bool g_reopenMenuPending = false;
 bool g_contextMenuShowing = false;
 
 struct TrayServiceState {
-    bool hasSnapshot = false;
-    /// From TSF snapshot only (not derived from per-host document focus).
+    /// TSF **Ui** message received (engine tray visibility).
+    bool hasUi = false;
+    /// TSF **Status** message received (mode / IM / actions).
+    bool hasStatus = false;
+    /// From TSF **Ui** only (not derived from per-host document focus).
     bool visible = true;
     bool chineseMode = true;
     std::string currentInputMethod;
@@ -104,6 +108,61 @@ struct TrayServiceState {
 TrayServiceState g_trayState;
 /// Per-PID ref count for ITfTextInputProcessor ActivateEx/Deactivate pairs.
 std::unordered_map<DWORD, int> g_tipSessionRefCount;
+
+/// Helper-owned foreground hint: merged with tip-session PIDs for diagnostics and
+/// future policy (visibility is still driven by tip sessions + engine **Ui**).
+struct ForegroundTrayValidityState {
+    DWORD foregroundPid = 0;
+    bool foregroundPidIsTipSession = false;
+    bool foregroundIsShellOrHelper = false;
+};
+
+ForegroundTrayValidityState g_foregroundTrayValidity;
+
+bool queryProcessImageBaseName(DWORD processId, std::wstring *outBase) {
+    if (!outBase) {
+        return false;
+    }
+    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE,
+                                 processId);
+    if (!process) {
+        return false;
+    }
+    wchar_t path[4096];
+    DWORD size = static_cast<DWORD>(sizeof(path) / sizeof(path[0]));
+    const BOOL ok = QueryFullProcessImageNameW(process, 0, path, &size);
+    CloseHandle(process);
+    if (!ok) {
+        return false;
+    }
+    const wchar_t *slash = wcsrchr(path, L'\\');
+    *outBase = slash ? std::wstring(slash + 1) : std::wstring(path);
+    return true;
+}
+
+void updateForegroundTrayValidityState() {
+    HWND fg = GetForegroundWindow();
+    if (!fg) {
+        g_foregroundTrayValidity.foregroundPid = 0;
+        g_foregroundTrayValidity.foregroundPidIsTipSession = false;
+        g_foregroundTrayValidity.foregroundIsShellOrHelper = false;
+        return;
+    }
+    DWORD pid = 0;
+    GetWindowThreadProcessId(fg, &pid);
+    g_foregroundTrayValidity.foregroundPid = pid;
+    const auto it = g_tipSessionRefCount.find(pid);
+    g_foregroundTrayValidity.foregroundPidIsTipSession =
+        (it != g_tipSessionRefCount.end() && it->second > 0);
+    if (pid == GetCurrentProcessId()) {
+        g_foregroundTrayValidity.foregroundIsShellOrHelper = true;
+        return;
+    }
+    std::wstring base;
+    g_foregroundTrayValidity.foregroundIsShellOrHelper =
+        queryProcessImageBaseName(pid, &base) &&
+        (_wcsicmp(base.c_str(), L"explorer.exe") == 0);
+}
 
 struct RimeDeployMonitorData {
     HANDLE process = nullptr;
@@ -428,8 +487,38 @@ void applyTrayServiceTipSessionEvent(
     }
 }
 
+void applyTrayServiceUi(const fcitx::TrayServiceUiEvent &ui) {
+    g_trayState.hasUi = true;
+    g_trayState.visible = ui.engineTrayVisible != FALSE;
+}
+
+void applyTrayServiceStatus(const fcitx::TrayServiceStatusEvent &status) {
+    g_trayState.hasStatus = true;
+    g_trayState.chineseMode = status.chineseMode != FALSE;
+    g_trayState.currentInputMethod =
+        fcitx::trayServiceUtf8FromBuffer(status.currentInputMethod);
+    g_trayState.statusActions.clear();
+    const UINT count =
+        (status.actionCount > fcitx::kTrayServiceMaxStatusActionCount)
+            ? static_cast<UINT>(fcitx::kTrayServiceMaxStatusActionCount)
+            : status.actionCount;
+    g_trayState.statusActions.reserve(count);
+    for (UINT i = 0; i < count; ++i) {
+        TrayStatusActionItem item;
+        item.uniqueName =
+            fcitx::trayServiceUtf8FromBuffer(status.actions[i].uniqueName);
+        item.displayName =
+            fcitx::trayServiceWideFromBuffer(status.actions[i].displayName);
+        item.isChecked = status.actions[i].isChecked != FALSE;
+        if (!item.uniqueName.empty()) {
+            g_trayState.statusActions.push_back(std::move(item));
+        }
+    }
+}
+
 void applyTrayServiceSnapshot(const fcitx::TrayServiceSnapshot &snapshot) {
-    g_trayState.hasSnapshot = true;
+    g_trayState.hasUi = true;
+    g_trayState.hasStatus = true;
     g_trayState.visible = snapshot.visible != FALSE;
     g_trayState.chineseMode = snapshot.chineseMode != FALSE;
     g_trayState.currentInputMethod =
@@ -458,7 +547,7 @@ std::string trayServiceCurrentInputMethodState() {
 }
 
 bool trayServiceChineseModeState() {
-    return g_trayState.hasSnapshot ? g_trayState.chineseMode : true;
+    return g_trayState.hasStatus ? g_trayState.chineseMode : true;
 }
 
 std::vector<TrayStatusActionItem> trayServiceStatusActions() {
@@ -601,7 +690,7 @@ void optimisticToggleSharedTrayStatusActionState(const std::string &uniqueName) 
         break;
     }
     if (changed) {
-        g_trayState.hasSnapshot = true;
+        g_trayState.hasStatus = true;
         g_trayState.statusActions = items;
     }
 }
@@ -974,28 +1063,40 @@ bool updateTrayTooltip(bool chineseMode) {
 }
 
 // Tray shows when at least one host has called ActivateEx (session ref > 0).
-// Snapshot.visible is an extra engine-level allow (Explorer does not bind TIP).
+// **Ui**.visible is an extra engine-level allow (Explorer does not bind TIP).
+// Foreground validity is tracked in **g_foregroundTrayValidity** for diagnostics;
+// it does not gate visibility yet (would hide the icon when focus leaves TIP hosts).
 bool shouldShowTrayIcon() {
     if (g_contextMenuShowing) {
         return true;
     }
-    pruneInactiveTipSessions();
-    if (g_trayState.hasSnapshot && !g_trayState.visible) {
+    if (g_trayState.hasUi && !g_trayState.visible) {
         return false;
     }
     return !g_tipSessionRefCount.empty();
 }
 
 void refreshTrayState() {
+    pruneInactiveTipSessions();
+    updateForegroundTrayValidityState();
     const bool chineseMode = trayServiceChineseModeState();
     const std::string current = trayServiceCurrentInputMethodState();
     const bool visible = shouldShowTrayIcon();
-    trayHelperTrace("refreshTrayState begin visible=" +
-                    std::string(visible ? "true" : "false") +
-                    " trayAdded=" + std::string(g_trayAdded ? "true" : "false") +
-                    " useGuid=" + std::string(g_useGuidIdentity ? "true" : "false") +
-                    " chinese=" + std::string(chineseMode ? "true" : "false") +
-                    " current=" + current);
+    trayHelperTrace(
+        "refreshTrayState begin visible=" + std::string(visible ? "true" : "false") +
+        " trayAdded=" + std::string(g_trayAdded ? "true" : "false") +
+        " useGuid=" + std::string(g_useGuidIdentity ? "true" : "false") +
+        " chinese=" + std::string(chineseMode ? "true" : "false") +
+        " current=" + current +
+        " fgPid=" +
+        std::to_string(
+            static_cast<unsigned long>(g_foregroundTrayValidity.foregroundPid)) +
+        " fgTip=" +
+        std::string(g_foregroundTrayValidity.foregroundPidIsTipSession ? "true"
+                                                                       : "false") +
+        " fgShell=" +
+        std::string(g_foregroundTrayValidity.foregroundIsShellOrHelper ? "true"
+                                                                       : "false"));
     if (!visible) {
         if (g_trayAdded) {
             trayHelperTrace("refreshTrayState hiding tray icon current=" + current);
@@ -1301,7 +1402,7 @@ void showContextMenu() {
             return;
         case IDM_INPUT_MODE_CHINESE:
             if (!chineseMode) {
-                g_trayState.hasSnapshot = true;
+                g_trayState.hasStatus = true;
                 g_trayState.chineseMode = true;
                 persistSharedTrayChineseModeRequest(true);
                 persistSharedTrayChineseModeState(true);
@@ -1311,7 +1412,7 @@ void showContextMenu() {
             break;
         case IDM_INPUT_MODE_ENGLISH:
             if (chineseMode) {
-                g_trayState.hasSnapshot = true;
+                g_trayState.hasStatus = true;
                 g_trayState.chineseMode = false;
                 persistSharedTrayChineseModeRequest(false);
                 persistSharedTrayChineseModeState(false);
@@ -1348,7 +1449,7 @@ void showContextMenu() {
             if (cmd >= IDM_INPUT_METHOD_BASE &&
                 cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
                 const auto &item = profileItems[cmd - IDM_INPUT_METHOD_BASE];
-                g_trayState.hasSnapshot = true;
+                g_trayState.hasStatus = true;
                 g_trayState.currentInputMethod = item.uniqueName;
                 g_trayState.chineseMode = true;
                 persistSharedTrayInputMethodRequest(item.uniqueName);
@@ -1402,6 +1503,34 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
         queueDebouncedTrayRefresh();
         return true;
     }
+    if (cds->dwData == fcitx::kTrayServiceCopyDataUi &&
+        cds->cbData == sizeof(fcitx::TrayServiceUiEvent)) {
+        const auto *ui = reinterpret_cast<const fcitx::TrayServiceUiEvent *>(
+            cds->lpData);
+        if (ui->version != 1) {
+            return false;
+        }
+        applyTrayServiceUi(*ui);
+        trayHelperTrace("received tray ui engineVisible=" +
+                        std::string(ui->engineTrayVisible != FALSE ? "true"
+                                                                   : "false"));
+        queueDebouncedTrayRefresh();
+        return true;
+    }
+    if (cds->dwData == fcitx::kTrayServiceCopyDataStatus &&
+        cds->cbData == sizeof(fcitx::TrayServiceStatusEvent)) {
+        const auto *st = reinterpret_cast<const fcitx::TrayServiceStatusEvent *>(
+            cds->lpData);
+        if (st->version != 1) {
+            return false;
+        }
+        applyTrayServiceStatus(*st);
+        trayHelperTrace("received tray status chinese=" +
+                        std::string(g_trayState.chineseMode ? "true" : "false") +
+                        " current=" + g_trayState.currentInputMethod);
+        queueDebouncedTrayRefresh();
+        return true;
+    }
     if (cds->dwData == fcitx::kTrayServiceCopyDataTipSession &&
         cds->cbData == sizeof(fcitx::TrayServiceTipSessionEvent)) {
         const auto *event =
@@ -1411,7 +1540,7 @@ bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
         }
         applyTrayServiceTipSessionEvent(*event);
         trayHelperTrace(
-            "received tip session active=" +
+            "received focus/tip session active=" +
             std::string(event->active != FALSE ? "true" : "false") + " pid=" +
             std::to_string(static_cast<unsigned long>(event->processId)));
         queueDebouncedTrayRefresh();
@@ -1425,7 +1554,7 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         const UINT code = LOWORD(static_cast<DWORD_PTR>(lp));
         if (code == WM_LBUTTONUP || code == NIN_SELECT || code == NIN_KEYSELECT) {
             const bool chineseMode = trayServiceChineseModeState();
-            g_trayState.hasSnapshot = true;
+            g_trayState.hasStatus = true;
             g_trayState.chineseMode = !chineseMode;
             persistSharedTrayChineseModeRequest(!chineseMode);
             persistSharedTrayChineseModeState(!chineseMode);
@@ -1476,7 +1605,6 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         }
         if (wp == kPeriodicTipSessionTimerId) {
-            pruneInactiveTipSessions();
             refreshTrayState();
             return 0;
         }

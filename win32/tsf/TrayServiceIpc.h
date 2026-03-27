@@ -9,9 +9,15 @@ namespace fcitx {
 
 constexpr wchar_t kStandaloneTrayHelperWindowClass[] =
     L"Fcitx5StandaloneTrayHelperWindow";
+/// Legacy: full snapshot (visible + status). Prefer **Ui** + **Status** messages.
 constexpr ULONG_PTR kTrayServiceCopyDataSnapshot = 0x46545331ULL;
-/// Per-process TSF TIP ActivateEx/Deactivate (not document focus / OnSetFocus).
+/// Engine-level tray visibility (LangBar / profile), independent of tip session.
+constexpr ULONG_PTR kTrayServiceCopyDataUi = 0x46545332ULL;
+/// Per-process TSF TIP ActivateEx/Deactivate (focus / session validity for helper).
 constexpr ULONG_PTR kTrayServiceCopyDataTipSession = 0x46545333ULL;
+constexpr ULONG_PTR kTrayServiceCopyDataFocus = kTrayServiceCopyDataTipSession;
+/// Chinese mode, current IM label, status actions (no visibility bit).
+constexpr ULONG_PTR kTrayServiceCopyDataStatus = 0x46545334ULL;
 constexpr size_t kTrayServiceMaxInputMethodLength = 64;
 constexpr size_t kTrayServiceMaxStatusActionCount = 8;
 constexpr size_t kTrayServiceMaxStatusActionNameLength = 32;
@@ -27,6 +33,19 @@ struct TrayServiceTipSessionEvent {
     DWORD version;
     DWORD processId;
     BOOL active;
+};
+
+struct TrayServiceUiEvent {
+    DWORD version;
+    BOOL engineTrayVisible;
+};
+
+struct TrayServiceStatusEvent {
+    DWORD version;
+    BOOL chineseMode;
+    char currentInputMethod[kTrayServiceMaxInputMethodLength];
+    UINT actionCount;
+    TrayServiceStatusActionState actions[kTrayServiceMaxStatusActionCount];
 };
 
 struct TrayServiceSnapshot {

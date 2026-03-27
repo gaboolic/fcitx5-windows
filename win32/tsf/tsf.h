@@ -191,6 +191,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initShellTrayIcon();
     void uninitShellTrayIcon();
     void pushTrayServiceStateSnapshot() const;
+    void pushTrayServiceUiEvent() const;
+    void pushTrayServiceStatusEvent() const;
     void pushTrayServiceTipSessionEvent(bool active) const;
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
