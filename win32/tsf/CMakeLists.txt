@@ -16,6 +16,10 @@ if(WIN32 AND NOT MSVC)
     target_sources(tsf PRIVATE MsctfMingwCompat.cpp)
 endif()
 
+if(WIN32)
+    target_link_libraries(tsf PUBLIC imm32)
+endif()
+
 if(FCITX_WIN32_IME_WITH_CORE)
     target_sources(tsf PRIVATE Fcitx5ImeEngine.cpp TsfInputContext.cpp)
     target_link_libraries(tsf PUBLIC Fcitx5::Core)
