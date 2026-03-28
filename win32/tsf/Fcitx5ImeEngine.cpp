@@ -267,8 +267,8 @@ void setupImeFcitxEnvironment() {
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
     setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
-    // libime loads zh_CN.lm via DefaultLanguageModelResolver; without this, the path baked
-    // at CMake time (CI/stage prefix) is wrong under Program Files and ranking collapses.
+    // DefaultLanguageModelResolver loads zh_CN.lm; without LIBIME_MODEL_DIRS,
+    // the CMake-time path is wrong under Program Files and ranking collapses.
     setEnvironment("LIBIME_MODEL_DIRS", libimeModels.string().c_str());
     setupDefaultTsLogPath();
 }
