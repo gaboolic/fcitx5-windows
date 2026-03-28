@@ -187,15 +187,18 @@ patch_fcitx5_chinese_addons_for_mingw() {
       rm -f "${pinyin_cpp}.bak"
     fi
   fi
-  if [[ -f "$scel" ]] && ! grep -q '#elif defined(_WIN32)' "$scel"; then
-    if command -v perl >/dev/null 2>&1; then
-      perl -i.bak -0777 -pe \
-        's/#else\R(#include <sys\/endian\.h>)/#elif defined(_WIN32)\R#include <stdint.h>\R#define le16toh(x) (x)\R#define le32toh(x) (x)\R#else\R$1/s' \
-        "$scel"
-      rm -f "${scel}.bak"
-    else
-      echo "warning: perl missing; scel2org5.cpp may fail on Windows (pacman -S perl)" >&2
-    fi
+  # In s/// replacement, \R is not a newline (it became literal "R" in CI). Use \n in replacement;
+  # keep \R only in the pattern to match LF or CRLF. Also repair one-line corruption from the old bug.
+  if [[ -f "$scel" ]] && command -v perl >/dev/null 2>&1; then
+    perl -i.bak -0777 -pe '
+      s/#elif defined\(_WIN32\)R#include <stdint\.h>R#define le16toh\(x\) \(x\)R#define le32toh\(x\) \(x\)R#elseR#include <sys\/endian\.h>/#elif defined(_WIN32)\n#include <stdint.h>\n#define le16toh(x) (x)\n#define le32toh(x) (x)\n#else\n#include <sys\/endian.h>/gs;
+      unless (m/#elif defined\(_WIN32\)\s*\n\s*#include <stdint\.h>/) {
+        s/#else\R(#include <sys\/endian\.h>)/#elif defined(_WIN32)\n#include <stdint.h>\n#define le16toh(x) (x)\n#define le32toh(x) (x)\n#else\n$1/gs;
+      }
+    ' "$scel"
+    rm -f "${scel}.bak"
+  elif [[ -f "$scel" ]]; then
+    echo "warning: perl missing; scel2org5.cpp may fail on Windows (pacman -S perl)" >&2
   fi
 }
 patch_fcitx5_chinese_addons_for_mingw
