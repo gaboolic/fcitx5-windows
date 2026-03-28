@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# 可重复：构建 fcitx5-windows → install 到 prefix → libime → chinese-addons（同一 prefix）。
-# 依赖：MSYS2 Clang64、Ninja、Boost、libzstd、gettext；源码目录见环境变量。
+# 可重复：构建 fcitx5-windows → install 到 prefix → libime → chinese-addons →
+# 可选 fcitx5-table-extra、fcitx5-rime、fcitx5-lua（同一 prefix）。
+# 依赖：MSYS2 Clang64、Ninja、Boost、libzstd、gettext；Rime：从源码合并编 librime+librime-lua（同 fcitx5-prebuilder / macOS）或回退为拷贝 MSYS2 预编译 librime；rime-data；Lua：lua.pc；见 docs/PINYIN_WINDOWS.md。
 # 详见 docs/PINYIN_WINDOWS.md
 set -euo pipefail
 
@@ -9,6 +10,12 @@ STAGE="${STAGE:-$ROOT/stage-pinyin}"
 FCITX_BUILD="${FCITX_BUILD:-$ROOT/build-pinyin-fcitx}"
 LIBIME_SRC="${LIBIME_SRC:-$ROOT/../libime}"
 CHINESE_SRC="${CHINESE_SRC:-$ROOT/../fcitx5-chinese-addons}"
+TABLE_EXTRA_SRC="${TABLE_EXTRA_SRC:-$ROOT/../fcitx5-table-extra}"
+RIME_SRC="${RIME_SRC:-$ROOT/../fcitx5-rime}"
+LUA_SRC="${LUA_SRC:-$ROOT/../fcitx5-lua}"
+# 与 fcitx5-prebuilder 一致：librime 源码 + 将 librime-lua 置于 plugins/lua 后 BUILD_MERGED_PLUGINS=ON。
+LIBRIME_SRC="${LIBRIME_SRC:-$ROOT/../librime}"
+LIBRIME_LUA_SRC="${LIBRIME_LUA_SRC:-$ROOT/../librime-lua}"
 # MSYS2: default libime/chinese build dirs under /tmp (usually C:\msys64\tmp) to avoid Ninja
 # "failed recompaction: Permission denied" on some Windows drives (Defender / indexing).
 # Use uname, not only MSYSTEM: GitHub Actions bash often does not set MSYSTEM like an interactive shell.
@@ -19,9 +26,17 @@ esac
 if [[ $_is_msys -eq 1 ]]; then
   LIBIME_BUILD="${LIBIME_BUILD:-/tmp/fcitx5-pinyin-libime}"
   CHINESE_BUILD="${CHINESE_BUILD:-/tmp/fcitx5-pinyin-chinese}"
+  TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-/tmp/fcitx5-pinyin-table-extra}"
+  RIME_BUILD="${RIME_BUILD:-/tmp/fcitx5-pinyin-rime}"
+  LUA_BUILD="${LUA_BUILD:-/tmp/fcitx5-pinyin-lua}"
+  LIBRIME_BUILD="${LIBRIME_BUILD:-/tmp/fcitx5-pinyin-librime}"
 else
   LIBIME_BUILD="${LIBIME_BUILD:-$ROOT/build-pinyin-libime}"
   CHINESE_BUILD="${CHINESE_BUILD:-$ROOT/build-pinyin-chinese}"
+  TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-$ROOT/build-pinyin-table-extra}"
+  RIME_BUILD="${RIME_BUILD:-$ROOT/build-pinyin-rime}"
+  LUA_BUILD="${LUA_BUILD:-$ROOT/build-pinyin-lua}"
+  LIBRIME_BUILD="${LIBRIME_BUILD:-$ROOT/build-pinyin-librime}"
 fi
 BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 8)}"
@@ -101,6 +116,17 @@ if (modelDirs \&\& modelDirs[0]) {\n#ifdef _WIN32\n        dirs = fcitx::stringu
   fi
 }
 patch_libime_languagemodel_dirs_for_win32
+
+if [[ $_is_msys -eq 1 ]]; then
+  for _pc in /clang64/lib/pkgconfig /mingw64/lib/pkgconfig; do
+    [[ -d "$_pc" ]] || continue
+    case ":${PKG_CONFIG_PATH:-}:" in
+      *":${_pc}:"*) ;;
+      *) PKG_CONFIG_PATH="${PKG_CONFIG_PATH:+${PKG_CONFIG_PATH}:}${_pc}" ;;
+    esac
+  done
+  export PKG_CONFIG_PATH
+fi
 
 echo "==> [2/3] libime"
 cmake -S "$LIBIME_SRC" -B "$LIBIME_BUILD" -G Ninja \
@@ -242,6 +268,193 @@ cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
 cmake --build "$CHINESE_BUILD" -j"$JOBS"
 cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
 
+# --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
+if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
+  echo "==> [4] fcitx5-table-extra"
+  rm -rf "$TABLE_EXTRA_BUILD"
+  cmake -S "$TABLE_EXTRA_SRC" -B "$TABLE_EXTRA_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="$STAGE"
+  cmake --build "$TABLE_EXTRA_BUILD" -j"$JOBS"
+  cmake --install "$TABLE_EXTRA_BUILD" --prefix "$STAGE"
+else
+  echo "==> skip fcitx5-table-extra (TABLE_EXTRA_SRC not set or missing CMakeLists.txt)"
+fi
+
+# --- Optional: fcitx5-rime (needs MSYS2 librime + rime-data; runtime DLLs from Clang64 bin) ---
+mingw_dll_source_bin() {
+  if [[ -d /clang64/bin ]]; then
+    echo /clang64/bin
+  elif [[ -d /mingw64/bin ]]; then
+    echo /mingw64/bin
+  else
+    echo ""
+  fi
+}
+
+vendor_rime_share_into_stage() {
+  local rime_data="$STAGE/share/rime-data"
+  if [[ -d "$rime_data" ]] && [[ -n "$(ls -A "$rime_data" 2>/dev/null)" ]]; then
+    return 0
+  fi
+  local src
+  for src in /clang64/share/rime-data /mingw64/share/rime-data; do
+    if [[ -d "$src" ]]; then
+      mkdir -p "$STAGE/share"
+      cp -a "$src" "$rime_data"
+      echo "==> vendored rime-data from $src -> $rime_data"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Rime 依赖 DLL（不含 librime 本体 — 本体由合并构建产出或由 MSYS2 包拷贝）。
+copy_librime_dependency_dlls() {
+  local _bin
+  _bin="$(mingw_dll_source_bin)"
+  [[ -n "$_bin" ]] || return 0
+  mkdir -p "$STAGE/bin"
+  local _f
+  shopt -s nullglob
+  for _f in "$_bin"/libopencc*.dll "$_bin"/libyaml-cpp.dll \
+    "$_bin"/libleveldb.dll "$_bin"/libglog.dll "$_bin"/libmarisa*.dll \
+    "$_bin"/libwinpthread-1.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  for _f in "$_bin"/liblua-*.dll "$_bin"/liblua.dll "$_bin"/lua5*.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  shopt -u nullglob
+  if [[ -f "$_bin/rime_deployer.exe" ]]; then
+    cp -f "$_bin/rime_deployer.exe" "$STAGE/bin/"
+  fi
+  # OpenCC config/data used by some Rime schemas
+  if [[ -d /clang64/share/opencc ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
+    mkdir -p "$STAGE/share"
+    cp -a /clang64/share/opencc "$STAGE/share/"
+  elif [[ -d /mingw64/share/opencc ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
+    mkdir -p "$STAGE/share"
+    cp -a /mingw64/share/opencc "$STAGE/share/"
+  fi
+}
+
+copy_librime_dlls_from_msys() {
+  local _bin _f
+  _bin="$(mingw_dll_source_bin)"
+  [[ -n "$_bin" ]] || return 0
+  mkdir -p "$STAGE/bin"
+  shopt -s nullglob
+  for _f in "$_bin"/librime-*.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  shopt -u nullglob
+}
+
+copy_librime_runtime_dlls() {
+  copy_librime_dependency_dlls
+  copy_librime_dlls_from_msys
+}
+
+# 参考 fcitx5-prebuilder scripts/librime.py：plugins/lua → librime-lua，BUILD_MERGED_PLUGINS=ON。
+prepare_librime_lua_plugin_dir() {
+  rm -rf "$LIBRIME_SRC/plugins/lua"
+  cp -a "$LIBRIME_LUA_SRC" "$LIBRIME_SRC/plugins/lua"
+}
+
+mingw_toolchain_prefix() {
+  if [[ -d /clang64 ]]; then
+    echo /clang64
+  elif [[ -d /mingw64 ]]; then
+    echo /mingw64
+  else
+    echo ""
+  fi
+}
+
+build_merged_librime_with_lua() {
+  local _prefix
+  _prefix="$(mingw_toolchain_prefix)"
+  [[ -n "$_prefix" ]] || return 1
+  echo "==> [5a] librime + librime-lua (merged into librime DLL, same idea as fcitx5-prebuilder / fcitx5-macos deps)"
+  prepare_librime_lua_plugin_dir || return 1
+  rm -rf "$LIBRIME_BUILD"
+  # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏，避免与 Clang64 的 libglog DLL 不匹配。
+  cmake -S "$LIBRIME_SRC" -B "$LIBRIME_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="${_prefix};${STAGE}" \
+    -DBUILD_TEST=OFF \
+    -DBUILD_MERGED_PLUGINS=ON \
+    -DCMAKE_DLL_NAME_WITH_SOVERSION=ON \
+    "-DCMAKE_CXX_FLAGS=-DNDEBUG -DGLOG_USE_GLOG_EXPORT -DGLOG_USE_GFLAGS" \
+    || return 1
+  cmake --build "$LIBRIME_BUILD" -j"$JOBS" || return 1
+  cmake --install "$LIBRIME_BUILD" --prefix "$STAGE" || return 1
+  export PKG_CONFIG_PATH="$STAGE/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
+  return 0
+}
+
+if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
+  echo "==> [5] fcitx5-rime"
+  if ! vendor_rime_share_into_stage; then
+    echo "error: rime-data missing under stage and not found under /clang64 or /mingw64." >&2
+    echo "  Install: pacman -S mingw-w64-clang-x86_64-rime-data (CLANG64)" >&2
+    exit 1
+  fi
+  if [[ $_is_msys -eq 1 ]] && [[ -f "$LIBRIME_SRC/CMakeLists.txt" ]] && [[ -f "$LIBRIME_LUA_SRC/CMakeLists.txt" ]]; then
+    copy_librime_dependency_dlls
+    if ! build_merged_librime_with_lua; then
+      echo "warning: merged librime+librime-lua build failed; falling back to MSYS2 librime DLL (no Rime Lua in core)" >&2
+      copy_librime_dlls_from_msys
+    fi
+  else
+    if [[ $_is_msys -ne 1 ]]; then
+      echo "==> non-MSYS: using prebuilt librime DLLs only (set LIBRIME_SRC + LIBRIME_LUA_SRC on MSYS2 for merged lua)"
+    fi
+    copy_librime_runtime_dlls
+  fi
+  rm -rf "$RIME_BUILD"
+  cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="$STAGE"
+  cmake --build "$RIME_BUILD" -j"$JOBS"
+  cmake --install "$RIME_BUILD" --prefix "$STAGE"
+else
+  echo "==> skip fcitx5-rime (RIME_SRC not set or missing CMakeLists.txt)"
+fi
+
+# --- Optional: fcitx5-lua (addon luaaddonloader; default USE_DLOPEN — ship liblua*.dll in bin) ---
+copy_lua_runtime_dlls() {
+  local _bin
+  _bin="$(mingw_dll_source_bin)"
+  [[ -n "$_bin" ]] || return 0
+  mkdir -p "$STAGE/bin"
+  local _f
+  shopt -s nullglob
+  for _f in "$_bin"/liblua-*.dll "$_bin"/liblua.dll "$_bin"/lua5*.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  shopt -u nullglob
+}
+
+if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
+  echo "==> [6] fcitx5-lua"
+  rm -rf "$LUA_BUILD"
+  cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="$STAGE" \
+    -DENABLE_TEST=OFF
+  cmake --build "$LUA_BUILD" -j"$JOBS"
+  cmake --install "$LUA_BUILD" --prefix "$STAGE"
+  copy_lua_runtime_dlls
+else
+  echo "==> skip fcitx5-lua (LUA_SRC not set or missing CMakeLists.txt)"
+fi
+
 # MinGW produces libpinyin.dll (matches Library=libpinyin in pinyin.conf); MSVC layouts may use pinyin.dll.
 _addon_dir="$STAGE/lib/fcitx5"
 if [[ ! -f "$_addon_dir/libpinyin.dll" ]] && [[ ! -f "$_addon_dir/pinyin.dll" ]]; then
@@ -255,9 +468,10 @@ fi
 
 echo ""
 echo "Done. Portable root: $STAGE"
-echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built)"
-echo "  lib/fcitx5/ — addons (expect libpinyin.dll on MinGW; matches Library=libpinyin in addon conf)"
-echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.pinyin.example"
+echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built), rime/lua runtime DLLs if those stages ran"
+echo "  lib/fcitx5/ — addons (libpinyin.dll; optional librime.dll, libluaaddonloader.dll, …)"
+echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.windows.example"
+echo "  share/rime-data/ — when fcitx5-rime is built; share/opencc/ if vendored for Rime schemas"
 echo "Copy profile example to your config/fcitx5/profile or set FCITX_TS_IM=pinyin."
 echo "TSF install (Admin PowerShell):"
 echo "  pwsh -File scripts/install-fcitx5-ime.ps1 -Stage \"$STAGE\" -DeployDir \"C:/Fcitx5Portable\""

@@ -11,6 +11,12 @@
 
 示例（CLANG64 终端）：`pacman -S --needed mingw-w64-clang-x86_64-boost mingw-w64-clang-x86_64-libzstd mingw-w64-clang-x86_64-gettext mingw-w64-clang-x86_64-ninja`
 
+若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`rime-data`**、**`opencc`**、**`lua`**，以及从源码编 **librime** 所需的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**（CI 已不再依赖预编译 **`mingw-w64-*-librime`** 包）。脚本会把 `share/rime-data`、依赖 DLL 与 **Lua** 拷进 **`bin/`**。
+
+**Rime 核心里的 Lua（librime-lua）** 与 [fcitx5-prebuilder](https://github.com/fcitx-contrib/fcitx5-prebuilder) / macOS 插件链一致：把 [librime-lua](https://github.com/hchunhui/librime-lua) 拷到 **`librime/plugins/lua`**，再对 **librime** 打开 **`BUILD_MERGED_PLUGINS=ON`**，把插件 **合并进同一个 `librime-*.dll`**（装到 **`$STAGE/bin`**），随后 **`PKG_CONFIG_PATH`** 优先用 **`$STAGE/lib/pkgconfig`** 再编 **fcitx5-rime**。源码目录默认为 **`../librime`**（建议与 MSYS2 包同版本，如 **1.14.0**）、**`../librime-lua`**，可用 **`LIBRIME_SRC`**、**`LIBRIME_LUA_SRC`** 覆盖；若缺少这两棵树，则在 MSYS 上会回退为拷贝预装的 **`librime-*.dll`**（无 Rime 内置 Lua）。
+
+**fcitx5-table-extra** 只需基础依赖（在 **chinese-addons 已安装到 prefix** 之后编）。
+
 若 CMake 报找不到 **Boost**，多半是未装上述 `boost` 包或未在 **CLANG64** 环境内执行。
 
 ## 1. 准备源码目录
@@ -19,6 +25,7 @@
 
 - `../libime` — [libime](https://github.com/fcitx/libime)
 - `../fcitx5-chinese-addons` — [fcitx5-chinese-addons](https://github.com/fcitx/fcitx5-chinese-addons)（与 libime / fcitx5 版本号在对方 `CMakeLists.txt` 里互相约束，请对齐 tag）
+- （可选，与官方 CI 安装包一致）`../fcitx5-table-extra`、`../fcitx5-rime`、`../fcitx5-lua`、`../librime`（tag 如 1.14.0）、`../librime-lua` — **`TABLE_EXTRA_SRC`**、**`RIME_SRC`**、**`LUA_SRC`**、**`LIBRIME_SRC`**、**`LIBRIME_LUA_SRC`** 可覆盖路径；见 `scripts/build-pinyin-stage.sh`
 
 **libime 含 Git 子模块 [KenLM](https://github.com/kpu/kenlm)**（路径 `src/libime/core/kenlm`）。若 CMake 报缺少 `build_binary_main.cc` 或 `kenlm` 无源文件，在 **`libime` 仓库根目录**执行：
 
@@ -36,7 +43,7 @@ git submodule update --init --recursive
 ./scripts/build-pinyin-stage.sh
 ```
 
-默认将 **`fcitx5-windows` 安装到 `./stage-pinyin`**，再在同一 prefix 下构建并安装 libime 与 chinese-addons。可用 **`STAGE`**、**`FCITX_BUILD`** 等环境变量覆盖路径（见脚本内注释）。
+默认将 **`fcitx5-windows` 安装到 `./stage-pinyin`**，再在同一 prefix 下构建并安装 libime、chinese-addons，以及在源码存在时的 **fcitx5-table-extra**、**fcitx5-rime**、**fcitx5-lua**。可用 **`STAGE`**、**`FCITX_BUILD`** 等环境变量覆盖路径（见脚本内注释）。
 
 ## 2. 安装本仓库（fcitx5 核心 + 模块）到统一 prefix
 
@@ -90,7 +97,7 @@ cmake --install build-chinese
 ## 5. 配置 profile（默认输入法含 pinyin）
 
 - **`cmake --install`** 后，prefix 下会有：
-  - **`profile.windows.example`** — 图形安装程序默认种子：**拼音 + 五笔（`wbx`）**，无 `keyboard-us`（与常见未启用 keyboard 引擎的构建一致）。
+  - **`profile.windows.example`** — 图形安装程序默认种子：**拼音 + 五笔（`wbx`）+ 中州韵（`rime`）**（`wbx`/`rime` 需对应 addon 已在 stage），无 `keyboard-us`（与常见未启用 keyboard 引擎的构建一致）。若本地未克隆 **fcitx5-rime**，请删掉 **`Name=rime`** 一段，或改用 **`profile.pinyin-only.example`**。未克隆 **fcitx5-lua** 仅缺少 Lua 相关 addon，不必改 profile。
   - **`profile.pinyin.example`** — 拼音 + `keyboard-us`（需已安装 keyboard addon）。
   - **`profile.pinyin-only.example`** — 仅 pinyin。
 - 将其中之一复制到用户配置目录下的 **`profile`**（路径由 fcitx5 `StandardPaths` 决定，IME 与便携布局下一般为 **`%AppData%\Fcitx5\config\fcitx5\profile`**）。若格式与当前 fcitx5 版本不兼容，可在 Linux 上添加一次拼音后拷贝生成的 `profile` 再对照修改。
@@ -100,7 +107,7 @@ cmake --install build-chinese
 托盘菜单（以及 TSF 侧 `readProfileInputMethodsFromConfig`）**只列出当前分组**里 **`[Groups/0/Items/N]` 的 `Name=`**，与 Linux 上 fcitx5 行为一致。若 profile 里只有 `pinyin`，菜单里就不会出现五笔或中州韵。
 
 - **五笔**：在 profile 的同一分组中增加一项 **`Name=wbx`**（与 `share/fcitx5/inputmethod/wbx.conf` 对应；需已安装 **table** 引擎及词库）。新安装包会优先用 **`profile.windows.example`** 种子（仅当用户目录下尚无 `profile` 时）。**已装过旧版**的用户若已有 `profile`，需自行编辑该文件，或删掉后重装/从 `share\fcitx5\profile.windows.example` 复制一份。
-- **中州韵（Rime）**：需要 **fcitx5-rime** 插件及 Rime 数据，**当前本仓库 CI 打出的 stage/安装包未包含**。要在托盘里切换 Rime，需自行集成 fcitx5-rime 并在 profile 中加入 **`Name=rime`**（且保证 `lib/fcitx5` 与数据目录齐全）。托盘在「当前输入法为 rime」时才会显示「重新部署中州韵」等扩展项。
+- **中州韵（Rime）**：需要 **fcitx5-rime**、`lib/fcitx5` 下的 rime addon DLL、**`share/rime-data`**（以及 `bin` 侧 **librime** 等运行时 DLL，脚本会从 CLANG64 的 `bin` 拷入）。**CI 打包 job** 已克隆 **fcitx5-rime**、**fcitx5-table-extra**、**fcitx5-lua** 并随 **`build-pinyin-stage.sh`** 写入 stage；本地为 Rime 需 **librime / rime-data** 与 **`RIME_SRC`**，为 Lua 需 **`lua` 包** 与 **`LUA_SRC`**。profile 中需有 **`Name=rime`**（**`profile.windows.example`** 已含）。托盘在「当前输入法为 rime」时才会显示「重新部署中州韵」等扩展项。
 
 ### 拼音候选顺序 / 词频「不对」？
 

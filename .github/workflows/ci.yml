@@ -80,8 +80,7 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Installer must include libime + fcitx5-chinese-addons (libpinyin.dll on MinGW; pinyin.dll on some MSVC layouts). _compile-build-portable.ps1
-  # alone only installs fcitx5 core from this repo — same as a clean clone, Chinese IME will not work.
+  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime, rime-data, lua). _compile-build-portable.ps1 alone is core-only.
   # This job runs scripts/build-pinyin-stage.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
@@ -107,7 +106,15 @@ jobs:
             mingw-w64-clang-x86_64-gettext-tools `
             gettext-devel `
             msys2-runtime-devel `
-            perl
+            perl `
+            mingw-w64-clang-x86_64-yaml-cpp `
+            mingw-w64-clang-x86_64-leveldb `
+            mingw-w64-clang-x86_64-glog `
+            mingw-w64-clang-x86_64-gflags `
+            mingw-w64-clang-x86_64-marisa `
+            mingw-w64-clang-x86_64-rime-data `
+            mingw-w64-clang-x86_64-opencc `
+            mingw-w64-clang-x86_64-lua
           cp -r windows-cross/its C:/msys64/usr/share/gettext
           Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
           Add-Content $env:GITHUB_PATH "C:/msys64/usr/bin"
@@ -118,17 +125,28 @@ jobs:
       - name: Install Inno Setup 6
         run: choco install innosetup -y --no-progress
 
-      - name: Clone libime and fcitx5-chinese-addons
+      - name: Clone libime, chinese-addons, table-extra, rime, lua, librime (1.14) + librime-lua
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $root = $env:GITHUB_WORKSPACE
+          $repos = @(
+            @{ name = 'libime'; url = 'https://github.com/fcitx/libime.git' },
+            @{ name = 'fcitx5-chinese-addons'; url = 'https://github.com/fcitx/fcitx5-chinese-addons.git' },
+            @{ name = 'fcitx5-table-extra'; url = 'https://github.com/fcitx/fcitx5-table-extra.git' },
+            @{ name = 'fcitx5-rime'; url = 'https://github.com/fcitx/fcitx5-rime.git' },
+            @{ name = 'fcitx5-lua'; url = 'https://github.com/fcitx/fcitx5-lua.git' },
+            @{ name = 'librime-lua'; url = 'https://github.com/hchunhui/librime-lua.git' }
+          )
+          foreach ($r in $repos) {
+            $dest = Join-Path $root $r.name
+            if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
+            git clone --depth 1 $r.url $dest
+          }
+          $librime = Join-Path $root 'librime'
+          if (Test-Path -LiteralPath $librime) { Remove-Item -LiteralPath $librime -Recurse -Force }
+          git clone --depth 1 --branch 1.14.0 https://github.com/rime/librime.git $librime
           $libime = Join-Path $root 'libime'
-          $chinese = Join-Path $root 'fcitx5-chinese-addons'
-          if (Test-Path -LiteralPath $libime) { Remove-Item -LiteralPath $libime -Recurse -Force }
-          if (Test-Path -LiteralPath $chinese) { Remove-Item -LiteralPath $chinese -Recurse -Force }
-          git clone --depth 1 https://github.com/fcitx/libime.git $libime
-          git clone --depth 1 https://github.com/fcitx/fcitx5-chinese-addons.git $chinese
           Push-Location $libime
           try {
             git submodule update --init --recursive
@@ -156,8 +174,17 @@ jobs:
             'export FCITX_BUILD="$CI_WS_UNIX/build-portable-ci"',
             'export LIBIME_SRC="$CI_WS_UNIX/libime"',
             'export CHINESE_SRC="$CI_WS_UNIX/fcitx5-chinese-addons"',
+            'export TABLE_EXTRA_SRC="$CI_WS_UNIX/fcitx5-table-extra"',
+            'export RIME_SRC="$CI_WS_UNIX/fcitx5-rime"',
+            'export LUA_SRC="$CI_WS_UNIX/fcitx5-lua"',
+            'export LIBRIME_SRC="$CI_WS_UNIX/librime"',
+            'export LIBRIME_LUA_SRC="$CI_WS_UNIX/librime-lua"',
             'export LIBIME_BUILD=/tmp/fcitx5-pinyin-libime',
             'export CHINESE_BUILD=/tmp/fcitx5-pinyin-chinese',
+            'export TABLE_EXTRA_BUILD=/tmp/fcitx5-pinyin-table-extra',
+            'export RIME_BUILD=/tmp/fcitx5-pinyin-rime',
+            'export LUA_BUILD=/tmp/fcitx5-pinyin-lua',
+            'export LIBRIME_BUILD=/tmp/fcitx5-pinyin-librime',
             'export CMAKE_BUILD_TYPE=Release',
             'export JOBS=8',
             'exec ./scripts/build-pinyin-stage.sh \',
@@ -177,6 +204,27 @@ jobs:
             Write-Host '--- *pinyin*.dll under stage-installer ---'
             Get-ChildItem -LiteralPath $stage -Recurse -Filter '*pinyin*.dll' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
             Write-Error 'stage-installer/lib/fcitx5/libpinyin.dll (or pinyin.dll) missing — see listing above. On MSYS2 the addon is almost always libpinyin.dll (not pinyin.dll); an older workflow that only checked pinyin.dll would fail spuriously.'
+          }
+          $rimeDll = Join-Path $addonDir 'librime.dll'
+          $rimeDllAlt = Join-Path $addonDir 'rime.dll'
+          if (-not (Test-Path -LiteralPath $rimeDll) -and -not (Test-Path -LiteralPath $rimeDllAlt)) {
+            Write-Error 'stage-installer/lib/fcitx5/librime.dll (or rime.dll) missing — fcitx5-rime stage failed'
+          }
+          $rimeData = Join-Path $stage 'share\rime-data'
+          if (-not (Test-Path -LiteralPath $rimeData)) {
+            Write-Error 'stage-installer/share/rime-data missing — rime-data not vendored into stage'
+          }
+          $luaAddon = Join-Path $addonDir 'libluaaddonloader.dll'
+          $luaAddonAlt = Join-Path $addonDir 'luaaddonloader.dll'
+          if (-not (Test-Path -LiteralPath $luaAddon) -and -not (Test-Path -LiteralPath $luaAddonAlt)) {
+            Write-Error 'stage-installer/lib/fcitx5/libluaaddonloader.dll (or luaaddonloader.dll) missing — fcitx5-lua stage failed'
+          }
+          $luaDll = Get-ChildItem -LiteralPath (Join-Path $stage 'bin') -Filter 'liblua*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          if (-not $luaDll) {
+            $luaDll = Get-ChildItem -LiteralPath (Join-Path $stage 'bin') -Filter 'lua5*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $luaDll) {
+            Write-Error 'stage-installer/bin missing liblua*.dll or lua5*.dll — copy_lua_runtime_dlls did not find MSYS2 Lua'
           }
 
       - name: Build TSF installer (fcitx5-windows-setup.exe)
