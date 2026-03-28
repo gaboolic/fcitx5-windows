@@ -5,6 +5,18 @@
 # 详见 docs/PINYIN_WINDOWS.md
 set -euo pipefail
 
+# Prefer MSYS GNU patch: CI PATH may put Strawberry Perl's patch.exe first; it rejects some valid
+# unified diffs (e.g. second hunk) as "malformed".
+_patch_exe() {
+  if [[ -x /usr/bin/patch ]]; then
+    printf '%s\n' /usr/bin/patch
+  elif [[ -x /bin/patch ]]; then
+    printf '%s\n' /bin/patch
+  else
+    printf '%s\n' patch
+  fi
+}
+
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGE="${STAGE:-$ROOT/stage-pinyin}"
 FCITX_BUILD="${FCITX_BUILD:-$ROOT/build-pinyin-fcitx}"
@@ -391,7 +403,7 @@ apply_msys2_librime_llvm_rc_patch() {
   local _patch="$ROOT/scripts/patches/librime/002-librime-fix-llvm-rc.patch"
   [[ -f "$_patch" ]] || return 1
   echo "==> patch librime AddRCInfo.cmake (MSYS2: MinGW+Clang 勿用 llvm-rc，避免 Exactly one input file)"
-  (cd "$LIBRIME_SRC" && patch -p1 -i "$_patch") || return 1
+  (cd "$LIBRIME_SRC" && "$(_patch_exe)" -p1 -i "$_patch") || return 1
 }
 
 build_merged_librime_with_lua() {
@@ -431,7 +443,7 @@ apply_fcitx5_rime_standardpaths_patch() {
     return 0
   fi
   echo "==> patch fcitx5-rime: path → UTF-8 string (Windows / fcitx StandardPaths path API)"
-  (cd "$RIME_SRC" && patch -p1 -i "$_patch") || {
+  (cd "$RIME_SRC" && "$(_patch_exe)" -p1 -i "$_patch") || {
     echo "error: fcitx5-rime patch failed: $_patch" >&2
     exit 1
   }

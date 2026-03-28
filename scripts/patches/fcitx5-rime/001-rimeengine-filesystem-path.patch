@@ -17,7 +17,8 @@ index cdaaa3d..978f24c 100644
      } else {
          sharedDataDir_ = RIME_DATA_DIR;
      }
-@@ -246,12 +246,13 @@ void RimeEngine::rimeStart(bool fullcheck) {
+@@ -246,20 +246,21 @@ void RimeEngine::rimeStart(bool fullcheck) {
+ void RimeEngine::rimeStart(bool fullcheck) {
      RIME_DEBUG() << "Rime Start (fullcheck: " << fullcheck << ")";
  
 -    auto userDir =
@@ -32,7 +33,7 @@ index cdaaa3d..978f24c 100644
              RIME_ERROR() << "Failed to create user directory: " << userDir;
          }
      }
-@@ -259,7 +260,7 @@ void RimeEngine::rimeStart(bool fullcheck) {
+ 
      RIME_STRUCT(RimeTraits, fcitx_rime_traits);
      fcitx_rime_traits.shared_data_dir = sharedDataDir_.c_str();
      fcitx_rime_traits.app_name = "rime.fcitx-rime";
