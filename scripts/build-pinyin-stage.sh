@@ -63,19 +63,42 @@ cmake -S "$LIBIME_SRC" -B "$LIBIME_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DCMAKE_INSTALL_PREFIX="$STAGE" \
   -DCMAKE_PREFIX_PATH="$STAGE" \
-  -DENABLE_TEST=OFF
+  -DENABLE_TEST=OFF \
+  -DENABLE_TOOLS=ON
 cmake --build "$LIBIME_BUILD" -j"$JOBS"
 cmake --install "$LIBIME_BUILD" --prefix "$STAGE"
+# Some layouts only install COMPONENT tools when requested explicitly.
+cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null || true
 
-# Installed LibIME*Config.cmake lists IMPORTED_LOCATION without .exe; Ninja dependency checks the
-# literal path. MinGW installs libime_*.exe — copy to extensionless name so chinese-addons can build.
-if [[ -n "${MSYSTEM:-}" ]]; then
+# LibIME*Config / fcitx5-chinese-addons expect paths without .exe; Ninja on Windows still resolves
+# D:/prefix/bin/libime_pinyindict. MinGW installs libime_*.exe — ensure extensionless copies exist.
+# Do not gate on MSYSTEM (e.g. CI bash may not set it); fall back to build tree if install skipped tools.
+ensure_libime_tool_names() {
+  local _tool
   for _tool in libime_pinyindict libime_tabledict libime_slm_build_binary libime_prediction libime_history libime_migrate_fcitx4_pinyin libime_migrate_fcitx4_table; do
-    if [[ -f "$STAGE/bin/${_tool}.exe" && ! -f "$STAGE/bin/${_tool}" ]]; then
-      cp "$STAGE/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+    if [[ -f "$STAGE/bin/${_tool}" ]]; then
+      continue
     fi
+    if [[ -f "$STAGE/bin/${_tool}.exe" ]]; then
+      cp -f "$STAGE/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+      continue
+    fi
+    if [[ -f "$LIBIME_BUILD/bin/${_tool}.exe" ]]; then
+      mkdir -p "$STAGE/bin"
+      cp -f "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}.exe"
+      cp -f "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+      continue
+    fi
+    if [[ -f "$LIBIME_BUILD/bin/${_tool}" ]]; then
+      mkdir -p "$STAGE/bin"
+      cp -f "$LIBIME_BUILD/bin/${_tool}" "$STAGE/bin/${_tool}"
+      continue
+    fi
+    echo "error: ${_tool} not under $STAGE/bin or $LIBIME_BUILD/bin (ENABLE_TOOLS=Off or build failed?)" >&2
+    exit 1
   done
-fi
+}
+ensure_libime_tool_names
 
 echo "==> [3/3] fcitx5-chinese-addons"
 cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
