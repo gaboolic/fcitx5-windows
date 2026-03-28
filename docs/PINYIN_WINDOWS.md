@@ -11,7 +11,7 @@
 
 示例（CLANG64 终端）：`pacman -S --needed mingw-w64-clang-x86_64-boost mingw-w64-clang-x86_64-libzstd mingw-w64-clang-x86_64-gettext mingw-w64-clang-x86_64-ninja`
 
-若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及从源码编 **librime** 所需的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**（CI 已不再依赖预编译 **`mingw-w64-*-librime`** 包）。脚本会把 **`share/rime-data`**（安装路径未变）、依赖 DLL 与 **Lua** 拷进 **`bin/`**。
+若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及从源码编 **librime** 所需的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**；CI 仍安装 **`mingw-w64-clang-x86_64-librime`**，以便合并构建失败时回退到系统 **`rime.pc` / DLL**。脚本会把 **`share/rime-data`**（安装路径未变）、依赖 DLL 与 **Lua** 拷进 **`bin/`**。
 
 **Rime 核心里的 Lua（librime-lua）** 与 [fcitx5-prebuilder](https://github.com/fcitx-contrib/fcitx5-prebuilder) / macOS 插件链一致：把 [librime-lua](https://github.com/hchunhui/librime-lua) 拷到 **`librime/plugins/lua`**，再对 **librime** 打开 **`BUILD_MERGED_PLUGINS=ON`**，把插件 **合并进同一个 `librime-*.dll`**（装到 **`$STAGE/bin`**），随后 **`PKG_CONFIG_PATH`** 优先用 **`$STAGE/lib/pkgconfig`** 再编 **fcitx5-rime**。源码目录默认为 **`../librime`**（建议与 MSYS2 包同版本，如 **1.14.0**）、**`../librime-lua`**，可用 **`LIBRIME_SRC`**、**`LIBRIME_LUA_SRC`** 覆盖；若缺少这两棵树，则在 MSYS 上会回退为拷贝预装的 **`librime-*.dll`**（无 Rime 内置 Lua）。
 

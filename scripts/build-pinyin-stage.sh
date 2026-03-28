@@ -380,7 +380,8 @@ build_merged_librime_with_lua() {
   echo "==> [5a] librime + librime-lua (merged into librime DLL, same idea as fcitx5-prebuilder / fcitx5-macos deps)"
   prepare_librime_lua_plugin_dir || return 1
   rm -rf "$LIBRIME_BUILD"
-  # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏，避免与 Clang64 的 libglog DLL 不匹配。
+  # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏；另强制 GFLAGS_IS_A_DLL 为 0/1，否则
+  # gflags_declare.h 里 #if GFLAGS_IS_A_DLL 在 Clang+MinGW 下会因空宏报 invalid token。
   cmake -S "$LIBRIME_SRC" -B "$LIBRIME_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DCMAKE_INSTALL_PREFIX="$STAGE" \
@@ -388,7 +389,7 @@ build_merged_librime_with_lua() {
     -DBUILD_TEST=OFF \
     -DBUILD_MERGED_PLUGINS=ON \
     -DCMAKE_DLL_NAME_WITH_SOVERSION=ON \
-    "-DCMAKE_CXX_FLAGS=-DNDEBUG -DGLOG_USE_GLOG_EXPORT -DGLOG_USE_GFLAGS" \
+    "-DCMAKE_CXX_FLAGS=-DNDEBUG -DGLOG_USE_GLOG_EXPORT -DGLOG_USE_GFLAGS -UGFLAGS_IS_A_DLL -DGFLAGS_IS_A_DLL=1" \
     || return 1
   cmake --build "$LIBRIME_BUILD" -j"$JOBS" || return 1
   cmake --install "$LIBRIME_BUILD" --prefix "$STAGE" || return 1
