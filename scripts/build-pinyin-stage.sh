@@ -11,7 +11,12 @@ LIBIME_SRC="${LIBIME_SRC:-$ROOT/../libime}"
 CHINESE_SRC="${CHINESE_SRC:-$ROOT/../fcitx5-chinese-addons}"
 # MSYS2: default libime/chinese build dirs under /tmp (usually C:\msys64\tmp) to avoid Ninja
 # "failed recompaction: Permission denied" on some Windows drives (Defender / indexing).
-if [[ -n "${MSYSTEM:-}" ]]; then
+# Use uname, not only MSYSTEM: GitHub Actions bash often does not set MSYSTEM like an interactive shell.
+_is_msys=0
+case "$(uname -s 2>/dev/null)" in
+  *MINGW* | MSYS_NT*) _is_msys=1 ;;
+esac
+if [[ $_is_msys -eq 1 ]]; then
   LIBIME_BUILD="${LIBIME_BUILD:-/tmp/fcitx5-pinyin-libime}"
   CHINESE_BUILD="${CHINESE_BUILD:-/tmp/fcitx5-pinyin-chinese}"
 else
@@ -53,10 +58,25 @@ cmake --build "$FCITX_BUILD" -j"$JOBS"
 cmake --install "$FCITX_BUILD" --prefix "$STAGE"
 
 # Ninja runs some build steps via cmd.exe; the loader must find MinGW + fcitx DLLs (e.g. libFcitx5Utils.dll in $STAGE/bin).
-case "${MSYSTEM:-}" in
-  CLANG64|MINGW64|UCRT64) export PATH="$STAGE/bin:/${MSYSTEM,,}/bin:/usr/bin${PATH:+:$PATH}" ;;
-  *) export PATH="$STAGE/bin${PATH:+:$PATH}" ;;
-esac
+if [[ $_is_msys -eq 1 ]]; then
+  case "${MSYSTEM:-}" in
+    CLANG64 | MINGW64 | UCRT64)
+      export PATH="$STAGE/bin:/${MSYSTEM,,}/bin:/usr/bin${PATH:+:$PATH}"
+      ;;
+    *)
+      # CI / non-interactive bash: MSYSTEM may be unset — still need the Clang64 toolchain on PATH.
+      if [[ -d /clang64/bin ]]; then
+        export PATH="$STAGE/bin:/clang64/bin:/usr/bin${PATH:+:$PATH}"
+      elif [[ -d /mingw64/bin ]]; then
+        export PATH="$STAGE/bin:/mingw64/bin:/usr/bin${PATH:+:$PATH}"
+      else
+        export PATH="$STAGE/bin${PATH:+:$PATH}"
+      fi
+      ;;
+  esac
+else
+  export PATH="$STAGE/bin${PATH:+:$PATH}"
+fi
 
 echo "==> [2/3] libime"
 cmake -S "$LIBIME_SRC" -B "$LIBIME_BUILD" -G Ninja \
@@ -72,35 +92,53 @@ cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null 
 
 # LibIME*Config / fcitx5-chinese-addons expect paths without .exe; Ninja on Windows still resolves
 # D:/prefix/bin/libime_pinyindict. MinGW installs libime_*.exe — ensure extensionless copies exist.
-# Do not gate on MSYSTEM (e.g. CI bash may not set it); fall back to build tree if install skipped tools.
+# Use cmake -E copy on MSYS: plain cp to an extensionless name is flaky for Ninja/cmd.exe visibility.
+copy_tool_no_ext() {
+  local src="$1" dst="$2"
+  if command -v cmake >/dev/null 2>&1; then
+    cmake -E copy "$src" "$dst"
+  else
+    cp -f "$src" "$dst"
+  fi
+}
+
 ensure_libime_tool_names() {
+  echo "==> ensuring libime CLI tools (extensionless names for fcitx5-chinese-addons / Ninja)"
   local _tool
   for _tool in libime_pinyindict libime_tabledict libime_slm_build_binary libime_prediction libime_history libime_migrate_fcitx4_pinyin libime_migrate_fcitx4_table; do
     if [[ -f "$STAGE/bin/${_tool}" ]]; then
       continue
     fi
     if [[ -f "$STAGE/bin/${_tool}.exe" ]]; then
-      cp -f "$STAGE/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+      copy_tool_no_ext "$STAGE/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
       continue
     fi
     if [[ -f "$LIBIME_BUILD/bin/${_tool}.exe" ]]; then
       mkdir -p "$STAGE/bin"
-      cp -f "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}.exe"
-      cp -f "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+      copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}.exe"
+      copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
       continue
     fi
     if [[ -f "$LIBIME_BUILD/bin/${_tool}" ]]; then
       mkdir -p "$STAGE/bin"
-      cp -f "$LIBIME_BUILD/bin/${_tool}" "$STAGE/bin/${_tool}"
+      copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}" "$STAGE/bin/${_tool}"
       continue
     fi
     echo "error: ${_tool} not under $STAGE/bin or $LIBIME_BUILD/bin (ENABLE_TOOLS=Off or build failed?)" >&2
+    ls -la "$STAGE/bin" 2>/dev/null || true
+    ls -la "$LIBIME_BUILD/bin" 2>/dev/null || true
     exit 1
   done
+  if [[ ! -f "$STAGE/bin/libime_pinyindict" ]]; then
+    echo "error: STAGE/bin/libime_pinyindict still missing after copy step" >&2
+    exit 1
+  fi
 }
 ensure_libime_tool_names
 
 echo "==> [3/3] fcitx5-chinese-addons"
+# Stale build.ninja can keep old paths / deps from a previous failed run (e.g. self-hosted or retried step).
+rm -rf "$CHINESE_BUILD"
 cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
   -DCMAKE_INSTALL_PREFIX="$STAGE" \
