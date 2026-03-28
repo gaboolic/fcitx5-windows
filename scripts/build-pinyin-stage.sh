@@ -400,7 +400,7 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
   echo "==> [5] fcitx5-rime"
   if ! vendor_rime_share_into_stage; then
     echo "error: rime-data missing under stage and not found under /clang64 or /mingw64." >&2
-    echo "  Install: pacman -S mingw-w64-clang-x86_64-rime-data (CLANG64)" >&2
+    echo "  Install: pacman -S mingw-w64-clang-x86_64-librime-data (CLANG64; replaces old rime-data)" >&2
     exit 1
   fi
   if [[ $_is_msys -eq 1 ]] && [[ -f "$LIBRIME_SRC/CMakeLists.txt" ]] && [[ -f "$LIBRIME_LUA_SRC/CMakeLists.txt" ]]; then

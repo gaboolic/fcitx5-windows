@@ -80,7 +80,7 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime, rime-data, lua). _compile-build-portable.ps1 alone is core-only.
+  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime-data meta, lua). _compile-build-portable.ps1 alone is core-only.
   # This job runs scripts/build-pinyin-stage.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
@@ -112,7 +112,7 @@ jobs:
             mingw-w64-clang-x86_64-glog `
             mingw-w64-clang-x86_64-gflags `
             mingw-w64-clang-x86_64-marisa `
-            mingw-w64-clang-x86_64-rime-data `
+            mingw-w64-clang-x86_64-librime-data `
             mingw-w64-clang-x86_64-opencc `
             mingw-w64-clang-x86_64-lua
           cp -r windows-cross/its C:/msys64/usr/share/gettext
