@@ -83,7 +83,7 @@ cmake --build build-chinese -j$(nproc)
 cmake --install build-chinese
 ```
 
-应得到 **`lib/fcitx5/pinyin.dll`**（及 punctuation、pinyinhelper 等依赖模块）、`share/fcitx5` 下拼音相关数据。
+应得到 **`lib/fcitx5/libpinyin.dll`**（MSYS2/MinGW；addon 配置里 `Library=libpinyin`；少数 MSVC 布局可能是 `pinyin.dll`）、以及 punctuation、pinyinhelper 等依赖模块、`share/fcitx5` 下拼音相关数据。
 
 若 `find_package` 失败，检查 **`CMAKE_PREFIX_PATH`** 是否仅指向 **`$STAGE`**（不要用未 `cmake --install` 的 build 树代替 prefix）。
 

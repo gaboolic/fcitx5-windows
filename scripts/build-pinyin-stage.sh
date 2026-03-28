@@ -218,10 +218,21 @@ cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
 cmake --build "$CHINESE_BUILD" -j"$JOBS"
 cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
 
+# MinGW produces libpinyin.dll (matches Library=libpinyin in pinyin.conf); MSVC layouts may use pinyin.dll.
+_addon_dir="$STAGE/lib/fcitx5"
+if [[ ! -f "$_addon_dir/libpinyin.dll" ]] && [[ ! -f "$_addon_dir/pinyin.dll" ]]; then
+  echo "error: pinyin addon DLL missing under $_addon_dir (expected libpinyin.dll or pinyin.dll)" >&2
+  echo "listing $_addon_dir:" >&2
+  ls -la "$_addon_dir" 2>&1 >&2 || true
+  echo "searching $STAGE for *pinyin*.dll:" >&2
+  find "$STAGE" -iname '*pinyin*.dll' -print 2>/dev/null >&2 || true
+  exit 1
+fi
+
 echo ""
 echo "Done. Portable root: $STAGE"
 echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built)"
-echo "  lib/fcitx5/ — addons (expect pinyin.dll)"
+echo "  lib/fcitx5/ — addons (expect libpinyin.dll on MinGW; matches Library=libpinyin in addon conf)"
 echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.pinyin.example"
 echo "Copy profile example to your config/fcitx5/profile or set FCITX_TS_IM=pinyin."
 echo "TSF install (Admin PowerShell):"

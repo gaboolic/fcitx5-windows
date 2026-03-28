@@ -80,7 +80,7 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Installer must include libime + fcitx5-chinese-addons (pinyin.dll). _compile-build-portable.ps1
+  # Installer must include libime + fcitx5-chinese-addons (libpinyin.dll on MinGW; pinyin.dll on some MSVC layouts). _compile-build-portable.ps1
   # alone only installs fcitx5 core from this repo — same as a clean clone, Chinese IME will not work.
   # This job runs scripts/build-pinyin-stage.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
@@ -167,9 +167,16 @@ jobs:
           $utf8NoBom = New-Object System.Text.UTF8Encoding $false
           [System.IO.File]::WriteAllText($runnerSh, (($bashLines -join "`n") + "`n"), $utf8NoBom)
           & C:/msys64/usr/bin/bash.exe -e $runnerSh
-          $pinyinDll = Join-Path $env:GITHUB_WORKSPACE 'stage-installer\lib\fcitx5\pinyin.dll'
-          if (-not (Test-Path -LiteralPath $pinyinDll)) {
-            Write-Error 'stage-installer/lib/fcitx5/pinyin.dll missing — libime/chinese-addons build failed or version mismatch with fcitx5 submodule'
+          $stage = Join-Path $env:GITHUB_WORKSPACE 'stage-installer'
+          $addonDir = Join-Path $stage 'lib\fcitx5'
+          $pinyinDll = Join-Path $addonDir 'libpinyin.dll'
+          $pinyinDllAlt = Join-Path $addonDir 'pinyin.dll'
+          if (-not (Test-Path -LiteralPath $pinyinDll) -and -not (Test-Path -LiteralPath $pinyinDllAlt)) {
+            Write-Host '--- lib/fcitx5 ---'
+            Get-ChildItem -LiteralPath $addonDir -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            Write-Host '--- *pinyin*.dll under stage-installer ---'
+            Get-ChildItem -LiteralPath $stage -Recurse -Filter '*pinyin*.dll' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+            Write-Error 'stage-installer/lib/fcitx5/libpinyin.dll (or pinyin.dll) missing — see listing above. On MSYS2 the addon is almost always libpinyin.dll (not pinyin.dll); an older workflow that only checked pinyin.dll would fail spuriously.'
           }
 
       - name: Build TSF installer (fcitx5-windows-setup.exe)
