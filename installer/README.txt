@@ -2,7 +2,7 @@ Fcitx5 TSF — graphical installer (Inno Setup 6)
 ===============================================
 
 Produces:
-  - Fcitx5TSF-Setup.exe     — wizard (choose install folder, copies stage tree, regsvr32 /s)
+  - fcitx5-windows-setup.exe — wizard (choose install folder, copies stage tree, regsvr32 /s)
   - After install: unins000.exe in the install directory — uninstaller
   - Start menu: "Uninstall" + "Fcitx5 user config" (opens %AppData%\Fcitx5)
   - Optional desktop shortcut to the uninstaller
@@ -15,7 +15,7 @@ Build (PowerShell):
   .\installer\build-installer.ps1 -StageDir C:\path\to\stage
 
 Output:
-  installer\dist\Fcitx5TSF-Setup.exe
+  installer\dist\fcitx5-windows-setup.exe
 
 Uninstall:
   - Settings -> Apps -> Fcitx5 (TSF IME), or

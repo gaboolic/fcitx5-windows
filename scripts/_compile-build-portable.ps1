@@ -135,6 +135,19 @@ if (-not $SkipTest) {
 
 if (-not $SkipInstall) {
     & $cmakeExe --install $BuildDir
+    # Inno Setup seeds %AppData%\Fcitx5\config\fcitx5\profile from this path; ensure it exists
+    # even if the install manifest omits these FILES (e.g. prefix/layout quirks on CI).
+    $prefixPath = ($InstallPrefix -replace '/', [System.IO.Path]::DirectorySeparatorChar)
+    $shareFcitx5 = Join-Path $prefixPath 'share\fcitx5'
+    if (-not (Test-Path -LiteralPath $shareFcitx5)) {
+        New-Item -ItemType Directory -Path $shareFcitx5 -Force | Out-Null
+    }
+    foreach ($name in @('profile.pinyin.example', 'profile.pinyin-only.example')) {
+        $src = Join-Path $RepoRoot "contrib\fcitx5\$name"
+        if (Test-Path -LiteralPath $src) {
+            Copy-Item -LiteralPath $src -Destination (Join-Path $shareFcitx5 $name) -Force
+        }
+    }
 }
 
 if (-not $SkipInstall -and -not $SkipDeploy) {

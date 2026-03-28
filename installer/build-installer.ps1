@@ -69,5 +69,5 @@ if ($p.ExitCode -ne 0) {
 }
 
 $dist = Join-Path $PSScriptRoot 'dist'
-Write-Host "Output: $(Join-Path $dist 'Fcitx5TSF-Setup.exe')"
+Write-Host "Output: $(Join-Path $dist 'fcitx5-windows-setup.exe')"
 exit 0

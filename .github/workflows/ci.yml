@@ -81,7 +81,7 @@ jobs:
           cmake --build (Join-Path $root 'build')
 
   # Same toolchain as scripts/_compile-build-portable.ps1: MSYS2 CLANG64 → install +
-  # deploy → Inno. Produces the nightly TSF setup exe artifact.
+  # deploy → Inno. Produces the nightly fcitx5-windows-setup.exe artifact.
   package-fcitx5-tsf-installer:
     needs: lint
     runs-on: windows-2025
@@ -130,7 +130,7 @@ jobs:
             -SkipRegsvr32 `
             -Jobs 8
 
-      - name: Build TSF installer (Fcitx5TSF-Setup.exe)
+      - name: Build TSF installer (fcitx5-windows-setup.exe)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -140,8 +140,8 @@ jobs:
       - name: Upload TSF installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Fcitx5TSF-Setup
-          path: installer/dist/Fcitx5TSF-Setup.exe
+          name: fcitx5-windows-setup
+          path: installer/dist/fcitx5-windows-setup.exe
 
   build-fcitx5-clang:
     needs: lint
@@ -247,7 +247,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          find "${GITHUB_WORKSPACE}" -type f \( -name 'Fcitx5-*.tar.bz2' -o -name 'Fcitx5TSF-Setup.exe' \) -exec cp -f {} release-assets/ \;
+          find "${GITHUB_WORKSPACE}" -type f -name 'fcitx5-windows-setup.exe' -exec cp -f {} release-assets/ \;
           ls -la release-assets/
 
       - name: Create Nightly release
