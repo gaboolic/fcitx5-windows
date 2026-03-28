@@ -59,11 +59,6 @@ Filename: "{sys}\regsvr32.exe"; \
 
 [Code]
 
-function UninstallImeDllExists: Boolean;
-begin
-  Result := (GetImeDll('') <> '');
-end;
-
 function GetImeDll(Param: string): string;
 begin
   if FileExists(ExpandConstant('{app}\bin\libfcitx5-x86_64.dll')) then
@@ -72,6 +67,11 @@ begin
     Result := ExpandConstant('{app}\bin\fcitx5-x86_64.dll')
   else
     Result := '';
+end;
+
+function UninstallImeDllExists: Boolean;
+begin
+  Result := (GetImeDll('') <> '');
 end;
 
 procedure RegPurgeFcitxResiduals;
