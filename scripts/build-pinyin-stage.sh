@@ -171,6 +171,35 @@ ensure_libime_tool_names() {
 }
 ensure_libime_tool_names
 
+# Upstream master may assume libstdc++ (implicit path→string) and BSD sys/endian.h; Clang/libc++ on
+# MinGW needs explicit path.string() and a _WIN32 branch in scel2org5.cpp.
+patch_fcitx5_chinese_addons_for_mingw() {
+  [[ $_is_msys -eq 1 ]] || return 0
+  local pinyin_cpp="$CHINESE_SRC/im/pinyin/pinyin.cpp"
+  local scel="$CHINESE_SRC/tools/scel2org5.cpp"
+  echo "==> patch fcitx5-chinese-addons for MinGW (pinyin path.string, scel2org5 endian)"
+  if [[ -f "$pinyin_cpp" ]] && ! grep -q 'loadDict(file.string(), persistentTask_)' "$pinyin_cpp"; then
+    if grep -q 'loadDict(file, persistentTask_)' "$pinyin_cpp"; then
+      sed -i.bak \
+        -e 's/loadDict(file, persistentTask_)/loadDict(file.string(), persistentTask_)/g' \
+        -e 's/loadDict(file.second, tasks_)/loadDict(file.second.string(), tasks_)/g' \
+        "$pinyin_cpp"
+      rm -f "${pinyin_cpp}.bak"
+    fi
+  fi
+  if [[ -f "$scel" ]] && ! grep -q '#elif defined(_WIN32)' "$scel"; then
+    if command -v perl >/dev/null 2>&1; then
+      perl -i.bak -0777 -pe \
+        's/#else\R(#include <sys\/endian\.h>)/#elif defined(_WIN32)\R#include <stdint.h>\R#define le16toh(x) (x)\R#define le32toh(x) (x)\R#else\R$1/s' \
+        "$scel"
+      rm -f "${scel}.bak"
+    else
+      echo "warning: perl missing; scel2org5.cpp may fail on Windows (pacman -S perl)" >&2
+    fi
+  fi
+}
+patch_fcitx5_chinese_addons_for_mingw
+
 echo "==> [3/3] fcitx5-chinese-addons"
 # Stale build.ninja can keep old paths / deps from a previous failed run (e.g. self-hosted or retried step).
 rm -rf "$CHINESE_BUILD"
