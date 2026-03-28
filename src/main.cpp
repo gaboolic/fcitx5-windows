@@ -4,9 +4,33 @@
 #include <fcitx/addonmanager.h>
 #include <fcitx/instance.h>
 #include <filesystem>
+#include <string>
 #include <windows.h>
 
 namespace fs = std::filesystem;
+
+namespace {
+std::string pathUtf8ForFcitxEnv(const fs::path &p) {
+    if (p.empty()) {
+        return {};
+    }
+    const auto &native = p.native();
+    if (native.empty()) {
+        return {};
+    }
+    const int n = WideCharToMultiByte(CP_UTF8, 0, native.data(),
+                                      static_cast<int>(native.size()), nullptr, 0,
+                                      nullptr, nullptr);
+    if (n <= 0) {
+        return {};
+    }
+    std::string out(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, native.data(),
+                        static_cast<int>(native.size()), out.data(), n, nullptr,
+                        nullptr);
+    return out;
+}
+} // namespace
 
 #ifdef ENABLE_KEYBOARD
 #include <fcitx/addoninstance.h>
@@ -40,17 +64,23 @@ void setupRimeUserDirEnv() {
 }
 
 void setupEnv() {
-    char path[MAX_PATH];
-    GetModuleFileNameA(NULL, path, MAX_PATH);
-    auto rootPath = ::fs::path(path).parent_path().parent_path();
-    auto fcitx_addon_dirs = rootPath / "lib" / "fcitx5";
-    setenv("FCITX_ADDON_DIRS", fcitx_addon_dirs.string());
-    auto xdg_data_dirs = rootPath / "share";
-    auto fcitx_data_dirs = xdg_data_dirs / "fcitx5";
-    setenv("XDG_DATA_DIRS", xdg_data_dirs.string());
-    setenv("FCITX_DATA_DIRS", fcitx_data_dirs.string());
-    auto libime_models = rootPath / "lib" / "libime";
-    setenv("LIBIME_MODEL_DIRS", libime_models.string());
+    std::wstring buf(MAX_PATH, L'\0');
+    const DWORD r =
+        GetModuleFileNameW(nullptr, buf.data(), static_cast<DWORD>(buf.size()));
+    if (r == 0) {
+        return;
+    }
+    buf.resize(r);
+    const auto rootPath =
+        ::fs::path(buf).parent_path().parent_path().lexically_normal();
+    const auto fcitx_addon_dirs = rootPath / "lib" / "fcitx5";
+    setenv("FCITX_ADDON_DIRS", pathUtf8ForFcitxEnv(fcitx_addon_dirs));
+    const auto xdg_data_dirs = rootPath / "share";
+    const auto fcitx_data_dirs = xdg_data_dirs / "fcitx5";
+    setenv("XDG_DATA_DIRS", pathUtf8ForFcitxEnv(xdg_data_dirs));
+    setenv("FCITX_DATA_DIRS", pathUtf8ForFcitxEnv(fcitx_data_dirs));
+    const auto libime_models = rootPath / "lib" / "libime";
+    setenv("LIBIME_MODEL_DIRS", pathUtf8ForFcitxEnv(libime_models));
     setupRimeUserDirEnv();
 }
 

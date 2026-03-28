@@ -249,6 +249,30 @@ void setupDefaultTsLogPath() {
     // here: attaching glog in transient hosts has caused unload-time crashes.
 }
 
+// Install root comes from GetModuleFileNameW → native wchar_t paths. path::string() uses the
+// system ACP, but fcitx setEnvironment() interprets values as UTF-8. Mismatch breaks
+// FCITX_ADDON_DIRS / LIBIME_MODEL_DIRS (no zh_CN.lm → bad ranking, or addons not found).
+std::string pathUtf8ForFcitxEnv(const std::filesystem::path &p) {
+    if (p.empty()) {
+        return {};
+    }
+    const auto &native = p.native();
+    if (native.empty()) {
+        return {};
+    }
+    const int n = WideCharToMultiByte(CP_UTF8, 0, native.data(),
+                                      static_cast<int>(native.size()), nullptr, 0,
+                                      nullptr, nullptr);
+    if (n <= 0) {
+        return {};
+    }
+    std::string out(static_cast<size_t>(n), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, native.data(),
+                        static_cast<int>(native.size()), out.data(), n, nullptr,
+                        nullptr);
+    return out;
+}
+
 void setupImeFcitxEnvironment() {
     auto root =
         dllInstallRootFromAddress(reinterpret_cast<const void *>(&utf8ToWide));
@@ -264,12 +288,16 @@ void setupImeFcitxEnvironment() {
     // inherit PATH and may accidentally load our libglog-2.dll. Keep only the
     // addon/data env vars here; DLL directory changes are scoped narrowly
     // around addon initialization in `Fcitx5ImeEngine::init()`.
-    setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
-    setEnvironment("XDG_DATA_DIRS", share.string().c_str());
-    setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
+    const std::string addonU8 = pathUtf8ForFcitxEnv(addon);
+    const std::string shareU8 = pathUtf8ForFcitxEnv(share);
+    const std::string fcitxdataU8 = pathUtf8ForFcitxEnv(fcitxdata);
+    const std::string libimeU8 = pathUtf8ForFcitxEnv(libimeModels);
+    setEnvironment("FCITX_ADDON_DIRS", addonU8.c_str());
+    setEnvironment("XDG_DATA_DIRS", shareU8.c_str());
+    setEnvironment("FCITX_DATA_DIRS", fcitxdataU8.c_str());
     // DefaultLanguageModelResolver loads zh_CN.lm; without LIBIME_MODEL_DIRS,
     // the CMake-time path is wrong under Program Files and ranking collapses.
-    setEnvironment("LIBIME_MODEL_DIRS", libimeModels.string().c_str());
+    setEnvironment("LIBIME_MODEL_DIRS", libimeU8.c_str());
     setupDefaultTsLogPath();
 }
 
