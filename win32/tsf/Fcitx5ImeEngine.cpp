@@ -736,8 +736,7 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
     }
 
     if (changed) {
-        tsfTrace("ensurePortableImGroupHasEntries updating IM group (was broken "
-                 "or empty)");
+        tsfTrace("ensurePortableImGroupHasEntries: fixed empty IM group");
         imm.setGroup(std::move(group));
         imm.save();
     }
