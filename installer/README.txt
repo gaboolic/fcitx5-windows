@@ -8,7 +8,7 @@ Produces:
   - Optional desktop shortcut to the uninstaller
 
 Prerequisites:
-  1) A full stage directory (e.g. from scripts/build-pinyin-stage.sh): must contain bin\libfcitx5-x86_64.dll (or fcitx5-x86_64.dll) plus data/share/lib trees.
+  1) A full stage directory (e.g. from scripts/build-pinyin-stage.sh): must contain bin\libfcitx5-x86_64.dll (or fcitx5-x86_64.dll) plus share\fcitx5\profile.pinyin.example (and the rest of share/lib). Post-install copies that example to %AppData%\Fcitx5\config\fcitx5\profile when profile does not exist yet.
   2) Inno Setup 6: https://jrsoftware.org/isdl.php
 
 Build (PowerShell):

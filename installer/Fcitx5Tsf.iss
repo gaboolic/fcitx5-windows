@@ -74,6 +74,23 @@ begin
   Result := (GetImeDll('') <> '');
 end;
 
+procedure SeedDefaultProfileFromExample;
+var
+  Src: String;
+  Dir: String;
+  Dst: String;
+begin
+  Src := ExpandConstant('{app}\share\fcitx5\profile.pinyin.example');
+  if not FileExists(Src) then
+    Exit;
+  Dir := ExpandConstant('{userappdata}\Fcitx5\config\fcitx5');
+  Dst := Dir + '\profile';
+  if FileExists(Dst) then
+    Exit;
+  if ForceDirectories(Dir) then
+    FileCopy(Src, Dst, False);
+end;
+
 procedure RegPurgeFcitxResiduals;
 var
   ClsidKey: String;
@@ -103,6 +120,7 @@ begin
       RaiseException('IME DLL not found under ' + ExpandConstant('{app}\bin') + '. Rebuild the stage and installer (see installer/README.txt).');
     if (not Exec(ExpandConstant('{sys}\regsvr32.exe'), '/s "' + Dll + '"', ExtractFileDir(Dll), SW_HIDE, ewWaitUntilTerminated, R)) or (R <> 0) then
       RaiseException('regsvr32 failed (code ' + IntToStr(R) + '). Run the installer as Administrator.');
+    SeedDefaultProfileFromExample;
   end;
 end;
 

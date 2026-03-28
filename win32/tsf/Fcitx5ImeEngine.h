@@ -68,6 +68,10 @@ class Fcitx5ImeEngine : public ImeEngine {
     bool rebuildForInputMethod(const std::string &preferredInputMethod);
     bool sendKeySym(KeySym sym);
     void syncUiFromIc();
+    /// If the loaded profile has no IM entries (or missing DefaultIM), TSF
+    /// cannot call setCurrentInputMethod for pinyin — repair in-memory and
+    /// persist so new installs work without manually copying profile.example.
+    void ensurePortableImGroupHasEntries();
     void
     activatePreferredInputMethod(const std::string &preferredInputMethod = {});
 

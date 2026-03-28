@@ -63,7 +63,7 @@ if(FCITX5_WINDOWS_BUILD_WIN32_IME)
     add_subdirectory(win32)
 endif()
 
-# Example IME profiles (copy to user config/fcitx5/profile or set FCITX_TS_IM=pinyin)
+# Example IME profiles: installer copies profile.pinyin.example → %AppData%\...\profile
 install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin.example"
         "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin-only.example"

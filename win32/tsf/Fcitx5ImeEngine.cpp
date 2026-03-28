@@ -13,6 +13,7 @@
 #include <fcitx/globalconfig.h>
 #include <fcitx/inputmethodengine.h>
 #include <fcitx/inputmethodentry.h>
+#include <fcitx/inputmethodgroup.h>
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/inputpanel.h>
 #include <fcitx/instance.h>
@@ -683,11 +684,71 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
     return ok;
 }
 
+void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
+    if (!instance_) {
+        return;
+    }
+    auto &imm = instance_->inputMethodManager();
+    InputMethodGroup group = imm.currentGroup();
+    auto &items = group.inputMethodList();
+    bool changed = false;
+
+    auto hasName = [&items](const std::string &n) {
+        return std::any_of(
+            items.begin(), items.end(),
+            [&n](const InputMethodGroupItem &it) { return it.name() == n; });
+    };
+
+    if (items.empty()) {
+        if (imm.entry("pinyin")) {
+            items.emplace_back("pinyin");
+            changed = true;
+        }
+        if (imm.entry("keyboard-us")) {
+            items.emplace_back("keyboard-us");
+            changed = true;
+        }
+        if (!items.empty()) {
+            if (imm.entry("pinyin") && hasName("pinyin")) {
+                group.setDefaultInputMethod("pinyin");
+            } else {
+                group.setDefaultInputMethod(items[0].name());
+            }
+            changed = true;
+        }
+    } else {
+        if (imm.entry("pinyin") && !hasName("pinyin")) {
+            items.insert(items.begin(), InputMethodGroupItem("pinyin"));
+            changed = true;
+        }
+        if (imm.entry("keyboard-us") && !hasName("keyboard-us")) {
+            items.emplace_back("keyboard-us");
+            changed = true;
+        }
+        if (group.defaultInputMethod().empty() && !items.empty()) {
+            if (hasName("pinyin")) {
+                group.setDefaultInputMethod("pinyin");
+            } else {
+                group.setDefaultInputMethod(items[0].name());
+            }
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        tsfTrace("ensurePortableImGroupHasEntries updating IM group (was broken "
+                 "or empty)");
+        imm.setGroup(std::move(group));
+        imm.save();
+    }
+}
+
 void Fcitx5ImeEngine::activatePreferredInputMethod(
     const std::string &preferredInputMethod) {
     if (!instance_ || !ic_) {
         return;
     }
+    ensurePortableImGroupHasEntries();
     auto &imm = instance_->inputMethodManager();
     if (!preferredInputMethod.empty() && imm.entry(preferredInputMethod)) {
         instance_->setCurrentInputMethod(ic_.get(), preferredInputMethod, true);
