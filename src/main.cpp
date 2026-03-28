@@ -19,8 +19,8 @@ std::string pathUtf8ForFcitxEnv(const fs::path &p) {
         return {};
     }
     const int n = WideCharToMultiByte(CP_UTF8, 0, native.data(),
-                                      static_cast<int>(native.size()), nullptr, 0,
-                                      nullptr, nullptr);
+                                      static_cast<int>(native.size()), nullptr,
+                                      0, nullptr, nullptr);
     if (n <= 0) {
         return {};
     }
