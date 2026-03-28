@@ -80,8 +80,9 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Same toolchain as scripts/_compile-build-portable.ps1: MSYS2 CLANG64 → install +
-  # deploy → Inno. Produces the nightly fcitx5-windows-setup.exe artifact.
+  # Installer must include libime + fcitx5-chinese-addons (pinyin.dll). _compile-build-portable.ps1
+  # alone only installs fcitx5 core from this repo — same as a clean clone, Chinese IME will not work.
+  # This job runs scripts/build-pinyin-stage.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
     runs-on: windows-2025
@@ -90,15 +91,17 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies (CLANG64, same family as portable script)
+      - name: Install dependencies (CLANG64 + Boost for libime)
         run: |
           C:/msys64/usr/bin/pacman -Syu --noconfirm
           C:/msys64/usr/bin/pacman -S --noconfirm `
+            mingw-w64-clang-x86_64-boost `
             mingw-w64-clang-x86_64-clang `
             mingw-w64-clang-x86_64-cmake `
             mingw-w64-clang-x86_64-ninja `
             mingw-w64-clang-x86_64-extra-cmake-modules `
             mingw-w64-clang-x86_64-libuv `
+            mingw-w64-clang-x86_64-libzstd `
             mingw-w64-clang-x86_64-dlfcn `
             mingw-w64-clang-x86_64-pkgconf `
             mingw-w64-clang-x86_64-gettext-tools `
@@ -114,21 +117,59 @@ jobs:
       - name: Install Inno Setup 6
         run: choco install innosetup -y --no-progress
 
-      - name: Build portable tree via _compile-build-portable.ps1
+      - name: Clone libime and fcitx5-chinese-addons
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           $root = $env:GITHUB_WORKSPACE
-          $stage = Join-Path $root 'stage-installer'
-          $prefix = $stage -replace '\\', '/'
-          $buildDir = Join-Path $root 'build-portable-ci'
-          & (Join-Path $root 'scripts/_compile-build-portable.ps1') `
-            -BuildDir $buildDir `
-            -InstallPrefix $prefix `
-            -DeployDir $stage `
-            -SkipTest `
-            -SkipRegsvr32 `
-            -Jobs 8
+          $libime = Join-Path $root 'libime'
+          $chinese = Join-Path $root 'fcitx5-chinese-addons'
+          if (Test-Path -LiteralPath $libime) { Remove-Item -LiteralPath $libime -Recurse -Force }
+          if (Test-Path -LiteralPath $chinese) { Remove-Item -LiteralPath $chinese -Recurse -Force }
+          git clone --depth 1 https://github.com/fcitx/libime.git $libime
+          git clone --depth 1 https://github.com/fcitx/fcitx5-chinese-addons.git $chinese
+          Push-Location $libime
+          try {
+            git submodule update --init --recursive
+          } finally {
+            Pop-Location
+          }
+
+      - name: Build stage (build-pinyin-stage.sh → stage-installer)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cygpath = 'C:/msys64/usr/bin/cygpath.exe'
+          if (-not (Test-Path -LiteralPath $cygpath)) {
+            Write-Error "cygpath not found: $cygpath"
+          }
+          $wsUnix = (& $cygpath -u $env:GITHUB_WORKSPACE).Trim()
+          $env:CI_WS_UNIX = $wsUnix
+          $runnerSh = Join-Path $env:RUNNER_TEMP 'ci-pinyin-stage.sh'
+          $bashLines = @(
+            'set -euo pipefail',
+            'export PATH="/clang64/bin:/usr/bin:$PATH"',
+            'export MSYSTEM=CLANG64',
+            'cd "$CI_WS_UNIX"',
+            'export STAGE="$CI_WS_UNIX/stage-installer"',
+            'export FCITX_BUILD="$CI_WS_UNIX/build-portable-ci"',
+            'export LIBIME_SRC="$CI_WS_UNIX/libime"',
+            'export CHINESE_SRC="$CI_WS_UNIX/fcitx5-chinese-addons"',
+            'export LIBIME_BUILD=/tmp/fcitx5-pinyin-libime',
+            'export CHINESE_BUILD=/tmp/fcitx5-pinyin-chinese',
+            'export CMAKE_BUILD_TYPE=Release',
+            'export JOBS=8',
+            'exec ./scripts/build-pinyin-stage.sh \',
+            '  -DCMAKE_C_COMPILER=/clang64/bin/clang.exe \',
+            '  -DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe'
+          )
+          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
+          [System.IO.File]::WriteAllText($runnerSh, (($bashLines -join "`n") + "`n"), $utf8NoBom)
+          & C:/msys64/usr/bin/bash.exe -e $runnerSh
+          $pinyinDll = Join-Path $env:GITHUB_WORKSPACE 'stage-installer\lib\fcitx5\pinyin.dll'
+          if (-not (Test-Path -LiteralPath $pinyinDll)) {
+            Write-Error 'stage-installer/lib/fcitx5/pinyin.dll missing — libime/chinese-addons build failed or version mismatch with fcitx5 submodule'
+          }
 
       - name: Build TSF installer (fcitx5-windows-setup.exe)
         shell: pwsh

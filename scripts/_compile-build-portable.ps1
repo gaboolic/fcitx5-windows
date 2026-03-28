@@ -6,6 +6,7 @@
 .DESCRIPTION
   Full tree on Windows is built with Clang + Ninja from MSYS2 CLANG64 (see scripts/build-msys-full.sh).
   This script prepends CLANG64 to PATH so the wrong ninja/windres (e.g. from other MSYS prefixes) does not break the toolchain.
+  For a distributable installer with Chinese (pinyin), run scripts/build-pinyin-stage.sh afterward (see docs/PINYIN_WINDOWS.md); this script alone does not build libime or fcitx5-chinese-addons.
 
 .PARAMETER BuildDir
   CMake build directory (default: <repo>/build-portable).
