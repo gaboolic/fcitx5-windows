@@ -115,7 +115,8 @@ jobs:
             mingw-w64-clang-x86_64-librime-data `
             mingw-w64-clang-x86_64-librime `
             mingw-w64-clang-x86_64-opencc `
-            mingw-w64-clang-x86_64-lua
+            mingw-w64-clang-x86_64-lua `
+            patch
           cp -r windows-cross/its C:/msys64/usr/share/gettext
           Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
           Add-Content $env:GITHUB_PATH "C:/msys64/usr/bin"

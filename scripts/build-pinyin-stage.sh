@@ -5,16 +5,24 @@
 # 详见 docs/PINYIN_WINDOWS.md
 set -euo pipefail
 
-# Prefer MSYS GNU patch: CI PATH may put Strawberry Perl's patch.exe first; it rejects some valid
-# unified diffs (e.g. second hunk) as "malformed".
-_patch_exe() {
-  if [[ -x /usr/bin/patch ]]; then
-    printf '%s\n' /usr/bin/patch
-  elif [[ -x /bin/patch ]]; then
-    printf '%s\n' /bin/patch
-  else
-    printf '%s\n' patch
+# Apply unified diff in a git checkout. GitHub Actions PATH often includes Strawberry Perl's
+# patch.exe, which crashes (assert hunk) on valid diffs. Prefer git apply, then MSYS /usr/bin/patch.
+_apply_unified_patch() {
+  local _dir="$1" _patch="$2"
+  [[ -d "$_dir" ]] || return 1
+  [[ -f "$_patch" ]] || return 1
+  if git -C "$_dir" rev-parse --git-dir &>/dev/null; then
+    if git -C "$_dir" apply --whitespace=nowarn "$_patch"; then
+      return 0
+    fi
   fi
+  local _p
+  for _p in /usr/bin/patch /bin/patch; do
+    if [[ -x "$_p" ]]; then
+      (cd "$_dir" && "$_p" -p1 -i "$_patch") && return 0
+    fi
+  done
+  (cd "$_dir" && patch -p1 -i "$_patch")
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -403,7 +411,7 @@ apply_msys2_librime_llvm_rc_patch() {
   local _patch="$ROOT/scripts/patches/librime/002-librime-fix-llvm-rc.patch"
   [[ -f "$_patch" ]] || return 1
   echo "==> patch librime AddRCInfo.cmake (MSYS2: MinGW+Clang 勿用 llvm-rc，避免 Exactly one input file)"
-  (cd "$LIBRIME_SRC" && "$(_patch_exe)" -p1 -i "$_patch") || return 1
+  _apply_unified_patch "$LIBRIME_SRC" "$_patch" || return 1
 }
 
 build_merged_librime_with_lua() {
@@ -443,7 +451,7 @@ apply_fcitx5_rime_standardpaths_patch() {
     return 0
   fi
   echo "==> patch fcitx5-rime: path → UTF-8 string (Windows / fcitx StandardPaths path API)"
-  (cd "$RIME_SRC" && "$(_patch_exe)" -p1 -i "$_patch") || {
+  _apply_unified_patch "$RIME_SRC" "$_patch" || {
     echo "error: fcitx5-rime patch failed: $_patch" >&2
     exit 1
   }
