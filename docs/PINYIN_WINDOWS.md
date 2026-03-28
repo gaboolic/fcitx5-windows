@@ -89,8 +89,55 @@ cmake --install build-chinese
 
 ## 5. 配置 profile（默认输入法含 pinyin）
 
-- **`cmake --install`** 后，prefix 下会有 **`share/fcitx5/profile.pinyin.example`**（含 `keyboard-us`）与 **`profile.pinyin-only.example`**（仅 pinyin，无键盘回退）。
-- 将其中之一复制到用户配置目录下的 **`profile`**（路径由 fcitx5 `StandardPaths` 决定，IME 与便携布局下一般为 **`…/config/fcitx5/profile`**）。若格式与当前 fcitx5 版本不兼容，可在 Linux 上添加一次拼音后拷贝生成的 `profile` 再对照修改。
+- **`cmake --install`** 后，prefix 下会有：
+  - **`profile.windows.example`** — 图形安装程序默认种子：**拼音 + 五笔（`wbx`）**，无 `keyboard-us`（与常见未启用 keyboard 引擎的构建一致）。
+  - **`profile.pinyin.example`** — 拼音 + `keyboard-us`（需已安装 keyboard addon）。
+  - **`profile.pinyin-only.example`** — 仅 pinyin。
+- 将其中之一复制到用户配置目录下的 **`profile`**（路径由 fcitx5 `StandardPaths` 决定，IME 与便携布局下一般为 **`%AppData%\Fcitx5\config\fcitx5\profile`**）。若格式与当前 fcitx5 版本不兼容，可在 Linux 上添加一次拼音后拷贝生成的 `profile` 再对照修改。
+
+### 托盘「切换输入法」里只有拼音？
+
+托盘菜单（以及 TSF 侧 `readProfileInputMethodsFromConfig`）**只列出当前分组**里 **`[Groups/0/Items/N]` 的 `Name=`**，与 Linux 上 fcitx5 行为一致。若 profile 里只有 `pinyin`，菜单里就不会出现五笔或中州韵。
+
+- **五笔**：在 profile 的同一分组中增加一项 **`Name=wbx`**（与 `share/fcitx5/inputmethod/wbx.conf` 对应；需已安装 **table** 引擎及词库）。新安装包会优先用 **`profile.windows.example`** 种子（仅当用户目录下尚无 `profile` 时）。**已装过旧版**的用户若已有 `profile`，需自行编辑该文件，或删掉后重装/从 `share\fcitx5\profile.windows.example` 复制一份。
+- **中州韵（Rime）**：需要 **fcitx5-rime** 插件及 Rime 数据，**当前本仓库 CI 打出的 stage/安装包未包含**。要在托盘里切换 Rime，需自行集成 fcitx5-rime 并在 profile 中加入 **`Name=rime`**（且保证 `lib/fcitx5` 与数据目录齐全）。托盘在「当前输入法为 rime」时才会显示「重新部署中州韵」等扩展项。
+
+### 拼音候选顺序 / 词频「不对」？
+
+**与安装到 `C:\Program Files\Fcitx5` 的关系**：只读安装目录**不会**单独把「静态词库」弄坏；TSF 在宿主进程里**可以正常读** Program Files 下的 `share\`。更常见的是下面两类原因。
+
+**1. 用户目录里的文件「盖住」了安装目录里的系统词库（很像静态词频不对）**
+
+fcitx5-chinese-addons 的拼音引擎加载 **libime 系统主词库**时用的是 **`StandardPathsType::Data`** 下的相对路径 **`libime/sc.dict`**（见上游 `im/pinyin/pinyin.cpp`：`standardPath.open(StandardPathsType::Data, "libime/sc.dict")`）。在 Windows 的 `StandardPaths` 里，**`Data` 类型**的查找顺序大致是：
+
+1. **`%AppData%\Fcitx5\data\`**（Roaming，先查）
+2. **`%LocalAppData%\Fcitx5\data\`**
+3. 安装根下的 **`share\`**（例如 **`C:\Program Files\Fcitx5\share\libime\sc.dict`**）
+
+**谁先存在就用谁**。因此只要 Roaming 或 Local 里有一份 **`Fcitx5\data\libime\sc.dict`**（例如从旧版/便携目录拷过、不完整、或版本不匹配），就会**一直优先于** Program Files 里的正式词库，表现会像「整套静态词频都不对」，而**不是**个人用户词的问题。
+
+同理，扩展词库在 **`StandardPathsType::PkgData`** 的 **`pinyin/dictionaries/*.dict`** 上按目录顺序合并，**同名文件**也是「**用户侧先出现者优先**」（Roaming 下的 `fcitx5` 与 `Fcitx5` 在 Windows 上通常指向同一文件夹，仅子路径不同）。若 `%AppData%\…\fcitx5\pinyin\dictionaries\` 里残留旧 `.dict`，也会覆盖安装目录里同名词典。
+
+**建议排查**（可先退出使用 IME 的应用后再试）：
+
+- 若存在且怀疑有问题，可**改名或删除**后重启应用，让引擎回退到 Program Files 内建文件：  
+  - `%AppData%\Fcitx5\data\libime\sc.dict`  
+  - `%LocalAppData%\Fcitx5\data\libime\sc.dict`  
+  - `%AppData%\fcitx5\pinyin\dictionaries\`（或 `Fcitx5\…` 下同路径）下的可疑 `.dict`
+
+**2. CI / 安装包候选顺序异常，便携本机构建却正常（例如 `xiexieni` 顶不上「谢谢你」）**
+
+libime 通过 **`DefaultLanguageModelResolver`** 找 **`zh_CN.lm`**（装在前缀的 **`lib/libime/zh_CN.lm`**）。若未设置环境变量 **`LIBIME_MODEL_DIRS`**，解析器会使用 **CMake 配置时的绝对路径** `LIBIME_INSTALL_LIBDATADIR`（即当时 `CMAKE_INSTALL_PREFIX/lib/libime`）。  
+CI 上该前缀往往是 `D:/a/.../stage-installer` 等，**用户机器上不存在**，语言模型文件打不开，解码器相当于没有正常 n-gram 打分，就会出现「词都能出，但顺序完全不对」。  
+本地便携构建若 **`CMAKE_INSTALL_PREFIX` 正好等于你的便携目录**，嵌入路径仍存在，就会「只有安装包坏、便携好」的现象。
+
+**处理**：本仓库已在 TSF / `Fcitx5.exe` 启动时设置 **`LIBIME_MODEL_DIRS`** 指向安装根下的 **`lib/libime`**，并在 **`scripts/build-pinyin-stage.sh`** 里对上游 **`languagemodel.cpp`** 打补丁：在 **`_WIN32`** 下用 **`;`** 分隔 `LIBIME_MODEL_DIRS`（上游用 **`:`** 会把 `C:\...` 拆坏）。重新走完整 stage + 安装包流程后应恢复。若你自行编 libime 而未用该脚本，需同步补丁或等上游修复。
+
+**3. 新装 / 无云端的正常差异**
+
+新安装**没有**你在其他机器上积累的个人词频与用户词库时，排序主要来自**当前加载到的那套**系统词库与默认策略。本仓库构建 chinese-addons 时通常关闭 **云拼音**（`ENABLE_CLOUDPINYIN=OFF`），与带云端纠偏的发行版也会不同。
+
+随使用时间增长，**用户词与用户语言模型**等会写入 **`%AppData%` / `%LocalAppData%`** 下 Fcitx5 / fcitx5 相关路径（例如 **`pinyin/user.dict`**、**`pinyin/user.history`** 等）；若用户目录不可写，学习结果无法保存。
 
 临时调试也可设置环境变量 **`FCITX_TS_IM=pinyin`**（见 `Fcitx5ImeEngine::activatePreferredInputMethod`），无需完整 profile 亦可强制当前会话使用拼音。
 

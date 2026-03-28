@@ -143,7 +143,7 @@ if (-not $SkipInstall) {
     if (-not (Test-Path -LiteralPath $shareFcitx5)) {
         New-Item -ItemType Directory -Path $shareFcitx5 -Force | Out-Null
     }
-    foreach ($name in @('profile.pinyin.example', 'profile.pinyin-only.example')) {
+    foreach ($name in @('profile.pinyin.example', 'profile.pinyin-only.example', 'profile.windows.example')) {
         $src = Join-Path $RepoRoot "contrib\fcitx5\$name"
         if (Test-Path -LiteralPath $src) {
             Copy-Item -LiteralPath $src -Destination (Join-Path $shareFcitx5 $name) -Force

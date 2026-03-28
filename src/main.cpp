@@ -49,6 +49,8 @@ void setupEnv() {
     auto fcitx_data_dirs = xdg_data_dirs / "fcitx5";
     setenv("XDG_DATA_DIRS", xdg_data_dirs.string());
     setenv("FCITX_DATA_DIRS", fcitx_data_dirs.string());
+    auto libime_models = rootPath / "lib" / "libime";
+    setenv("LIBIME_MODEL_DIRS", libime_models.string());
     setupRimeUserDirEnv();
 }
 

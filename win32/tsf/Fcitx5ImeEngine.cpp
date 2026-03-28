@@ -256,6 +256,7 @@ void setupImeFcitxEnvironment() {
         return;
     }
     auto addon = (root / "lib" / "fcitx5").lexically_normal();
+    auto libimeModels = (root / "lib" / "libime").lexically_normal();
     auto share = root / "share";
     auto fcitxdata = share / "fcitx5";
     // TSF runs inside arbitrary host processes such as QQ. Do not prepend the
@@ -266,6 +267,9 @@ void setupImeFcitxEnvironment() {
     setEnvironment("FCITX_ADDON_DIRS", addon.string().c_str());
     setEnvironment("XDG_DATA_DIRS", share.string().c_str());
     setEnvironment("FCITX_DATA_DIRS", fcitxdata.string().c_str());
+    // libime loads zh_CN.lm via DefaultLanguageModelResolver; without this, the path baked
+    // at CMake time (CI/stage prefix) is wrong under Program Files and ranking collapses.
+    setEnvironment("LIBIME_MODEL_DIRS", libimeModels.string().c_str());
     setupDefaultTsLogPath();
 }
 

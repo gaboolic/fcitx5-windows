@@ -80,7 +80,9 @@ var
   Dir: String;
   Dst: String;
 begin
-  Src := ExpandConstant('{app}\share\fcitx5\profile.pinyin.example');
+  Src := ExpandConstant('{app}\share\fcitx5\profile.windows.example');
+  if not FileExists(Src) then
+    Src := ExpandConstant('{app}\share\fcitx5\profile.pinyin.example');
   if not FileExists(Src) then
     Exit;
   Dir := ExpandConstant('{userappdata}\Fcitx5\config\fcitx5');

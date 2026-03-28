@@ -78,6 +78,30 @@ else
   export PATH="$STAGE/bin${PATH:+:$PATH}"
 fi
 
+# DefaultLanguageModelResolver uses LIBIME_INSTALL_LIBDATADIR (CMake-time absolute path) when
+# LIBIME_MODEL_DIRS is unset. CI stage paths (e.g. D:/a/...) do not exist on end-user PCs →
+# zh_CN.lm never loads → decoder scores are wrong ("xiexieni" → garbage). TSF sets
+# LIBIME_MODEL_DIRS at runtime; upstream splits that env only by ':' which breaks 'C:\...'.
+patch_libime_languagemodel_dirs_for_win32() {
+  [[ $_is_msys -eq 1 ]] || return 0
+  local f="$LIBIME_SRC/src/libime/core/languagemodel.cpp"
+  [[ -f "$f" ]] || return 0
+  if grep -q 'split(modelDirs, ";")' "$f" 2>/dev/null; then
+    return 0
+  fi
+  echo "==> patch libime languagemodel.cpp: LIBIME_MODEL_DIRS split ';' on _WIN32"
+  perl -i.bak -0777 -pe '
+    s/if \(modelDirs && modelDirs\[0\]\) \{\R\s*dirs = fcitx::stringutils::split\(modelDirs, ":"\);/
+if (modelDirs \&\& modelDirs[0]) {\n#ifdef _WIN32\n        dirs = fcitx::stringutils::split(modelDirs, ";");\n#else\n        dirs = fcitx::stringutils::split(modelDirs, ":");\n#endif/s;
+  ' "$f"
+  rm -f "${f}.bak"
+  if ! grep -q 'split(modelDirs, ";")' "$f" 2>/dev/null; then
+    echo "error: failed to patch libime languagemodel.cpp (LIBIME_MODEL_DIRS / _WIN32)" >&2
+    exit 1
+  fi
+}
+patch_libime_languagemodel_dirs_for_win32
+
 echo "==> [2/3] libime"
 cmake -S "$LIBIME_SRC" -B "$LIBIME_BUILD" -G Ninja \
   -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \

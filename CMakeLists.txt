@@ -63,8 +63,9 @@ if(FCITX5_WINDOWS_BUILD_WIN32_IME)
     add_subdirectory(win32)
 endif()
 
-# Example IME profiles: installer copies profile.pinyin.example → %AppData%\...\profile
+# Example IME profiles: installer seeds profile from profile.windows.example (fallback: profile.pinyin.example)
 install(
   FILES "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin.example"
         "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.pinyin-only.example"
+        "${CMAKE_CURRENT_SOURCE_DIR}/contrib/fcitx5/profile.windows.example"
   DESTINATION share/fcitx5)
