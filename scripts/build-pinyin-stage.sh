@@ -90,9 +90,44 @@ cmake --install "$LIBIME_BUILD" --prefix "$STAGE"
 # Some layouts only install COMPONENT tools when requested explicitly.
 cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null || true
 
-# LibIME*Config / fcitx5-chinese-addons expect paths without .exe; Ninja on Windows still resolves
-# D:/prefix/bin/libime_pinyindict. MinGW installs libime_*.exe — ensure extensionless copies exist.
-# Use cmake -E copy on MSYS: plain cp to an extensionless name is flaky for Ninja/cmd.exe visibility.
+# LibIME *Config.cmake sets IMPORTED_LOCATION to .../bin/libime_pinyindict (no .exe). MinGW only
+# installs libime_pinyindict.exe. Native Windows Ninja then looks for the extensionless path and
+# fails ("missing and no known rule to make it") even if MSYS created a copy — fix the *installed*
+# CMake package so find_package points at the real .exe names.
+patch_libime_imported_locations_for_mingw() {
+  [[ $_is_msys -eq 1 ]] || return 0
+  echo "==> patch LibIME *Config.cmake IMPORTED_LOCATION -> *.exe (MinGW / Ninja)"
+  local f
+  shopt -s nullglob
+  for f in "$STAGE"/lib/cmake/LibIME*/LibIME*Config.cmake; do
+    [[ -f "$f" ]] || continue
+    if command -v perl >/dev/null 2>&1; then
+      perl -i.bak -pe '
+        next unless /IMPORTED_LOCATION/;
+        s/libime_slm_build_binary(?!\.exe)"/libime_slm_build_binary.exe"/g;
+        s/libime_prediction(?!\.exe)"/libime_prediction.exe"/g;
+        s/libime_history(?!\.exe)"/libime_history.exe"/g;
+        s/libime_pinyindict(?!\.exe)"/libime_pinyindict.exe"/g;
+        s/libime_tabledict(?!\.exe)"/libime_tabledict.exe"/g;
+        s/libime_migrate_fcitx4_pinyin(?!\.exe)"/libime_migrate_fcitx4_pinyin.exe"/g;
+        s/libime_migrate_fcitx4_table(?!\.exe)"/libime_migrate_fcitx4_table.exe"/g;
+      ' "$f"
+      rm -f "${f}.bak"
+    else
+      # No perl: sed only touches IMPORTED_LOCATION lines (msys perl package: pacman -S perl).
+      local _t
+      for _t in libime_slm_build_binary libime_prediction libime_history libime_pinyindict libime_tabledict libime_migrate_fcitx4_pinyin libime_migrate_fcitx4_table; do
+        sed -i.bak "/IMPORTED_LOCATION/ s|/${_t}\"|/${_t}.exe\"|g" "$f"
+      done
+      rm -f "${f}.bak"
+    fi
+  done
+  shopt -u nullglob
+}
+patch_libime_imported_locations_for_mingw
+
+# Optional: extensionless copies for anything that still resolves the Unix path without .exe.
+# Use cmake -E copy on MSYS where possible.
 copy_tool_no_ext() {
   local src="$1" dst="$2"
   if command -v cmake >/dev/null 2>&1; then
@@ -129,8 +164,8 @@ ensure_libime_tool_names() {
     ls -la "$LIBIME_BUILD/bin" 2>/dev/null || true
     exit 1
   done
-  if [[ ! -f "$STAGE/bin/libime_pinyindict" ]]; then
-    echo "error: STAGE/bin/libime_pinyindict still missing after copy step" >&2
+  if [[ ! -f "$STAGE/bin/libime_pinyindict" ]] && [[ ! -f "$STAGE/bin/libime_pinyindict.exe" ]]; then
+    echo "error: libime_pinyindict (.exe or extensionless) missing under $STAGE/bin" >&2
     exit 1
   fi
 }

@@ -106,7 +106,8 @@ jobs:
             mingw-w64-clang-x86_64-pkgconf `
             mingw-w64-clang-x86_64-gettext-tools `
             gettext-devel `
-            msys2-runtime-devel
+            msys2-runtime-devel `
+            perl
           cp -r windows-cross/its C:/msys64/usr/share/gettext
           Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
           Add-Content $env:GITHUB_PATH "C:/msys64/usr/bin"
