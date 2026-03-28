@@ -502,8 +502,25 @@ copy_lua_runtime_dlls() {
   shopt -u nullglob
 }
 
+# llvm-objdump on MinGW .dll.a has no ELF SONAME; CMake REGEX REPLACE leaves SONAME_OUT == full
+# dump → LUA_LIBRARY_PATH in config.h is multiline garbage and breaks the C++ compile.
+apply_fcitx5_lua_mingw_library_path_patch() {
+  local _patch="$ROOT/scripts/patches/fcitx5-lua/001-cmake-resolve-lua-library-mingw.patch"
+  local _marker="$LUA_SRC/CMakeLists.txt"
+  [[ -f "$_patch" ]] && [[ -f "$_marker" ]] || return 0
+  if grep -q 'NOT SONAME_OUT STREQUAL OBJDUMP_RESULT' "$_marker" 2>/dev/null; then
+    return 0
+  fi
+  echo "==> patch fcitx5-lua: LUA_LIBRARY_PATH for MinGW import libs (.dll.a)"
+  _apply_unified_patch "$LUA_SRC" "$_patch" || {
+    echo "error: fcitx5-lua patch failed: $_patch" >&2
+    exit 1
+  }
+}
+
 if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
   echo "==> [6] fcitx5-lua"
+  apply_fcitx5_lua_mingw_library_path_patch
   rm -rf "$LUA_BUILD"
   cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
