@@ -249,9 +249,10 @@ void setupDefaultTsLogPath() {
     // here: attaching glog in transient hosts has caused unload-time crashes.
 }
 
-// Install root comes from GetModuleFileNameW → native wchar_t paths. path::string() uses the
-// system ACP, but fcitx setEnvironment() interprets values as UTF-8. Mismatch breaks
-// FCITX_ADDON_DIRS / LIBIME_MODEL_DIRS (no zh_CN.lm → bad ranking, or addons not found).
+// Install root comes from GetModuleFileNameW → native wchar_t paths.
+// path::string() uses the system ACP, but fcitx setEnvironment() interprets
+// values as UTF-8. Mismatch breaks FCITX_ADDON_DIRS / LIBIME_MODEL_DIRS (no
+// zh_CN.lm → bad ranking, or addons not found).
 std::string pathUtf8ForFcitxEnv(const std::filesystem::path &p) {
     if (p.empty()) {
         return {};
@@ -261,8 +262,8 @@ std::string pathUtf8ForFcitxEnv(const std::filesystem::path &p) {
         return {};
     }
     const int n = WideCharToMultiByte(CP_UTF8, 0, native.data(),
-                                      static_cast<int>(native.size()), nullptr, 0,
-                                      nullptr, nullptr);
+                                      static_cast<int>(native.size()), nullptr,
+                                      0, nullptr, nullptr);
     if (n <= 0) {
         return {};
     }
