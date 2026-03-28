@@ -18,6 +18,9 @@ installer/dist
 install
 .cache
 
+# Local scratch (downloaded upstream sources / shallow clones for patching)
+.tmp-*
+
 # Visual Studio / MSVC
 .vs/
 *.vcxproj.user

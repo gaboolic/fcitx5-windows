@@ -420,6 +420,23 @@ build_merged_librime_with_lua() {
   return 0
 }
 
+# fcitx5 5.1.13+ StandardPaths::locate / userDirectory return std::filesystem::path;
+# Windows path::c_str() is wchar_t* — incompatible with fcitx::fs::isdir(std::string) and
+# RimeTraits::user_data_dir (const char *). Upstream fcitx5-rime 5.1.13 predates that API.
+apply_fcitx5_rime_standardpaths_patch() {
+  local _patch="$ROOT/scripts/patches/fcitx5-rime/001-rimeengine-filesystem-path.patch"
+  local _marker="$RIME_SRC/src/rimeengine.h"
+  [[ -f "$_patch" ]] && [[ -f "$_marker" ]] || return 0
+  if grep -q 'rimePathToUtf8' "$_marker" 2>/dev/null; then
+    return 0
+  fi
+  echo "==> patch fcitx5-rime: path → UTF-8 string (Windows / fcitx StandardPaths path API)"
+  (cd "$RIME_SRC" && patch -p1 -i "$_patch") || {
+    echo "error: fcitx5-rime patch failed: $_patch" >&2
+    exit 1
+  }
+}
+
 if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
   echo "==> [5] fcitx5-rime"
   if ! vendor_rime_share_into_stage; then
@@ -439,6 +456,7 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
     fi
     copy_librime_runtime_dlls
   fi
+  apply_fcitx5_rime_standardpaths_patch
   rm -rf "$RIME_BUILD"
   cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
