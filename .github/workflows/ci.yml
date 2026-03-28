@@ -135,7 +135,6 @@ jobs:
             @{ name = 'libime'; url = 'https://github.com/fcitx/libime.git' },
             @{ name = 'fcitx5-chinese-addons'; url = 'https://github.com/fcitx/fcitx5-chinese-addons.git' },
             @{ name = 'fcitx5-table-extra'; url = 'https://github.com/fcitx/fcitx5-table-extra.git' },
-            @{ name = 'fcitx5-rime'; url = 'https://github.com/fcitx/fcitx5-rime.git' },
             @{ name = 'fcitx5-lua'; url = 'https://github.com/fcitx/fcitx5-lua.git' },
             @{ name = 'librime-lua'; url = 'https://github.com/hchunhui/librime-lua.git' }
           )
@@ -144,6 +143,10 @@ jobs:
             if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
             git clone --depth 1 $r.url $dest
           }
+          $rime = Join-Path $root 'fcitx5-rime'
+          if (Test-Path -LiteralPath $rime) { Remove-Item -LiteralPath $rime -Recurse -Force }
+          # master 可能超前于 MSYS2 的 librime 1.14 头文件；与已发布 5.1.13 对齐
+          git clone --depth 1 --branch 5.1.13 https://github.com/fcitx/fcitx5-rime.git $rime
           $librime = Join-Path $root 'librime'
           if (Test-Path -LiteralPath $librime) { Remove-Item -LiteralPath $librime -Recurse -Force }
           git clone --depth 1 --branch 1.14.0 https://github.com/rime/librime.git $librime

@@ -373,12 +373,34 @@ mingw_toolchain_prefix() {
   fi
 }
 
+install_merged_librime_dll_into_bindir() {
+  # 上游 install(TARGETS rime DESTINATION lib) 会把 DLL 放在 $STAGE/lib；运行时与 fcitx5 一致从 bin 加载。
+  shopt -s nullglob
+  local _f
+  for _f in "$STAGE/lib"/librime-*.dll "$STAGE/lib"/librime.dll; do
+    if [[ -f "$_f" ]]; then
+      mkdir -p "$STAGE/bin"
+      cp -f "$_f" "$STAGE/bin/"
+      echo "==> copied $(basename "$_f") from lib/ to bin/"
+    fi
+  done
+  shopt -u nullglob
+}
+
+apply_msys2_librime_llvm_rc_patch() {
+  local _patch="$ROOT/scripts/patches/librime/002-librime-fix-llvm-rc.patch"
+  [[ -f "$_patch" ]] || return 1
+  echo "==> patch librime AddRCInfo.cmake (MSYS2: MinGW+Clang 勿用 llvm-rc，避免 Exactly one input file)"
+  (cd "$LIBRIME_SRC" && patch -p1 -i "$_patch") || return 1
+}
+
 build_merged_librime_with_lua() {
   local _prefix
   _prefix="$(mingw_toolchain_prefix)"
   [[ -n "$_prefix" ]] || return 1
   echo "==> [5a] librime + librime-lua (merged into librime DLL, same idea as fcitx5-prebuilder / fcitx5-macos deps)"
   prepare_librime_lua_plugin_dir || return 1
+  apply_msys2_librime_llvm_rc_patch || return 1
   rm -rf "$LIBRIME_BUILD"
   # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏；另强制 GFLAGS_IS_A_DLL 为 0/1，否则
   # gflags_declare.h 里 #if GFLAGS_IS_A_DLL 在 Clang+MinGW 下会因空宏报 invalid token。
@@ -393,6 +415,7 @@ build_merged_librime_with_lua() {
     || return 1
   cmake --build "$LIBRIME_BUILD" -j"$JOBS" || return 1
   cmake --install "$LIBRIME_BUILD" --prefix "$STAGE" || return 1
+  install_merged_librime_dll_into_bindir
   export PKG_CONFIG_PATH="$STAGE/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
   return 0
 }
