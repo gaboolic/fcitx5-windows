@@ -2,6 +2,8 @@
 # Step 2 — 依赖链：libime → fcitx5-chinese-addons → 可选 table-extra / rime / lua（同一 STAGE）。
 # 默认先执行 fcitx5-windows 安装到 STAGE。若已用 PowerShell 跑过 01-build-fcitx5-windows.ps1 装入同一 STAGE，可 export SKIP_FCITX_WINDOWS=1 跳过本节。
 # 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
+# 缺源码目录时会 git clone --depth 1（需 git）。可覆盖：LIBIME_GIT / LIBIME_TAG、CHINESE_ADDONS_GIT / CHINESE_ADDONS_TAG、
+# RIME_TAG（默认 5.1.13）、LIBRIME_TAG（默认 1.14.0）；可选仓库见 maybe_clone_optional 调用处。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -40,16 +42,55 @@ fi
 BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 8)}"
 
+# Clone into $1 if there is no CMakeLists.txt yet and $1 does not exist.
+ensure_repo() {
+  local dest="$1" url="$2" branch="${3:-}"
+  if [[ -f "$dest/CMakeLists.txt" ]]; then
+    return 0
+  fi
+  if [[ -e "$dest" ]]; then
+    echo "error: path exists but is not a CMake project (no CMakeLists.txt): $dest" >&2
+    exit 1
+  fi
+  if ! command -v git >/dev/null 2>&1; then
+    echo "error: git not on PATH (cannot clone $url -> $dest)" >&2
+    exit 1
+  fi
+  mkdir -p "$(dirname "$dest")"
+  echo "==> git clone --depth 1 $url -> $dest"
+  if [[ -n "$branch" ]]; then
+    git clone --depth 1 --branch "$branch" "$url" "$dest"
+  else
+    git clone --depth 1 "$url" "$dest"
+  fi
+}
+
+# Optional deps: clone only if $1 is entirely absent (do not overwrite partial trees).
+maybe_clone_optional() {
+  local dest="$1" url="$2" branch="${3:-}"
+  if [[ -f "$dest/CMakeLists.txt" ]]; then
+    return 0
+  fi
+  if [[ -e "$dest" ]]; then
+    return 0
+  fi
+  ensure_repo "$dest" "$url" "$branch"
+}
+
 if [[ ! -f "$ROOT/CMakeLists.txt" ]]; then
   echo "ROOT invalid: $ROOT" >&2
   exit 1
 fi
+
+ensure_repo "$LIBIME_SRC" "${LIBIME_GIT:-https://github.com/fcitx/libime.git}" "${LIBIME_TAG:-}"
 if [[ ! -f "$LIBIME_SRC/CMakeLists.txt" ]]; then
-  echo "LIBIME_SRC missing: $LIBIME_SRC (clone https://github.com/fcitx/libime)" >&2
+  echo "error: LIBIME_SRC invalid after clone: $LIBIME_SRC" >&2
   exit 1
 fi
+
+ensure_repo "$CHINESE_SRC" "${CHINESE_ADDONS_GIT:-https://github.com/fcitx/fcitx5-chinese-addons.git}" "${CHINESE_ADDONS_TAG:-}"
 if [[ ! -f "$CHINESE_SRC/CMakeLists.txt" ]]; then
-  echo "CHINESE_SRC missing: $CHINESE_SRC (clone https://github.com/fcitx/fcitx5-chinese-addons next to fcitx5-windows, or set CHINESE_SRC)" >&2
+  echo "error: CHINESE_SRC invalid after clone: $CHINESE_SRC" >&2
   exit 1
 fi
 
@@ -123,23 +164,20 @@ cmake --install "$LIBIME_BUILD" --prefix "$STAGE"
 # Some layouts only install COMPONENT tools when requested explicitly.
 cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null || true
 
-# Optional: extensionless copies for anything that still resolves the Unix path without .exe.
-# Use cmake -E copy on MSYS where possible.
+# LibIME*Config.cmake IMPORTED_LOCATION points at .../bin/libime_pinyindict (no .exe). MinGW only
+# ships *.exe; Ninja needs the extensionless path. Use cp (not cmake -E copy): on Windows, CMake
+# may normalize/copy extensionless destinations incorrectly and leave the Ninja dependency missing.
 copy_tool_no_ext() {
-  local src="$1" dst="$2"
-  if command -v cmake >/dev/null 2>&1; then
-    cmake -E copy "$src" "$dst"
-  else
-    cp -f "$src" "$dst"
-  fi
+  cp -f "$1" "$2"
 }
 
 ensure_libime_tool_names() {
   echo "==> ensuring libime CLI tools (extensionless names for fcitx5-chinese-addons / Ninja)"
   local _tool
   for _tool in libime_pinyindict libime_tabledict libime_slm_build_binary libime_prediction libime_history libime_migrate_fcitx4_pinyin libime_migrate_fcitx4_table; do
-    if [[ -f "$STAGE/bin/${_tool}" ]]; then
-      continue
+    if [[ -f "$LIBIME_BUILD/bin/${_tool}.exe" ]] && [[ ! -f "$STAGE/bin/${_tool}.exe" ]]; then
+      mkdir -p "$STAGE/bin"
+      copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}.exe"
     fi
     if [[ -f "$STAGE/bin/${_tool}.exe" ]]; then
       copy_tool_no_ext "$STAGE/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
@@ -149,6 +187,9 @@ ensure_libime_tool_names() {
       mkdir -p "$STAGE/bin"
       copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}.exe"
       copy_tool_no_ext "$LIBIME_BUILD/bin/${_tool}.exe" "$STAGE/bin/${_tool}"
+      continue
+    fi
+    if [[ -f "$STAGE/bin/${_tool}" ]]; then
       continue
     fi
     if [[ -f "$LIBIME_BUILD/bin/${_tool}" ]]; then
@@ -184,6 +225,7 @@ cmake --build "$CHINESE_BUILD" -j"$JOBS"
 cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
 
 # --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
+maybe_clone_optional "$TABLE_EXTRA_SRC" "${TABLE_EXTRA_GIT:-https://github.com/fcitx/fcitx5-table-extra.git}" "${TABLE_EXTRA_TAG:-}"
 if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
   echo "==> [4] fcitx5-table-extra"
   rm -rf "$TABLE_EXTRA_BUILD"
@@ -327,6 +369,10 @@ build_merged_librime_with_lua() {
   return 0
 }
 
+maybe_clone_optional "$RIME_SRC" "${RIME_GIT:-https://github.com/fcitx/fcitx5-rime.git}" "${RIME_TAG:-5.1.13}"
+maybe_clone_optional "$LIBRIME_SRC" "${LIBRIME_GIT:-https://github.com/rime/librime.git}" "${LIBRIME_TAG:-1.14.0}"
+maybe_clone_optional "$LIBRIME_LUA_SRC" "${LIBRIME_LUA_GIT:-https://github.com/hchunhui/librime-lua.git}" "${LIBRIME_LUA_TAG:-}"
+
 if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
   echo "==> [5] fcitx5-rime"
   if ! vendor_rime_share_into_stage; then
@@ -378,6 +424,8 @@ copy_lua_runtime_dlls() {
   done
   shopt -u nullglob
 }
+
+maybe_clone_optional "$LUA_SRC" "${LUA_GIT:-https://github.com/fcitx/fcitx5-lua.git}" "${LUA_TAG:-}"
 
 if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
   echo "==> [6] fcitx5-lua"
