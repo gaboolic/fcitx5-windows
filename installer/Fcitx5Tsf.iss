@@ -9,7 +9,7 @@
 #define ImeClsid "{{FC3869BA-51E3-4078-8EE2-5FE49493A1F4}}"
 
 #ifndef StageDir
-  #define StageDir "..\stage-pinyin"
+  #define StageDir "..\stage"
 #endif
 
 [Setup]

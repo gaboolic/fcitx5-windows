@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
-# 可重复：构建 fcitx5-windows → install 到 prefix → libime → chinese-addons →
-# 可选 fcitx5-table-extra、fcitx5-rime、fcitx5-lua（同一 prefix）。
-# 依赖：MSYS2 Clang64、Ninja、Boost、libzstd、gettext；Rime：从源码合并编 librime+librime-lua（同 fcitx5-prebuilder / macOS）或回退为拷贝 MSYS2 预编译 librime；rime-data；Lua：lua.pc；见 docs/PINYIN_WINDOWS.md。
-# 详见 docs/PINYIN_WINDOWS.md
+# Step 2 — 依赖链：libime → fcitx5-chinese-addons → 可选 table-extra / rime / lua（同一 STAGE）。
+# 默认先执行 fcitx5-windows 安装到 STAGE。若已用 PowerShell 跑过 01-build-fcitx5-windows.ps1 装入同一 STAGE，可 export SKIP_FCITX_WINDOWS=1 跳过本节。
+# 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
 set -euo pipefail
 
 # Apply unified diff in a git checkout. GitHub Actions PATH often includes Strawberry Perl's
@@ -26,7 +25,7 @@ _apply_unified_patch() {
 }
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-STAGE="${STAGE:-$ROOT/stage-pinyin}"
+STAGE="${STAGE:-$ROOT/stage}"
 FCITX_BUILD="${FCITX_BUILD:-$ROOT/build-pinyin-fcitx}"
 LIBIME_SRC="${LIBIME_SRC:-$ROOT/../libime}"
 CHINESE_SRC="${CHINESE_SRC:-$ROOT/../fcitx5-chinese-addons}"
@@ -70,7 +69,7 @@ if [[ ! -f "$LIBIME_SRC/CMakeLists.txt" ]]; then
   exit 1
 fi
 if [[ ! -f "$CHINESE_SRC/CMakeLists.txt" ]]; then
-  echo "CHINESE_SRC missing: $CHINESE_SRC (run scripts/prepare-pinyin-deps.sh or clone fcitx5-chinese-addons)" >&2
+  echo "CHINESE_SRC missing: $CHINESE_SRC (clone https://github.com/fcitx/fcitx5-chinese-addons next to fcitx5-windows, or set CHINESE_SRC)" >&2
   exit 1
 fi
 
@@ -83,14 +82,22 @@ fi
 echo "==> Stage prefix: $STAGE"
 mkdir -p "$STAGE"
 
-echo "==> [1/3] fcitx5-windows configure + build + install"
-cmake -S "$ROOT" -B "$FCITX_BUILD" -G Ninja \
-  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-  -DCMAKE_INSTALL_PREFIX="$STAGE" \
-  -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON \
-  "$@"
-cmake --build "$FCITX_BUILD" -j"$JOBS"
-cmake --install "$FCITX_BUILD" --prefix "$STAGE"
+if [[ "${SKIP_FCITX_WINDOWS:-0}" != "1" ]]; then
+  echo "==> [1/3] fcitx5-windows configure + build + install"
+  cmake -S "$ROOT" -B "$FCITX_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON \
+    "$@"
+  cmake --build "$FCITX_BUILD" -j"$JOBS"
+  cmake --install "$FCITX_BUILD" --prefix "$STAGE"
+else
+  echo "==> [1/3] skip fcitx5-windows (SKIP_FCITX_WINDOWS=1 — use scripts/01-build-fcitx5-windows.ps1 first if STAGE is empty)"
+  if [[ ! -d "$STAGE/lib/cmake/Fcitx5Core" ]]; then
+    echo "error: STAGE missing fcitx5 install (expected $STAGE/lib/cmake/Fcitx5Core). Run 01-build-fcitx5-windows.ps1 or unset SKIP_FCITX_WINDOWS." >&2
+    exit 1
+  fi
+fi
 
 # Ninja runs some build steps via cmd.exe; the loader must find MinGW + fcitx DLLs (e.g. libFcitx5Utils.dll in $STAGE/bin).
 if [[ $_is_msys -eq 1 ]]; then
@@ -471,7 +478,15 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
       copy_librime_dlls_from_msys
     fi
   else
-    if [[ $_is_msys -ne 1 ]]; then
+    if [[ $_is_msys -eq 1 ]]; then
+      if [[ ! -f "$LIBRIME_SRC/CMakeLists.txt" ]]; then
+        echo "==> skip merged librime build: LIBRIME_SRC missing or no CMakeLists.txt ($LIBRIME_SRC)" >&2
+      fi
+      if [[ ! -f "$LIBRIME_LUA_SRC/CMakeLists.txt" ]]; then
+        echo "==> skip merged librime build: librime-lua missing or no CMakeLists.txt ($LIBRIME_LUA_SRC); Rime core will not embed Lua" >&2
+      fi
+      echo "==> falling back to copy_librime_runtime_dlls (MSYS2 prebuilt librime + deps)" >&2
+    else
       echo "==> non-MSYS: using prebuilt librime DLLs only (set LIBRIME_SRC + LIBRIME_LUA_SRC on MSYS2 for merged lua)"
     fi
     copy_librime_runtime_dlls
@@ -552,7 +567,9 @@ echo "  lib/fcitx5/ — addons (libpinyin.dll; optional librime.dll, libluaaddon
 echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.windows.example"
 echo "  share/rime-data/ — when fcitx5-rime is built; share/opencc/ if vendored for Rime schemas"
 echo "Copy profile example to your config/fcitx5/profile or set FCITX_TS_IM=pinyin."
-echo "TSF install (Admin PowerShell):"
-echo "  pwsh -File scripts/install-fcitx5-ime.ps1 -Stage \"$STAGE\" -DeployDir \"C:/Fcitx5Portable\""
-echo "Uninstall: scripts/uninstall-fcitx5-ime.ps1 -DeployDir \"...\" [-RemoveFiles] [-Force]"
-echo "Or: deploy-ime-stage.ps1 / .sh (same as before; -Unregister = uninstall)"
+echo "Next (PowerShell, Admin for 04+05):"
+echo "  03-build-installer.ps1 -StageDir \"$STAGE\"   # 安装包 fcitx5-windows-setup.exe（与 04+05 等效于最终用户安装）"
+echo "  04-deploy-to-portable.ps1 -Stage \"$STAGE\" -DeployDir C:\\Fcitx5Portable"
+echo "  05-register-ime.ps1 -DeployDir C:\\Fcitx5Portable"
+echo "  # or one shot: install-fcitx5-ime.ps1 -Stage \"$STAGE\" -DeployDir C:/Fcitx5Portable"
+echo "Uninstall: uninstall-fcitx5-ime.ps1 -DeployDir \"...\" [-RemoveFiles] [-Force]"

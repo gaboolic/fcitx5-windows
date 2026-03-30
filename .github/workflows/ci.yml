@@ -80,8 +80,8 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime-data meta, lua). _compile-build-portable.ps1 alone is core-only.
-  # This job runs scripts/build-pinyin-stage.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
+  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime-data meta, lua). scripts/01-build-fcitx5-windows.ps1 is core-only.
+  # This job runs scripts/02-build-deps.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
     runs-on: windows-2025
@@ -159,7 +159,7 @@ jobs:
             Pop-Location
           }
 
-      - name: Build stage (build-pinyin-stage.sh → stage-installer)
+      - name: Build stage (02-build-deps.sh → stage-installer)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -192,7 +192,7 @@ jobs:
             'export LIBRIME_BUILD=/tmp/fcitx5-pinyin-librime',
             'export CMAKE_BUILD_TYPE=Release',
             'export JOBS=8',
-            'exec ./scripts/build-pinyin-stage.sh \',
+            'exec ./scripts/02-build-deps.sh \',
             '  -DCMAKE_C_COMPILER=/clang64/bin/clang.exe \',
             '  -DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe'
           )

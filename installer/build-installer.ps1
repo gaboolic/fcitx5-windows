@@ -10,7 +10,7 @@
   Optional path to Fcitx5Tsf.iss (default: installer dir next to this script).
 
 .EXAMPLE
-  .\installer\build-installer.ps1 -StageDir D:\fcitx5-windows\stage-pinyin
+  .\installer\build-installer.ps1 -StageDir D:\fcitx5-windows\stage
 #>
 param(
     [Parameter(Mandatory = $true)]
