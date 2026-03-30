@@ -1,30 +1,15 @@
 diff --git a/src/addonloader/luaaddonstate.cpp b/src/addonloader/luaaddonstate.cpp
 --- a/src/addonloader/luaaddonstate.cpp
 +++ b/src/addonloader/luaaddonstate.cpp
-@@ -161,9 +161,26 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+@@ -160,9 +160,10 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
              {"standardPathLocate", &LuaAddonState::standardPathLocate},
              {"UTF16ToUTF8", &LuaAddonState::UTF16ToUTF8},
              {"UTF8ToUTF16", &LuaAddonState::UTF8ToUTF16},
 +            {nullptr, nullptr},
          };
          auto *addon = GetLuaAddonState(state);
-+        constexpr int kFcitxCoreTotalFunctions = 17;
-+        constexpr int kFcitxCoreSelectedFunctions = kFcitxCoreTotalFunctions;
-+        FCITX_LUA_FORCE_TRACE("open_fcitx_core register plan total="
-+                              << kFcitxCoreTotalFunctions
-+                              << " selected=" << kFcitxCoreSelectedFunctions
-+                              << " mode=single-full-table");
-+        FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_newlib state="
-+                              << static_cast<const void *>(state)
-+                              << " addonLuaState="
-+                              << static_cast<const void *>(addon->state_.get())
-+                              << " selected=" << kFcitxCoreSelectedFunctions
-+                              << " first=version last=UTF8ToUTF16");
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_newlib");
          luaL_newlib(addon->state_, fcitxlib);
-+        FCITX_LUA_FORCE_TRACE("open_fcitx_core after luaL_newlib state="
-+                              << static_cast<const void *>(state)
-+                              << " addonLuaState="
-+                              << static_cast<const void *>(addon->state_.get()));
          return 1;
      };
      auto open_fcitx = [](lua_State *state) {
