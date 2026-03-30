@@ -1,0 +1,68 @@
+diff --git a/src/addonloader/luahelper.cpp b/src/addonloader/luahelper.cpp
+--- a/src/addonloader/luahelper.cpp
++++ b/src/addonloader/luahelper.cpp
+@@ -58,10 +58,30 @@ void LuaForceTrace(const std::string &msg) {
+ }
+ 
+ LuaAddonState *GetLuaAddonState(lua_State *lua) {
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState begin lua="
++                          << static_cast<const void *>(lua));
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState before lua_getglobal lua="
++                          << static_cast<const void *>(lua)
++                          << " name=" << kLuaModuleName);
+     _fcitx_lua_getglobal(lua, kLuaModuleName);
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState after lua_getglobal lua="
++                          << static_cast<const void *>(lua));
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState before lua_touserdata lua="
++                          << static_cast<const void *>(lua));
+     auto **module =
+         reinterpret_cast<LuaAddonState **>(_fcitx_lua_touserdata(lua, -1));
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState after lua_touserdata lua="
++                          << static_cast<const void *>(lua)
++                          << " modulePtr=" << static_cast<const void *>(module));
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState before lua_settop lua="
++                          << static_cast<const void *>(lua));
+     _fcitx_lua_settop(lua, -2);
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState after lua_settop lua="
++                          << static_cast<const void *>(lua));
++    FCITX_LUA_FORCE_TRACE("GetLuaAddonState return lua="
++                          << static_cast<const void *>(lua)
++                          << " addonState="
++                          << static_cast<const void *>(module ? *module : nullptr));
+     return *module;
+ }
+diff --git a/src/addonloader/luaaddonstate.cpp b/src/addonloader/luaaddonstate.cpp
+--- a/src/addonloader/luaaddonstate.cpp
++++ b/src/addonloader/luaaddonstate.cpp
+@@ -164,6 +164,8 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+     FCITX_LUA_FORCE_TRACE(
+         "LuaAddonState opened standard libraries addon=" << name);
+     auto open_fcitx_core = [](lua_State *state) {
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core enter state="
++                              << static_cast<const void *>(state));
+         static const luaL_Reg fcitxlib[] = {
+             {"version", &LuaAddonState::version},
+             {"lastCommit", &LuaAddonState::lastCommit},
+@@ -184,8 +186,23 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+             {"UTF16ToUTF8", &LuaAddonState::UTF16ToUTF8},
+             {"UTF8ToUTF16", &LuaAddonState::UTF8ToUTF16},
+         };
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core before GetLuaAddonState state="
++                              << static_cast<const void *>(state));
+         auto *addon = GetLuaAddonState(state);
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core after GetLuaAddonState state="
++                              << static_cast<const void *>(state)
++                              << " addon=" << static_cast<const void *>(addon)
++                              << " addonLuaState="
++                              << static_cast<const void *>(addon->state_.get()));
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_newlib state="
++                              << static_cast<const void *>(state)
++                              << " addonLuaState="
++                              << static_cast<const void *>(addon->state_.get()));
+         luaL_newlib(addon->state_, fcitxlib);
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core after luaL_newlib state="
++                              << static_cast<const void *>(state)
++                              << " addonLuaState="
++                              << static_cast<const void *>(addon->state_.get()));
+         return 1;
+     };

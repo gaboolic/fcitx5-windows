@@ -1,0 +1,80 @@
+diff --git a/src/addonloader/luaaddonstate.cpp b/src/addonloader/luaaddonstate.cpp
+--- a/src/addonloader/luaaddonstate.cpp
++++ b/src/addonloader/luaaddonstate.cpp
+@@ -166,12 +166,28 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+     auto open_fcitx_core = [](lua_State *state) {
+         FCITX_LUA_FORCE_TRACE("open_fcitx_core enter state="
+                               << static_cast<const void *>(state));
+-        static const luaL_Reg fcitxlibMinimal[] = {
++        struct FcitxCoreRegEntry {
++            const char *name;
++            lua_CFunction function;
++        };
++        static const FcitxCoreRegEntry fcitxlib[] = {
+             {"version", &LuaAddonState::version},
++            {"lastCommit", &LuaAddonState::lastCommit},
++            {"splitString", &LuaAddonState::splitString},
++            {"log", &LuaAddonState::log},
++            {"watchEvent", &LuaAddonState::watchEvent},
++            {"unwatchEvent", &LuaAddonState::unwatchEvent},
++            {"currentInputMethod", &LuaAddonState::currentInputMethod},
++            {"setCurrentInputMethod", &LuaAddonState::setCurrentInputMethod},
++            {"currentProgram", &LuaAddonState::currentProgram},
++            {"addConverter", &LuaAddonState::addConverter},
++            {"removeConverter", &LuaAddonState::removeConverter},
++            {"addQuickPhraseHandler", &LuaAddonState::addQuickPhraseHandler},
++            {"removeQuickPhraseHandler",
++             &LuaAddonState::removeQuickPhraseHandler},
++            {"commitString", &LuaAddonState::commitString},
++            {"standardPathLocate", &LuaAddonState::standardPathLocate},
++            {"UTF16ToUTF8", &LuaAddonState::UTF16ToUTF8},
++            {"UTF8ToUTF16", &LuaAddonState::UTF8ToUTF16},
+             {nullptr, nullptr},
+         };
+-        constexpr int kFcitxCoreTotalFunctions = 17;
+-        constexpr int kFcitxCoreSelectedFunctions = 1;
++        constexpr int kFcitxCoreTotalFunctions =
++            sizeof(fcitxlib) / sizeof(fcitxlib[0]);
++        constexpr int kFcitxCoreSelectedFunctions = kFcitxCoreTotalFunctions;
+         FCITX_LUA_FORCE_TRACE("open_fcitx_core register plan total="
+                               << kFcitxCoreTotalFunctions
+                               << " selected=" << kFcitxCoreSelectedFunctions
+@@ -189,8 +205,23 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+                               << static_cast<const void *>(state)
+                               << " addonLuaState="
+                               << static_cast<const void *>(addon->state_.get()));
+-        FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_setfuncs state="
+-                              << static_cast<const void *>(state)
+-                              << " addonLuaState="
+-                              << static_cast<const void *>(addon->state_.get())
+-                              << " selected=" << kFcitxCoreSelectedFunctions);
+-        luaL_setfuncs(addon->state_, fcitxlibMinimal, 0);
+-        FCITX_LUA_FORCE_TRACE("open_fcitx_core after luaL_setfuncs state="
+-                              << static_cast<const void *>(state)
+-                              << " addonLuaState="
+-                              << static_cast<const void *>(addon->state_.get()));
++        for (int i = 0; i < kFcitxCoreSelectedFunctions; i++) {
++            const luaL_Reg reg[] = {
++                {fcitxlib[i].name, fcitxlib[i].function},
++                {nullptr, nullptr},
++            };
++            FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_setfuncs state="
++                                  << static_cast<const void *>(state)
++                                  << " addonLuaState="
++                                  << static_cast<const void *>(
++                                         addon->state_.get())
++                                  << " index=" << (i + 1) << "/"
++                                  << kFcitxCoreSelectedFunctions
++                                  << " name=" << fcitxlib[i].name);
++            luaL_setfuncs(addon->state_, reg, 0);
++            FCITX_LUA_FORCE_TRACE("open_fcitx_core after luaL_setfuncs state="
++                                  << static_cast<const void *>(state)
++                                  << " addonLuaState="
++                                  << static_cast<const void *>(
++                                         addon->state_.get())
++                                  << " index=" << (i + 1) << "/"
++                                  << kFcitxCoreSelectedFunctions
++                                  << " name=" << fcitxlib[i].name);
++        }
+         return 1;
+     };

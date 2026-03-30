@@ -153,15 +153,25 @@ apply_fcitx5_rime_patch
 # fcitx5-lua: CMake REGEX REPLACE leaves full llvm-objdump output when SONAME is absent (MinGW .dll.a);
 # parse SONAME or (real.dll) inside import lib, else basename.
 apply_fcitx5_lua_patch() {
-  local pf="$ROOT/patches/fcitx5-lua-mingw-objdump-resolve.patch"
+  local pf
   [[ "${LUA_SKIP_PATCH:-0}" == "1" ]] && return 0
-  [[ -f "$pf" ]] || return 0
   [[ -f "$LUA_SRC/CMakeLists.txt" ]] || return 0
   [[ $_is_msys -eq 1 ]] || return 0
-  if git -C "$LUA_SRC" apply --check --whitespace=nowarn "$pf" 2>/dev/null; then
-    echo "==> applying $(basename "$pf") to $LUA_SRC (set LUA_SKIP_PATCH=1 to skip)"
-    git -C "$LUA_SRC" apply --whitespace=nowarn "$pf"
-  fi
+  # Keep the Windows build-compat patch, but disable local behavior/debug patches.
+  for pf in \
+    "$ROOT/patches/fcitx5-lua-mingw-objdump-resolve.patch" \
+    "$ROOT/patches/fcitx5-lua-windows-no-newnamespace.patch" \
+    "$ROOT/patches/fcitx5-lua-loader-trace.patch" \
+    "$ROOT/patches/fcitx5-lua-loader-force-visible-fallback.patch" \
+    "$ROOT/patches/fcitx5-lua-loader-deep-trace.patch" \
+    "$ROOT/patches/fcitx5-lua-loader-minimal-core-register.patch" \
+    "$ROOT/patches/fcitx5-lua-loader-bisect-core-groups.patch"; do
+    [[ -f "$pf" ]] || continue
+    if git -C "$LUA_SRC" apply --check --recount --ignore-whitespace --whitespace=nowarn "$pf" 2>/dev/null; then
+      echo "==> applying $(basename "$pf") to $LUA_SRC (set LUA_SKIP_PATCH=1 to skip)"
+      git -C "$LUA_SRC" apply --recount --ignore-whitespace --whitespace=nowarn "$pf"
+    fi
+  done
 }
 
 apply_fcitx5_lua_patch
