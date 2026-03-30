@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 # Step 2 — 依赖链：libime → fcitx5-chinese-addons → 可选 table-extra / rime / lua（同一 STAGE）。
 # 默认先执行 fcitx5-windows 安装到 STAGE。若已用 PowerShell 跑过 01-build-fcitx5-windows.ps1 装入同一 STAGE，可 export SKIP_FCITX_WINDOWS=1 跳过本节。
+# 默认 CMAKE_BUILD_TYPE 与 01-build-fcitx5-windows.ps1 一致为 Release；RelWithDebInfo 会令 libFcitx5Core / libfcitx5-x86_64 等体积显著变大。可 export CMAKE_BUILD_TYPE=RelWithDebInfo 覆盖。
 # 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
 # 缺源码目录时会 git clone --depth 1（需 git）。可覆盖：LIBIME_GIT / LIBIME_TAG、CHINESE_ADDONS_GIT / CHINESE_ADDONS_TAG、
-# RIME_TAG（默认 5.1.13）、LIBRIME_TAG（默认 1.14.0）；可选仓库见 maybe_clone_optional 调用处。
+# RIME_TAG（默认 5.1.13）；可选仓库在 KenLM 子模块就绪后、[1/3] fcitx5-windows 之前统一克隆。
+# librime：不再源码合并构建；从 MSYS2 安装包拷贝预编 librime-*.dll（无 Rime 内置 Lua，与 MSYS2 官方包一致）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -14,9 +16,6 @@ CHINESE_SRC="${CHINESE_SRC:-$ROOT/../fcitx5-chinese-addons}"
 TABLE_EXTRA_SRC="${TABLE_EXTRA_SRC:-$ROOT/../fcitx5-table-extra}"
 RIME_SRC="${RIME_SRC:-$ROOT/../fcitx5-rime}"
 LUA_SRC="${LUA_SRC:-$ROOT/../fcitx5-lua}"
-# 与 fcitx5-prebuilder 一致：librime 源码 + 将 librime-lua 置于 plugins/lua 后 BUILD_MERGED_PLUGINS=ON。
-LIBRIME_SRC="${LIBRIME_SRC:-$ROOT/../librime}"
-LIBRIME_LUA_SRC="${LIBRIME_LUA_SRC:-$ROOT/../librime-lua}"
 # MSYS2: default libime/chinese build dirs under /tmp (usually C:\msys64\tmp) to avoid Ninja
 # "failed recompaction: Permission denied" on some Windows drives (Defender / indexing).
 # Use uname, not only MSYSTEM: GitHub Actions bash often does not set MSYSTEM like an interactive shell.
@@ -30,16 +29,14 @@ if [[ $_is_msys -eq 1 ]]; then
   TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-/tmp/fcitx5-pinyin-table-extra}"
   RIME_BUILD="${RIME_BUILD:-/tmp/fcitx5-pinyin-rime}"
   LUA_BUILD="${LUA_BUILD:-/tmp/fcitx5-pinyin-lua}"
-  LIBRIME_BUILD="${LIBRIME_BUILD:-/tmp/fcitx5-pinyin-librime}"
 else
   LIBIME_BUILD="${LIBIME_BUILD:-$ROOT/build-pinyin-libime}"
   CHINESE_BUILD="${CHINESE_BUILD:-$ROOT/build-pinyin-chinese}"
   TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-$ROOT/build-pinyin-table-extra}"
   RIME_BUILD="${RIME_BUILD:-$ROOT/build-pinyin-rime}"
   LUA_BUILD="${LUA_BUILD:-$ROOT/build-pinyin-lua}"
-  LIBRIME_BUILD="${LIBRIME_BUILD:-$ROOT/build-pinyin-librime}"
 fi
-BUILD_TYPE="${CMAKE_BUILD_TYPE:-RelWithDebInfo}"
+BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 8)}"
 
 # Clone into $1 if there is no CMakeLists.txt yet and $1 does not exist.
@@ -66,6 +63,7 @@ ensure_repo() {
 }
 
 # Optional deps: clone only if $1 is entirely absent (do not overwrite partial trees).
+# Clone failure (network, etc.) is non-fatal — the matching build block is skipped if CMakeLists.txt is missing.
 maybe_clone_optional() {
   local dest="$1" url="$2" branch="${3:-}"
   if [[ -f "$dest/CMakeLists.txt" ]]; then
@@ -74,7 +72,23 @@ maybe_clone_optional() {
   if [[ -e "$dest" ]]; then
     return 0
   fi
-  ensure_repo "$dest" "$url" "$branch"
+  if ! command -v git >/dev/null 2>&1; then
+    echo "warning: git not on PATH; skip optional clone $url -> $dest" >&2
+    return 0
+  fi
+  mkdir -p "$(dirname "$dest")"
+  echo "==> git clone --depth 1 (optional) $url -> $dest"
+  if [[ -n "$branch" ]]; then
+    if ! git clone --depth 1 --branch "$branch" "$url" "$dest"; then
+      echo "warning: optional clone failed: $url (network?) — continuing without this tree" >&2
+      rm -rf "$dest" 2>/dev/null || true
+    fi
+  else
+    if ! git clone --depth 1 "$url" "$dest"; then
+      echo "warning: optional clone failed: $url (network?) — continuing without this tree" >&2
+      rm -rf "$dest" 2>/dev/null || true
+    fi
+  fi
 }
 
 if [[ ! -f "$ROOT/CMakeLists.txt" ]]; then
@@ -94,11 +108,63 @@ if [[ ! -f "$CHINESE_SRC/CMakeLists.txt" ]]; then
   exit 1
 fi
 
+# Upstream fcitx5-chinese-addons: MSYS2 CLANG64 + libc++ (path→string) and scel2org5 (no sys/endian.h).
+# Patch lives in this repo only; set CHINESE_ADDONS_SKIP_PATCH=1 to skip (e.g. upstream fixed or you use GCC only).
+apply_fcitx5_chinese_addons_patch() {
+  local pf="$ROOT/patches/fcitx5-chinese-addons-msys2-clang-libcxx.patch"
+  [[ "${CHINESE_ADDONS_SKIP_PATCH:-0}" == "1" ]] && return 0
+  [[ -f "$pf" ]] || return 0
+  [[ $_is_msys -eq 1 ]] || return 0
+  if git -C "$CHINESE_SRC" apply --check --whitespace=nowarn "$pf" 2>/dev/null; then
+    echo "==> applying $(basename "$pf") to $CHINESE_SRC (set CHINESE_ADDONS_SKIP_PATCH=1 to skip)"
+    git -C "$CHINESE_SRC" apply --whitespace=nowarn "$pf"
+  fi
+}
+
+apply_fcitx5_chinese_addons_patch
+
+# fcitx5-rime: C++20 + libc++ — path→string is explicit; fs::isdir takes std::string; RimeTraits paths are const char*.
+apply_fcitx5_rime_patch() {
+  local pf="$ROOT/patches/fcitx5-rime-windows-path-utf8.patch"
+  [[ "${RIME_SKIP_PATCH:-0}" == "1" ]] && return 0
+  [[ -f "$pf" ]] || return 0
+  [[ -f "$RIME_SRC/CMakeLists.txt" ]] || return 0
+  [[ $_is_msys -eq 1 ]] || return 0
+  if git -C "$RIME_SRC" apply --check --whitespace=nowarn "$pf" 2>/dev/null; then
+    echo "==> applying $(basename "$pf") to $RIME_SRC (set RIME_SKIP_PATCH=1 to skip)"
+    git -C "$RIME_SRC" apply --whitespace=nowarn "$pf"
+  fi
+}
+
 # libime vendors KenLM as a Git submodule (src/libime/core/kenlm).
 if [[ ! -f "$LIBIME_SRC/src/libime/core/kenlm/lm/build_binary_main.cc" ]]; then
   echo "==> KenLM submodule missing under libime; running: git submodule update --init --recursive"
   (cd "$LIBIME_SRC" && git submodule update --init --recursive)
 fi
+
+# Clone optional trees before [1/3] fcitx5-windows.
+echo "==> optional source trees (clone if absent; failures are non-fatal)"
+maybe_clone_optional "$TABLE_EXTRA_SRC" "${TABLE_EXTRA_GIT:-https://github.com/fcitx/fcitx5-table-extra.git}" "${TABLE_EXTRA_TAG:-}"
+maybe_clone_optional "$RIME_SRC" "${RIME_GIT:-https://github.com/fcitx/fcitx5-rime.git}" "${RIME_TAG:-5.1.13}"
+maybe_clone_optional "$LUA_SRC" "${LUA_GIT:-https://github.com/fcitx/fcitx5-lua.git}" "${LUA_TAG:-}"
+
+apply_fcitx5_rime_patch
+
+# fcitx5-lua: CMake REGEX REPLACE leaves full llvm-objdump output when SONAME is absent (MinGW .dll.a);
+# parse SONAME or (real.dll) inside import lib, else basename.
+apply_fcitx5_lua_patch() {
+  local pf="$ROOT/patches/fcitx5-lua-mingw-objdump-resolve.patch"
+  [[ "${LUA_SKIP_PATCH:-0}" == "1" ]] && return 0
+  [[ -f "$pf" ]] || return 0
+  [[ -f "$LUA_SRC/CMakeLists.txt" ]] || return 0
+  [[ $_is_msys -eq 1 ]] || return 0
+  if git -C "$LUA_SRC" apply --check --whitespace=nowarn "$pf" 2>/dev/null; then
+    echo "==> applying $(basename "$pf") to $LUA_SRC (set LUA_SKIP_PATCH=1 to skip)"
+    git -C "$LUA_SRC" apply --whitespace=nowarn "$pf"
+  fi
+}
+
+apply_fcitx5_lua_patch
 
 echo "==> Stage prefix: $STAGE"
 mkdir -p "$STAGE"
@@ -168,11 +234,40 @@ cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null 
 # ships *.exe; Ninja needs the extensionless path. Use cp (not cmake -E copy): on Windows, CMake
 # may normalize/copy extensionless destinations incorrectly and leave the Ninja dependency missing.
 copy_tool_no_ext() {
-  # MSYS maps foo ↔ foo.exe to one inode; cp foo.exe foo is "same file" and errors.
-  if [[ -e "$1" && -e "$2" && "$1" -ef "$2" ]]; then
-    return 0
+  local src="$1" dest="$2" win_cmd wsrc wdest
+  if [[ ! -f "$src" ]]; then
+    echo "error: copy_tool_no_ext: source not a file: $src" >&2
+    return 1
   fi
-  cp -f "$1" "$2"
+  mkdir -p "$(dirname "$dest")"
+  # MSYS cp treats foo and foo.exe as one file; Ninja needs a real path without .exe for IMPORTED deps.
+  case "$(uname -s 2>/dev/null)" in
+    MSYS_NT* | MINGW*)
+      wsrc=$(cygpath -w "$src")
+      # cygpath -w on extensionless paths often resolves to the same *.exe path as $src, and cmd then
+      # errors: "The file cannot be copied onto itself." Build the Windows dest from dir + basename only.
+      wdestdir=$(cygpath -w "$(dirname "$dest")")
+      wdest="${wdestdir}\\$(basename "$dest")"
+      if [[ -n "${SYSTEMROOT:-}" ]]; then
+        win_cmd="$(cygpath -u "$SYSTEMROOT")/System32/cmd.exe"
+      else
+        win_cmd="/c/Windows/System32/cmd.exe"
+      fi
+      [[ -f "$win_cmd" ]] || win_cmd="/c/Windows/System32/cmd.exe"
+      # MSYS2_ARG_CONV_EXCL: stop rewriting "copy" / paths so cmd gets a plain `copy /Y src dest`.
+      if ! env MSYS2_ARG_CONV_EXCL='*' "$win_cmd" /c copy /Y "$wsrc" "$wdest" </dev/null; then
+        echo "error: Windows copy failed ($src -> $dest); cmd=$win_cmd" >&2
+        return 1
+      fi
+      if [[ ! -f "$dest" ]]; then
+        echo "error: expected file missing after copy: $dest" >&2
+        return 1
+      fi
+      ;;
+    *)
+      cp -f "$src" "$dest"
+      ;;
+  esac
 }
 
 ensure_libime_tool_names() {
@@ -229,7 +324,6 @@ cmake --build "$CHINESE_BUILD" -j"$JOBS"
 cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
 
 # --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
-maybe_clone_optional "$TABLE_EXTRA_SRC" "${TABLE_EXTRA_GIT:-https://github.com/fcitx/fcitx5-table-extra.git}" "${TABLE_EXTRA_TAG:-}"
 if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
   echo "==> [4] fcitx5-table-extra"
   rm -rf "$TABLE_EXTRA_BUILD"
@@ -271,7 +365,8 @@ vendor_rime_share_into_stage() {
   return 1
 }
 
-# Rime 依赖 DLL（不含 librime 本体 — 本体由合并构建产出或由 MSYS2 包拷贝）。
+# Rime 依赖 DLL（不含 librime 本体 — 本体由 MSYS2 预编包拷贝）。
+# CLANG64 上为 libglog-2.dll（不是 libglog.dll）；libglog 还依赖 libgflags、libunwind。
 copy_librime_dependency_dlls() {
   local _bin
   _bin="$(mingw_dll_source_bin)"
@@ -280,7 +375,8 @@ copy_librime_dependency_dlls() {
   local _f
   shopt -s nullglob
   for _f in "$_bin"/libopencc*.dll "$_bin"/libyaml-cpp.dll \
-    "$_bin"/libleveldb.dll "$_bin"/libglog.dll "$_bin"/libmarisa*.dll \
+    "$_bin"/libleveldb.dll "$_bin"/libglog*.dll "$_bin"/libmarisa*.dll \
+    "$_bin"/libgflags*.dll "$_bin"/libunwind.dll \
     "$_bin"/libwinpthread-1.dll; do
     [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
   done
@@ -318,64 +414,18 @@ copy_librime_runtime_dlls() {
   copy_librime_dlls_from_msys
 }
 
-# 参考 fcitx5-prebuilder scripts/librime.py：plugins/lua → librime-lua，BUILD_MERGED_PLUGINS=ON。
-prepare_librime_lua_plugin_dir() {
-  rm -rf "$LIBRIME_SRC/plugins/lua"
-  cp -a "$LIBRIME_LUA_SRC" "$LIBRIME_SRC/plugins/lua"
-}
-
-mingw_toolchain_prefix() {
-  if [[ -d /clang64 ]]; then
-    echo /clang64
-  elif [[ -d /mingw64 ]]; then
-    echo /mingw64
-  else
-    echo ""
-  fi
-}
-
-install_merged_librime_dll_into_bindir() {
-  # 上游 install(TARGETS rime DESTINATION lib) 会把 DLL 放在 $STAGE/lib；运行时与 fcitx5 一致从 bin 加载。
+verify_librime_prebuilt_in_stage() {
   shopt -s nullglob
-  local _f
-  for _f in "$STAGE/lib"/librime-*.dll "$STAGE/lib"/librime.dll; do
-    if [[ -f "$_f" ]]; then
-      mkdir -p "$STAGE/bin"
-      cp -f "$_f" "$STAGE/bin/"
-      echo "==> copied $(basename "$_f") from lib/ to bin/"
-    fi
-  done
+  local _lr=( "$STAGE/bin"/librime-*.dll )
   shopt -u nullglob
+  if [[ ${#_lr[@]} -eq 0 ]]; then
+    echo "error: no librime-*.dll under $STAGE/bin (MSYS2 prebuilt)." >&2
+    echo "  CLANG64: pacman -S mingw-w64-clang-x86_64-librime mingw-w64-clang-x86_64-librime-data" >&2
+    echo "  MINGW64: pacman -S mingw-w64-x86_64-librime mingw-w64-x86_64-librime-data" >&2
+    exit 1
+  fi
+  echo "==> [5a] librime: MSYS2 prebuilt $(basename "${_lr[0]}") + deps (no merged librime-lua in DLL)"
 }
-
-build_merged_librime_with_lua() {
-  local _prefix
-  _prefix="$(mingw_toolchain_prefix)"
-  [[ -n "$_prefix" ]] || return 1
-  echo "==> [5a] librime + librime-lua (merged into librime DLL, same idea as fcitx5-prebuilder / fcitx5-macos deps)"
-  prepare_librime_lua_plugin_dir || return 1
-  rm -rf "$LIBRIME_BUILD"
-  # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏；另强制 GFLAGS_IS_A_DLL 为 0/1，否则
-  # gflags_declare.h 里 #if GFLAGS_IS_A_DLL 在 Clang+MinGW 下会因空宏报 invalid token。
-  cmake -S "$LIBRIME_SRC" -B "$LIBRIME_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$STAGE" \
-    -DCMAKE_PREFIX_PATH="${_prefix};${STAGE}" \
-    -DBUILD_TEST=OFF \
-    -DBUILD_MERGED_PLUGINS=ON \
-    -DCMAKE_DLL_NAME_WITH_SOVERSION=ON \
-    "-DCMAKE_CXX_FLAGS=-DNDEBUG -DGLOG_USE_GLOG_EXPORT -DGLOG_USE_GFLAGS -UGFLAGS_IS_A_DLL -DGFLAGS_IS_A_DLL=1" \
-    || return 1
-  cmake --build "$LIBRIME_BUILD" -j"$JOBS" || return 1
-  cmake --install "$LIBRIME_BUILD" --prefix "$STAGE" || return 1
-  install_merged_librime_dll_into_bindir
-  export PKG_CONFIG_PATH="$STAGE/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
-  return 0
-}
-
-maybe_clone_optional "$RIME_SRC" "${RIME_GIT:-https://github.com/fcitx/fcitx5-rime.git}" "${RIME_TAG:-5.1.13}"
-maybe_clone_optional "$LIBRIME_SRC" "${LIBRIME_GIT:-https://github.com/rime/librime.git}" "${LIBRIME_TAG:-1.14.0}"
-maybe_clone_optional "$LIBRIME_LUA_SRC" "${LIBRIME_LUA_GIT:-https://github.com/hchunhui/librime-lua.git}" "${LIBRIME_LUA_TAG:-}"
 
 if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
   echo "==> [5] fcitx5-rime"
@@ -384,25 +434,11 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
     echo "  Install: pacman -S mingw-w64-clang-x86_64-librime-data (CLANG64; replaces old rime-data)" >&2
     exit 1
   fi
-  if [[ $_is_msys -eq 1 ]] && [[ -f "$LIBRIME_SRC/CMakeLists.txt" ]] && [[ -f "$LIBRIME_LUA_SRC/CMakeLists.txt" ]]; then
-    copy_librime_dependency_dlls
-    if ! build_merged_librime_with_lua; then
-      echo "warning: merged librime+librime-lua build failed; falling back to MSYS2 librime DLL (no Rime Lua in core)" >&2
-      copy_librime_dlls_from_msys
-    fi
+  copy_librime_runtime_dlls
+  if [[ $_is_msys -eq 1 ]]; then
+    verify_librime_prebuilt_in_stage
   else
-    if [[ $_is_msys -eq 1 ]]; then
-      if [[ ! -f "$LIBRIME_SRC/CMakeLists.txt" ]]; then
-        echo "==> skip merged librime build: LIBRIME_SRC missing or no CMakeLists.txt ($LIBRIME_SRC)" >&2
-      fi
-      if [[ ! -f "$LIBRIME_LUA_SRC/CMakeLists.txt" ]]; then
-        echo "==> skip merged librime build: librime-lua missing or no CMakeLists.txt ($LIBRIME_LUA_SRC); Rime core will not embed Lua" >&2
-      fi
-      echo "==> falling back to copy_librime_runtime_dlls (MSYS2 prebuilt librime + deps)" >&2
-    else
-      echo "==> non-MSYS: using prebuilt librime DLLs only (set LIBRIME_SRC + LIBRIME_LUA_SRC on MSYS2 for merged lua)"
-    fi
-    copy_librime_runtime_dlls
+    echo "==> [5a] librime: non-MSYS — copy skipped MSYS bin paths; ensure fcitx5-rime links and runtime can find librime" >&2
   fi
   rm -rf "$RIME_BUILD"
   cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
@@ -429,19 +465,22 @@ copy_lua_runtime_dlls() {
   shopt -u nullglob
 }
 
-maybe_clone_optional "$LUA_SRC" "${LUA_GIT:-https://github.com/fcitx/fcitx5-lua.git}" "${LUA_TAG:-}"
-
 if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
   echo "==> [6] fcitx5-lua"
-  rm -rf "$LUA_BUILD"
-  cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$STAGE" \
-    -DCMAKE_PREFIX_PATH="$STAGE" \
-    -DENABLE_TEST=OFF
-  cmake --build "$LUA_BUILD" -j"$JOBS"
-  cmake --install "$LUA_BUILD" --prefix "$STAGE"
-  copy_lua_runtime_dlls
+  if [[ $_is_msys -eq 1 ]] && command -v pkg-config >/dev/null 2>&1 && ! pkg-config --exists lua 2>/dev/null; then
+    echo "warning: pkg-config module 'lua' not found; skip fcitx5-lua (optional addon)." >&2
+    echo "  MSYS2 CLANG64: pacman -S mingw-w64-clang-x86_64-lua" >&2
+  else
+    rm -rf "$LUA_BUILD"
+    cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
+      -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+      -DCMAKE_INSTALL_PREFIX="$STAGE" \
+      -DCMAKE_PREFIX_PATH="$STAGE" \
+      -DENABLE_TEST=OFF
+    cmake --build "$LUA_BUILD" -j"$JOBS"
+    cmake --install "$LUA_BUILD" --prefix "$STAGE"
+    copy_lua_runtime_dlls
+  fi
 else
   echo "==> skip fcitx5-lua (LUA_SRC not set or missing CMakeLists.txt)"
 fi
@@ -459,7 +498,7 @@ fi
 
 echo ""
 echo "Done. Portable root: $STAGE"
-echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built), rime/lua runtime DLLs if those stages ran"
+echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built), librime (MSYS2 prebuilt) + rime deps, lua if built"
 echo "  lib/fcitx5/ — addons (libpinyin.dll; optional librime.dll, libluaaddonloader.dll, …)"
 echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.windows.example"
 echo "  share/rime-data/ — when fcitx5-rime is built; share/opencc/ if vendored for Rime schemas"

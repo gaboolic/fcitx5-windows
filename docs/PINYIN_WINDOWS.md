@@ -11,9 +11,7 @@
 
 示例（CLANG64 终端）：`pacman -S --needed mingw-w64-clang-x86_64-boost mingw-w64-clang-x86_64-libzstd mingw-w64-clang-x86_64-gettext mingw-w64-clang-x86_64-ninja`
 
-若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及从源码编 **librime** 所需的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**；CI 仍安装 **`mingw-w64-clang-x86_64-librime`**，以便合并构建失败时回退到系统 **`rime.pc` / DLL**。脚本会把 **`share/rime-data`**（安装路径未变）、依赖 DLL 与 **Lua** 拷进 **`bin/`**。
-
-**Rime 核心里的 Lua（librime-lua）** 与 [fcitx5-prebuilder](https://github.com/fcitx-contrib/fcitx5-prebuilder) / macOS 插件链一致：把 [librime-lua](https://github.com/hchunhui/librime-lua) 拷到 **`librime/plugins/lua`**，再对 **librime** 打开 **`BUILD_MERGED_PLUGINS=ON`**，把插件 **合并进同一个 `librime-*.dll`**；构建脚本会把 **`lib/`** 下的 **`librime-*.dll`** 拷到 **`$STAGE/bin`**。随后 **`PKG_CONFIG_PATH`** 优先 **`$STAGE/lib/pkgconfig`** 再编 **fcitx5-rime**。源码目录默认为 **`../librime`**（建议与 MSYS2 同版本，如 **1.14.0**）、**`../librime-lua`**；**CI 将 fcitx5-rime 固定为 tag `5.1.13`**，与 **librime 1.14** 及本仓库 fcitx5 版本一致。若缺少 librime 源码，则在 MSYS 上会回退为拷贝预装的 **`librime-*.dll`**（无 Rime 内置 Lua）。合并编 librime 时若遇 **llvm-rc / .rc** 等问题，需自行对齐上游或 MSYS2 **librime** 包里的 CMake 处理。
+若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime`**、**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及 Rime 运行时常用的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**（脚本会从 **`/clang64/bin`** 或 **`/mingw64/bin`** 拷依赖 DLL 进 **`$STAGE/bin`**）。**`scripts/02-build-deps.sh` 不再从源码合并编译 librime**：始终使用 MSYS2 预编的 **`librime-*.dll`**（与官方 **`mingw-w64-*-librime`** 包一致，**不含** 合并进 DLL 的 **Rime 内置 Lua**；若需要 librime-lua，需自行改回源码合并构建或换用带 Lua 的 librime 构建）。**fcitx5-rime** 仍由源码编，**CI 固定 tag `5.1.13`**。
 
 **fcitx5-table-extra** 只需基础依赖（在 **chinese-addons 已安装到 prefix** 之后编）。
 
@@ -25,7 +23,7 @@
 
 - `../libime` — [libime](https://github.com/fcitx/libime)
 - `../fcitx5-chinese-addons` — [fcitx5-chinese-addons](https://github.com/fcitx/fcitx5-chinese-addons)（与 libime / fcitx5 版本号在对方 `CMakeLists.txt` 里互相约束，请对齐 tag）
-- （可选，与官方 CI 安装包一致）`../fcitx5-table-extra`、`../fcitx5-rime`、`../fcitx5-lua`、`../librime`（tag 如 1.14.0）、`../librime-lua` — **`TABLE_EXTRA_SRC`**、**`RIME_SRC`**、**`LUA_SRC`**、**`LIBRIME_SRC`**、**`LIBRIME_LUA_SRC`** 可覆盖路径；见 `scripts/02-build-deps.sh`
+- （可选，与官方 CI 安装包一致）`../fcitx5-table-extra`、`../fcitx5-rime`、`../fcitx5-lua` — **`TABLE_EXTRA_SRC`**、**`RIME_SRC`**、**`LUA_SRC`** 可覆盖路径；**librime** 由 MSYS2 **`pacman -S mingw-w64-clang-x86_64-librime`** 提供，见 `scripts/02-build-deps.sh`
 
 **libime 含 Git 子模块 [KenLM](https://github.com/kpu/kenlm)**（路径 `src/libime/core/kenlm`）。若 CMake 报缺少 `build_binary_main.cc` 或 `kenlm` 无源文件，在 **`libime` 仓库根目录**执行：
 
@@ -51,7 +49,7 @@ git submodule update --init --recursive
 
 ```bash
 cd /path/to/fcitx5-windows
-cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j$(nproc)
 cmake --install build --prefix "$PWD/stage"
 ```

@@ -80,7 +80,7 @@ jobs:
             -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON
           cmake --build (Join-Path $root 'build')
 
-  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: librime-data meta, lua). scripts/01-build-fcitx5-windows.ps1 is core-only.
+  # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: prebuilt librime + librime-data, lua). scripts/01-build-fcitx5-windows.ps1 is core-only.
   # This job runs scripts/02-build-deps.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
@@ -127,7 +127,7 @@ jobs:
       - name: Install Inno Setup 6
         run: choco install innosetup -y --no-progress
 
-      - name: Clone libime, chinese-addons, table-extra, rime, lua, librime (1.14) + librime-lua
+      - name: Clone libime, chinese-addons, table-extra, rime, lua (librime = MSYS2 pacman prebuilt)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -136,8 +136,7 @@ jobs:
             @{ name = 'libime'; url = 'https://github.com/fcitx/libime.git' },
             @{ name = 'fcitx5-chinese-addons'; url = 'https://github.com/fcitx/fcitx5-chinese-addons.git' },
             @{ name = 'fcitx5-table-extra'; url = 'https://github.com/fcitx/fcitx5-table-extra.git' },
-            @{ name = 'fcitx5-lua'; url = 'https://github.com/fcitx/fcitx5-lua.git' },
-            @{ name = 'librime-lua'; url = 'https://github.com/hchunhui/librime-lua.git' }
+            @{ name = 'fcitx5-lua'; url = 'https://github.com/fcitx/fcitx5-lua.git' }
           )
           foreach ($r in $repos) {
             $dest = Join-Path $root $r.name
@@ -146,11 +145,7 @@ jobs:
           }
           $rime = Join-Path $root 'fcitx5-rime'
           if (Test-Path -LiteralPath $rime) { Remove-Item -LiteralPath $rime -Recurse -Force }
-          # master 可能超前于 MSYS2 的 librime 1.14 头文件；与已发布 5.1.13 对齐
           git clone --depth 1 --branch 5.1.13 https://github.com/fcitx/fcitx5-rime.git $rime
-          $librime = Join-Path $root 'librime'
-          if (Test-Path -LiteralPath $librime) { Remove-Item -LiteralPath $librime -Recurse -Force }
-          git clone --depth 1 --branch 1.14.0 https://github.com/rime/librime.git $librime
           $libime = Join-Path $root 'libime'
           Push-Location $libime
           try {
@@ -182,14 +177,11 @@ jobs:
             'export TABLE_EXTRA_SRC="$CI_WS_UNIX/fcitx5-table-extra"',
             'export RIME_SRC="$CI_WS_UNIX/fcitx5-rime"',
             'export LUA_SRC="$CI_WS_UNIX/fcitx5-lua"',
-            'export LIBRIME_SRC="$CI_WS_UNIX/librime"',
-            'export LIBRIME_LUA_SRC="$CI_WS_UNIX/librime-lua"',
             'export LIBIME_BUILD=/tmp/fcitx5-pinyin-libime',
             'export CHINESE_BUILD=/tmp/fcitx5-pinyin-chinese',
             'export TABLE_EXTRA_BUILD=/tmp/fcitx5-pinyin-table-extra',
             'export RIME_BUILD=/tmp/fcitx5-pinyin-rime',
             'export LUA_BUILD=/tmp/fcitx5-pinyin-lua',
-            'export LIBRIME_BUILD=/tmp/fcitx5-pinyin-librime',
             'export CMAKE_BUILD_TYPE=Release',
             'export JOBS=8',
             'exec ./scripts/02-build-deps.sh \',

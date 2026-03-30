@@ -27,6 +27,7 @@
 #include <uv.h>
 
 #include <Windows.h>
+#include <winreg.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -161,6 +162,33 @@ std::wstring trayStatusActionLabel(std::string_view actionName, bool checked) {
     return {};
 }
 
+bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
+
+/** User env from "System Properties" is in HKCU\\Environment; child processes
+ * only see it after explorer restarts. Read registry here so set-fcitx-ts-disable-rime.ps1 works immediately. */
+bool userPersistentEnvWideTruthy(const wchar_t *valueName) {
+    wchar_t buf[64];
+    DWORD size = sizeof(buf);
+    DWORD typ = 0;
+    const LSTATUS st =
+        RegGetValueW(HKEY_CURRENT_USER, L"Environment", valueName,
+                     RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, &typ, buf, &size);
+    if (st != ERROR_SUCCESS) {
+        return false;
+    }
+    if (buf[0] == L'\0' || wcscmp(buf, L"0") == 0) {
+        return false;
+    }
+    return true;
+}
+
+bool disableRimeDueToUserEnvOrRegistry() {
+    if (envTruthy(std::getenv("FCITX_TS_DISABLE_RIME"))) {
+        return true;
+    }
+    return userPersistentEnvWideTruthy(L"FCITX_TS_DISABLE_RIME");
+}
+
 std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     HMODULE mod = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -213,6 +241,12 @@ struct InstanceArgv {
 };
 
 bool shouldDisableRimeForCurrentHost() {
+    // Rime loads native librime / deps; mis-matched DLLs or broken deploy can AV
+    // the host. FCITX_TS_DISABLE_RIME=1 (process env or HKCU\Environment) adds
+    // --disable=rime for diagnosis (pinyin/table still work).
+    if (disableRimeDueToUserEnvOrRegistry()) {
+        return true;
+    }
     return currentProcessIsQQForTsf() || currentProcessIsCursorForTsf();
 }
 
@@ -484,8 +518,6 @@ bool isChineseToggleVk(unsigned vk) {
     return vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000);
 }
 
-bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
-
 /// Optional TSF IME logging: `Log::setLogStream` is process-global; refcount
 /// when multiple engines exist. Lines are UTF-8; converted for
 /// OutputDebugStringW.
@@ -653,8 +685,13 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         setupImeFcitxEnvironment();
         const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
         if (disableRimeForHost) {
-            tsfTrace(
-                "Fcitx5ImeEngine::init disabling rime addon for risky host");
+            if (disableRimeDueToUserEnvOrRegistry()) {
+                tsfTrace("Fcitx5ImeEngine::init disabling rime (FCITX_TS_DISABLE_"
+                         "RIME env or HKCU\\\\Environment)");
+            } else {
+                tsfTrace(
+                    "Fcitx5ImeEngine::init disabling rime addon for risky host");
+            }
         }
         InstanceArgv instanceArgv(disableRimeForHost);
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
@@ -671,8 +708,11 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         }
         instance_ = std::make_unique<Instance>(instanceArgv.argc(),
                                                instanceArgv.data());
+        tsfTrace("Fcitx5ImeEngine::init Instance constructed");
         instance_->addonManager().registerDefaultLoader(nullptr);
+        tsfTrace("Fcitx5ImeEngine::init before initialize()");
         instance_->initialize();
+        tsfTrace("Fcitx5ImeEngine::init after initialize()");
         tsfTrace("Fcitx5ImeEngine::init instance initialized");
 
         ic_ = std::make_unique<TsfInputContext>(

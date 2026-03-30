@@ -1,0 +1,34 @@
+diff --git a/src/rimeengine.cpp b/src/rimeengine.cpp
+--- a/src/rimeengine.cpp
++++ b/src/rimeengine.cpp
+@@ -182,7 +182,8 @@ RimeEngine::RimeEngine(Instance *instance)
+     if constexpr (isAndroid() || isApple()) {
+         const auto &sp = StandardPaths::global();
+         std::string defaultYaml =
+-            sp.locate(StandardPathsType::Data, "rime-data/default.yaml");
++            sp.locate(StandardPathsType::Data, "rime-data/default.yaml")
++                .string();
+         if (defaultYaml.empty()) {
+             throw std::runtime_error("Fail to locate shared data directory");
+         }
+@@ -249,9 +250,10 @@ void RimeEngine::rimeStart(bool fullcheck) {
+     auto userDir =
+         StandardPaths::global().userDirectory(StandardPathsType::PkgData) /
+         "rime";
++    const std::string userDirUtf8 = userDir.string();
+     RIME_DEBUG() << "Rime data directory: " << userDir;
+     if (!fs::makePath(userDir)) {
+-        if (!fs::isdir(userDir)) {
++        if (!fs::isdir(userDirUtf8)) {
+             RIME_ERROR() << "Failed to create user directory: " << userDir;
+         }
+     }
+@@ -259,7 +261,7 @@ void RimeEngine::rimeStart(bool fullcheck) {
+     RIME_STRUCT(RimeTraits, fcitx_rime_traits);
+     fcitx_rime_traits.shared_data_dir = sharedDataDir_.c_str();
+     fcitx_rime_traits.app_name = "rime.fcitx-rime";
+-    fcitx_rime_traits.user_data_dir = userDir.c_str();
++    fcitx_rime_traits.user_data_dir = userDirUtf8.c_str();
+     fcitx_rime_traits.distribution_name = "Rime";
+     fcitx_rime_traits.distribution_code_name = "fcitx-rime";
+     fcitx_rime_traits.distribution_version = FCITX_RIME_VERSION;

@@ -5,6 +5,7 @@
 
 .DESCRIPTION
   Sets MSYSTEM=CLANG64 and PATH so Ninja/cmake/clang from /clang64/bin are used. Environment variables you set in this PowerShell session (e.g. STAGE, SKIP_FCITX_WINDOWS, LIBIME_SRC) are inherited by bash.
+  On MSYS2, 02-build-deps.sh applies patches/fcitx5-chinese-addons-msys2-clang-libcxx.patch to a clean fcitx5-chinese-addons tree (libc++/Windows); set CHINESE_ADDONS_SKIP_PATCH=1 to skip.
 
 .PARAMETER MsysRoot
   MSYS2 root (default C:\msys64).

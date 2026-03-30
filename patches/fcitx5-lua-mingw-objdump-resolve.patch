@@ -1,0 +1,30 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -66,6 +66,7 @@ if (NOT TARGET Lua::_LuaLibrary)
+ endif()
+ 
+ function(_RESOLVE_LIBRARY_PATH _FILE_NAME _LIBRARY_PATH)
++    unset(_FILE_NAME_OUT)
+     if (CMAKE_OBJDUMP)
+         execute_process (
+             COMMAND ${CMAKE_OBJDUMP} -p "${_LIBRARY_PATH}"
+@@ -73,10 +74,14 @@ function(_RESOLVE_LIBRARY_PATH _FILE_NAME _LIBRARY_PATH)
+             OUTPUT_VARIABLE OBJDUMP_RESULT
+             ERROR_QUIET
+         )
+-        string(REGEX REPLACE ".*SONAME +([^ ]+)\n.*$" "\\1" SONAME_OUT "${OBJDUMP_RESULT}")
+-        if (SONAME_OUT)
+-            set(_FILE_NAME_OUT "${SONAME_OUT}")
+-        endif ()
++        if (STATUS EQUAL 0)
++            if ("${OBJDUMP_RESULT}" MATCHES "SONAME[ ]+([^ \r\n]+)")
++                set(_FILE_NAME_OUT "${CMAKE_MATCH_1}")
++            elseif ("${OBJDUMP_RESULT}" MATCHES "\\(([^)]+\\.dll)\\)")
++                # llvm-objdump on MinGW import libs, e.g. liblua.dll.a(lua54.dll):
++                set(_FILE_NAME_OUT "${CMAKE_MATCH_1}")
++            endif()
++        endif()
+     endif()
+     if (NOT _FILE_NAME_OUT)
+         get_filename_component(_FILE_NAME_OUT "${_LIBRARY_PATH}" NAME)
