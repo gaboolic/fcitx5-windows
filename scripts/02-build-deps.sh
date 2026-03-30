@@ -160,12 +160,7 @@ apply_fcitx5_lua_patch() {
   # Keep the Windows build-compat patch, but disable local behavior/debug patches.
   for pf in \
     "$ROOT/patches/fcitx5-lua-mingw-objdump-resolve.patch" \
-    "$ROOT/patches/fcitx5-lua-windows-no-newnamespace.patch" \
-    "$ROOT/patches/fcitx5-lua-loader-trace.patch" \
-    "$ROOT/patches/fcitx5-lua-loader-force-visible-fallback.patch" \
-    "$ROOT/patches/fcitx5-lua-loader-deep-trace.patch" \
-    "$ROOT/patches/fcitx5-lua-loader-minimal-core-register.patch" \
-    "$ROOT/patches/fcitx5-lua-loader-bisect-core-groups.patch"; do
+    "$ROOT/patches/fcitx5-lua-loader-min-anchor-trace.patch"; do
     [[ -f "$pf" ]] || continue
     if git -C "$LUA_SRC" apply --check --recount --ignore-whitespace --whitespace=nowarn "$pf" 2>/dev/null; then
       echo "==> applying $(basename "$pf") to $LUA_SRC (set LUA_SKIP_PATCH=1 to skip)"

@@ -1,0 +1,117 @@
+diff --git a/src/addonloader/luaaddonstate.cpp b/src/addonloader/luaaddonstate.cpp
+--- a/src/addonloader/luaaddonstate.cpp
++++ b/src/addonloader/luaaddonstate.cpp
+@@ -161,9 +161,26 @@ LuaAddonState::LuaAddonState(Library *luaLibrary, const std::string &name,
+             {"standardPathLocate", &LuaAddonState::standardPathLocate},
+             {"UTF16ToUTF8", &LuaAddonState::UTF16ToUTF8},
+             {"UTF8ToUTF16", &LuaAddonState::UTF8ToUTF16},
++            {nullptr, nullptr},
+         };
+         auto *addon = GetLuaAddonState(state);
++        constexpr int kFcitxCoreTotalFunctions = 17;
++        constexpr int kFcitxCoreSelectedFunctions = kFcitxCoreTotalFunctions;
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core register plan total="
++                              << kFcitxCoreTotalFunctions
++                              << " selected=" << kFcitxCoreSelectedFunctions
++                              << " mode=single-full-table");
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core before luaL_newlib state="
++                              << static_cast<const void *>(state)
++                              << " addonLuaState="
++                              << static_cast<const void *>(addon->state_.get())
++                              << " selected=" << kFcitxCoreSelectedFunctions
++                              << " first=version last=UTF8ToUTF16");
+         luaL_newlib(addon->state_, fcitxlib);
++        FCITX_LUA_FORCE_TRACE("open_fcitx_core after luaL_newlib state="
++                              << static_cast<const void *>(state)
++                              << " addonLuaState="
++                              << static_cast<const void *>(addon->state_.get()));
+         return 1;
+     };
+     auto open_fcitx = [](lua_State *state) {
+diff --git a/src/addonloader/luahelper.cpp b/src/addonloader/luahelper.cpp
+--- a/src/addonloader/luahelper.cpp
++++ b/src/addonloader/luahelper.cpp
+@@ -6,7 +6,12 @@
+  */
+ #include "luahelper.h"
+ #include "luaaddonstate.h"
++#include <cstdio>
++#include <cstdlib>
+ #include <fcitx-utils/log.h>
++#ifdef _WIN32
++#include <windows.h>
++#endif
+ 
+ namespace fcitx {
+ 
+@@ -18,6 +23,40 @@ decltype(&::lua_settop) _fcitx_lua_settop;
+ decltype(&::lua_close) _fcitx_lua_close;
+ decltype(&::luaL_newstate) _fcitx_luaL_newstate;
+ 
++namespace {
++
++std::string luaTraceLogPath() {
++#ifdef _WIN32
++    if (const char *temp = std::getenv("TEMP"); temp && *temp) {
++        std::string path(temp);
++        if (path.back() != '\\' && path.back() != '/') {
++            path += '\\';
++        }
++        path += "fcitx5-lua-loader-trace.log";
++        return path;
++    }
++#endif
++    return "fcitx5-lua-loader-trace.log";
++}
++
++} // namespace
++
++void LuaForceTrace(const std::string &msg) {
++    FCITX_LUA_ERROR() << msg;
++#ifdef _WIN32
++    std::string line = "[fcitx5-lua] " + msg + "\r\n";
++    OutputDebugStringA(line.c_str());
++#else
++    std::string line = "[fcitx5-lua] " + msg + "\n";
++    std::fputs(line.c_str(), stderr);
++#endif
++    const auto path = luaTraceLogPath();
++    if (FILE *fp = std::fopen(path.c_str(), "ab")) {
++        std::fwrite(line.data(), 1, line.size(), fp);
++        std::fclose(fp);
++    }
++}
++
+ LuaAddonState *GetLuaAddonState(lua_State *lua) {
+     _fcitx_lua_getglobal(lua, kLuaModuleName);
+     auto **module =
+diff --git a/src/addonloader/luahelper.h b/src/addonloader/luahelper.h
+--- a/src/addonloader/luahelper.h
++++ b/src/addonloader/luahelper.h
+@@ -11,6 +11,7 @@
+ #include <cstdint>
+ #include <fcitx-utils/log.h>
+ #include <fcitx-utils/macros.h>
++#include <sstream>
+ #include <tuple>
+ #include <utility>
+ 
+@@ -103,12 +104,19 @@ extern decltype(&::lua_settop) _fcitx_lua_settop;
+ extern decltype(&::lua_close) _fcitx_lua_close;
+ 
+ LuaAddonState *GetLuaAddonState(lua_State *lua);
++void LuaForceTrace(const std::string &msg);
+ 
+ FCITX_DECLARE_LOG_CATEGORY(lua_log);
+ #define FCITX_LUA_INFO() FCITX_LOGC(::fcitx::lua_log, Info)
+ #define FCITX_LUA_WARN() FCITX_LOGC(::fcitx::lua_log, Warn)
+ #define FCITX_LUA_ERROR() FCITX_LOGC(::fcitx::lua_log, Error)
+ #define FCITX_LUA_DEBUG() FCITX_LOGC(::fcitx::lua_log, Debug)
++#define FCITX_LUA_FORCE_TRACE(msg)                                           \
++    do {                                                                     \
++        std::ostringstream _fcitx_lua_trace_stream;                          \
++        _fcitx_lua_trace_stream << msg;                                      \
++        ::fcitx::LuaForceTrace(_fcitx_lua_trace_stream.str());               \
++    } while (0)
+ 
+ } // namespace fcitx
