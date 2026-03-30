@@ -168,6 +168,10 @@ cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null 
 # ships *.exe; Ninja needs the extensionless path. Use cp (not cmake -E copy): on Windows, CMake
 # may normalize/copy extensionless destinations incorrectly and leave the Ninja dependency missing.
 copy_tool_no_ext() {
+  # MSYS maps foo ↔ foo.exe to one inode; cp foo.exe foo is "same file" and errors.
+  if [[ -e "$1" && -e "$2" && "$1" -ef "$2" ]]; then
+    return 0
+  fi
   cp -f "$1" "$2"
 }
 
