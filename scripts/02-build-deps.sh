@@ -4,26 +4,6 @@
 # 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
 set -euo pipefail
 
-# Apply unified diff in a git checkout. GitHub Actions PATH often includes Strawberry Perl's
-# patch.exe, which crashes (assert hunk) on valid diffs. Prefer git apply, then MSYS /usr/bin/patch.
-_apply_unified_patch() {
-  local _dir="$1" _patch="$2"
-  [[ -d "$_dir" ]] || return 1
-  [[ -f "$_patch" ]] || return 1
-  if git -C "$_dir" rev-parse --git-dir &>/dev/null; then
-    if git -C "$_dir" apply --whitespace=nowarn "$_patch"; then
-      return 0
-    fi
-  fi
-  local _p
-  for _p in /usr/bin/patch /bin/patch; do
-    if [[ -x "$_p" ]]; then
-      (cd "$_dir" && "$_p" -p1 -i "$_patch") && return 0
-    fi
-  done
-  (cd "$_dir" && patch -p1 -i "$_patch")
-}
-
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGE="${STAGE:-$ROOT/stage}"
 FCITX_BUILD="${FCITX_BUILD:-$ROOT/build-pinyin-fcitx}"
@@ -120,30 +100,6 @@ else
   export PATH="$STAGE/bin${PATH:+:$PATH}"
 fi
 
-# DefaultLanguageModelResolver uses LIBIME_INSTALL_LIBDATADIR (CMake-time absolute path) when
-# LIBIME_MODEL_DIRS is unset. CI stage paths (e.g. D:/a/...) do not exist on end-user PCs →
-# zh_CN.lm never loads → decoder scores are wrong ("xiexieni" → garbage). TSF sets
-# LIBIME_MODEL_DIRS at runtime; upstream splits that env only by ':' which breaks 'C:\...'.
-patch_libime_languagemodel_dirs_for_win32() {
-  [[ $_is_msys -eq 1 ]] || return 0
-  local f="$LIBIME_SRC/src/libime/core/languagemodel.cpp"
-  [[ -f "$f" ]] || return 0
-  if grep -q 'split(modelDirs, ";")' "$f" 2>/dev/null; then
-    return 0
-  fi
-  echo "==> patch libime languagemodel.cpp: LIBIME_MODEL_DIRS split ';' on _WIN32"
-  perl -i.bak -0777 -pe '
-    s/if \(modelDirs && modelDirs\[0\]\) \{\R\s*dirs = fcitx::stringutils::split\(modelDirs, ":"\);/
-if (modelDirs \&\& modelDirs[0]) {\n#ifdef _WIN32\n        dirs = fcitx::stringutils::split(modelDirs, ";");\n#else\n        dirs = fcitx::stringutils::split(modelDirs, ":");\n#endif/s;
-  ' "$f"
-  rm -f "${f}.bak"
-  if ! grep -q 'split(modelDirs, ";")' "$f" 2>/dev/null; then
-    echo "error: failed to patch libime languagemodel.cpp (LIBIME_MODEL_DIRS / _WIN32)" >&2
-    exit 1
-  fi
-}
-patch_libime_languagemodel_dirs_for_win32
-
 if [[ $_is_msys -eq 1 ]]; then
   for _pc in /clang64/lib/pkgconfig /mingw64/lib/pkgconfig; do
     [[ -d "$_pc" ]] || continue
@@ -166,42 +122,6 @@ cmake --build "$LIBIME_BUILD" -j"$JOBS"
 cmake --install "$LIBIME_BUILD" --prefix "$STAGE"
 # Some layouts only install COMPONENT tools when requested explicitly.
 cmake --install "$LIBIME_BUILD" --prefix "$STAGE" --component tools 2>/dev/null || true
-
-# LibIME *Config.cmake sets IMPORTED_LOCATION to .../bin/libime_pinyindict (no .exe). MinGW only
-# installs libime_pinyindict.exe. Native Windows Ninja then looks for the extensionless path and
-# fails ("missing and no known rule to make it") even if MSYS created a copy — fix the *installed*
-# CMake package so find_package points at the real .exe names.
-patch_libime_imported_locations_for_mingw() {
-  [[ $_is_msys -eq 1 ]] || return 0
-  echo "==> patch LibIME *Config.cmake IMPORTED_LOCATION -> *.exe (MinGW / Ninja)"
-  local f
-  shopt -s nullglob
-  for f in "$STAGE"/lib/cmake/LibIME*/LibIME*Config.cmake; do
-    [[ -f "$f" ]] || continue
-    if command -v perl >/dev/null 2>&1; then
-      perl -i.bak -pe '
-        next unless /IMPORTED_LOCATION/;
-        s/libime_slm_build_binary(?!\.exe)"/libime_slm_build_binary.exe"/g;
-        s/libime_prediction(?!\.exe)"/libime_prediction.exe"/g;
-        s/libime_history(?!\.exe)"/libime_history.exe"/g;
-        s/libime_pinyindict(?!\.exe)"/libime_pinyindict.exe"/g;
-        s/libime_tabledict(?!\.exe)"/libime_tabledict.exe"/g;
-        s/libime_migrate_fcitx4_pinyin(?!\.exe)"/libime_migrate_fcitx4_pinyin.exe"/g;
-        s/libime_migrate_fcitx4_table(?!\.exe)"/libime_migrate_fcitx4_table.exe"/g;
-      ' "$f"
-      rm -f "${f}.bak"
-    else
-      # No perl: sed only touches IMPORTED_LOCATION lines (msys perl package: pacman -S perl).
-      local _t
-      for _t in libime_slm_build_binary libime_prediction libime_history libime_pinyindict libime_tabledict libime_migrate_fcitx4_pinyin libime_migrate_fcitx4_table; do
-        sed -i.bak "/IMPORTED_LOCATION/ s|/${_t}\"|/${_t}.exe\"|g" "$f"
-      done
-      rm -f "${f}.bak"
-    fi
-  done
-  shopt -u nullglob
-}
-patch_libime_imported_locations_for_mingw
 
 # Optional: extensionless copies for anything that still resolves the Unix path without .exe.
 # Use cmake -E copy on MSYS where possible.
@@ -247,38 +167,6 @@ ensure_libime_tool_names() {
   fi
 }
 ensure_libime_tool_names
-
-# Upstream master may assume libstdc++ (implicit path→string) and BSD sys/endian.h; Clang/libc++ on
-# MinGW needs explicit path.string() and a _WIN32 branch in scel2org5.cpp.
-patch_fcitx5_chinese_addons_for_mingw() {
-  [[ $_is_msys -eq 1 ]] || return 0
-  local pinyin_cpp="$CHINESE_SRC/im/pinyin/pinyin.cpp"
-  local scel="$CHINESE_SRC/tools/scel2org5.cpp"
-  echo "==> patch fcitx5-chinese-addons for MinGW (pinyin path.string, scel2org5 endian)"
-  if [[ -f "$pinyin_cpp" ]] && ! grep -q 'loadDict(file.string(), persistentTask_)' "$pinyin_cpp"; then
-    if grep -q 'loadDict(file, persistentTask_)' "$pinyin_cpp"; then
-      sed -i.bak \
-        -e 's/loadDict(file, persistentTask_)/loadDict(file.string(), persistentTask_)/g' \
-        -e 's/loadDict(file.second, tasks_)/loadDict(file.second.string(), tasks_)/g' \
-        "$pinyin_cpp"
-      rm -f "${pinyin_cpp}.bak"
-    fi
-  fi
-  # In s/// replacement, \R is not a newline (it became literal "R" in CI). Use \n in replacement;
-  # keep \R only in the pattern to match LF or CRLF. Also repair one-line corruption from the old bug.
-  if [[ -f "$scel" ]] && command -v perl >/dev/null 2>&1; then
-    perl -i.bak -0777 -pe '
-      s/#elif defined\(_WIN32\)R#include <stdint\.h>R#define le16toh\(x\) \(x\)R#define le32toh\(x\) \(x\)R#elseR#include <sys\/endian\.h>/#elif defined(_WIN32)\n#include <stdint.h>\n#define le16toh(x) (x)\n#define le32toh(x) (x)\n#else\n#include <sys\/endian.h>/gs;
-      unless (m/#elif defined\(_WIN32\)\s*\n\s*#include <stdint\.h>/) {
-        s/#else\R(#include <sys\/endian\.h>)/#elif defined(_WIN32)\n#include <stdint.h>\n#define le16toh(x) (x)\n#define le32toh(x) (x)\n#else\n$1/gs;
-      }
-    ' "$scel"
-    rm -f "${scel}.bak"
-  elif [[ -f "$scel" ]]; then
-    echo "warning: perl missing; scel2org5.cpp may fail on Windows (pacman -S perl)" >&2
-  fi
-}
-patch_fcitx5_chinese_addons_for_mingw
 
 echo "==> [3/3] fcitx5-chinese-addons"
 # Stale build.ninja can keep old paths / deps from a previous failed run (e.g. self-hosted or retried step).
@@ -414,20 +302,12 @@ install_merged_librime_dll_into_bindir() {
   shopt -u nullglob
 }
 
-apply_msys2_librime_llvm_rc_patch() {
-  local _patch="$ROOT/scripts/patches/librime/002-librime-fix-llvm-rc.patch"
-  [[ -f "$_patch" ]] || return 1
-  echo "==> patch librime AddRCInfo.cmake (MSYS2: MinGW+Clang 勿用 llvm-rc，避免 Exactly one input file)"
-  _apply_unified_patch "$LIBRIME_SRC" "$_patch" || return 1
-}
-
 build_merged_librime_with_lua() {
   local _prefix
   _prefix="$(mingw_toolchain_prefix)"
   [[ -n "$_prefix" ]] || return 1
   echo "==> [5a] librime + librime-lua (merged into librime DLL, same idea as fcitx5-prebuilder / fcitx5-macos deps)"
   prepare_librime_lua_plugin_dir || return 1
-  apply_msys2_librime_llvm_rc_patch || return 1
   rm -rf "$LIBRIME_BUILD"
   # 与 MSYS2 mingw-w64-librime PKGBUILD 对齐的 glog 宏；另强制 GFLAGS_IS_A_DLL 为 0/1，否则
   # gflags_declare.h 里 #if GFLAGS_IS_A_DLL 在 Clang+MinGW 下会因空宏报 invalid token。
@@ -445,23 +325,6 @@ build_merged_librime_with_lua() {
   install_merged_librime_dll_into_bindir
   export PKG_CONFIG_PATH="$STAGE/lib/pkgconfig${PKG_CONFIG_PATH:+:${PKG_CONFIG_PATH}}"
   return 0
-}
-
-# fcitx5 5.1.13+ StandardPaths::locate / userDirectory return std::filesystem::path;
-# Windows path::c_str() is wchar_t* — incompatible with fcitx::fs::isdir(std::string) and
-# RimeTraits::user_data_dir (const char *). Upstream fcitx5-rime 5.1.13 predates that API.
-apply_fcitx5_rime_standardpaths_patch() {
-  local _patch="$ROOT/scripts/patches/fcitx5-rime/001-rimeengine-filesystem-path.patch"
-  local _marker="$RIME_SRC/src/rimeengine.h"
-  [[ -f "$_patch" ]] && [[ -f "$_marker" ]] || return 0
-  if grep -q 'rimePathToUtf8' "$_marker" 2>/dev/null; then
-    return 0
-  fi
-  echo "==> patch fcitx5-rime: path → UTF-8 string (Windows / fcitx StandardPaths path API)"
-  _apply_unified_patch "$RIME_SRC" "$_patch" || {
-    echo "error: fcitx5-rime patch failed: $_patch" >&2
-    exit 1
-  }
 }
 
 if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
@@ -491,7 +354,6 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
     fi
     copy_librime_runtime_dlls
   fi
-  apply_fcitx5_rime_standardpaths_patch
   rm -rf "$RIME_BUILD"
   cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
@@ -517,25 +379,8 @@ copy_lua_runtime_dlls() {
   shopt -u nullglob
 }
 
-# llvm-objdump on MinGW .dll.a has no ELF SONAME; CMake REGEX REPLACE leaves SONAME_OUT == full
-# dump → LUA_LIBRARY_PATH in config.h is multiline garbage and breaks the C++ compile.
-apply_fcitx5_lua_mingw_library_path_patch() {
-  local _patch="$ROOT/scripts/patches/fcitx5-lua/001-cmake-resolve-lua-library-mingw.patch"
-  local _marker="$LUA_SRC/CMakeLists.txt"
-  [[ -f "$_patch" ]] && [[ -f "$_marker" ]] || return 0
-  if grep -q 'NOT SONAME_OUT STREQUAL OBJDUMP_RESULT' "$_marker" 2>/dev/null; then
-    return 0
-  fi
-  echo "==> patch fcitx5-lua: LUA_LIBRARY_PATH for MinGW import libs (.dll.a)"
-  _apply_unified_patch "$LUA_SRC" "$_patch" || {
-    echo "error: fcitx5-lua patch failed: $_patch" >&2
-    exit 1
-  }
-}
-
 if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
   echo "==> [6] fcitx5-lua"
-  apply_fcitx5_lua_mingw_library_path_patch
   rm -rf "$LUA_BUILD"
   cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
