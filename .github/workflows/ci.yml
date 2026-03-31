@@ -139,8 +139,8 @@ jobs:
           $env:RIME_SRC = "$wsUnix/fcitx5-rime"
           $env:LUA_SRC = "$wsUnix/fcitx5-lua"
           & (Join-Path $env:GITHUB_WORKSPACE 'scripts/02-build-deps.ps1') `
-            -DCMAKE_C_COMPILER=/clang64/bin/clang.exe `
-            -DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe
+            '-DCMAKE_C_COMPILER=/clang64/bin/clang.exe' `
+            '-DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe'
 
       - name: Build TSF installer (03-build-installer.ps1)
         shell: pwsh
