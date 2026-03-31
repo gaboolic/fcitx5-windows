@@ -1103,8 +1103,8 @@ findTrayStatusAction(const std::vector<TrayStatusActionItem> &items,
 }
 
 int shuangpinSchemeIndexFromValue(std::string_view value) {
-    for (size_t i = 0; i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]);
-         ++i) {
+    for (size_t i = 0;
+         i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]); ++i) {
         if (value == kShuangpinSchemes[i].value) {
             return static_cast<int>(i);
         }
@@ -1118,8 +1118,8 @@ std::filesystem::path sharedPinyinConfigFile() {
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
         return portable;
     }
-    const auto roaming = std::filesystem::path(appData) / L"Fcitx5" /
-                         kPinyinConfigRelativePath;
+    const auto roaming =
+        std::filesystem::path(appData) / L"Fcitx5" / kPinyinConfigRelativePath;
     std::error_code ec;
     if (std::filesystem::exists(roaming, ec)) {
         return roaming;
@@ -1139,7 +1139,8 @@ std::string loadShuangpinSchemeValue() {
     while (std::getline(in, line)) {
         line = trimSharedTrayValue(std::move(line));
         if (line.rfind("ShuangpinProfile=", 0) == 0) {
-            return trimSharedTrayValue(line.substr(sizeof("ShuangpinProfile=") - 1));
+            return trimSharedTrayValue(
+                line.substr(sizeof("ShuangpinProfile=") - 1));
         }
     }
     return kShuangpinSchemes[0].value;
@@ -1201,15 +1202,15 @@ void appendRadioMenuItem(HMENU menu, UINT id, const wchar_t *label) {
 static std::atomic<bool> g_explorerTrayHelperPrimed{false};
 
 bool explorerTrayHelperPrimedOnce() {
-    const bool cached = g_explorerTrayHelperPrimed.load(std::memory_order_relaxed);
+    const bool cached =
+        g_explorerTrayHelperPrimed.load(std::memory_order_relaxed);
     if (cached && standaloneTrayHelperWindowExists()) {
         tsfTrace("explorerTrayHelperPrimedOnce cached=true helperWindow=true");
         return true;
     }
     if (cached) {
-        tsfTrace(
-            "explorerTrayHelperPrimedOnce cached=true helperWindow=false; "
-            "retrying helper startup");
+        tsfTrace("explorerTrayHelperPrimedOnce cached=true helperWindow=false; "
+                 "retrying helper startup");
     }
     const bool helperReady = ensureStandaloneTrayHelperRunning();
     tsfTrace(std::string("explorerTrayHelperPrimedOnce ensure helperReady=") +
@@ -1328,13 +1329,12 @@ STDMETHODIMP FcitxLangBarButton::OnClick(TfLBIClick click, POINT pt,
     if (click == TF_LBI_CLK_RIGHT) {
         const bool explorer = currentProcessIsExplorer();
         tsfTrace(std::string("FcitxLangBarButton::OnClick right explorer=") +
-                 (explorer ? "true" : "false") + " pt=" +
-                 std::to_string(static_cast<long long>(pt.x)) + "," +
+                 (explorer ? "true" : "false") +
+                 " pt=" + std::to_string(static_cast<long long>(pt.x)) + "," +
                  std::to_string(static_cast<long long>(pt.y)));
         if (explorer) {
-            tsfTrace(
-                "FcitxLangBarButton::OnClick right explorer conservative "
-                "helper-only path");
+            tsfTrace("FcitxLangBarButton::OnClick right explorer conservative "
+                     "helper-only path");
             tsf_->showShellTrayContextMenu();
             return S_OK;
         }
@@ -1816,7 +1816,8 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
 }
 
 bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
-    if (!engine_ || pendingTrayReloadPinyinConfig_ || currentProcessIsExplorer()) {
+    if (!engine_ || pendingTrayReloadPinyinConfig_ ||
+        currentProcessIsExplorer()) {
         return false;
     }
     if (!readSharedTrayPinyinReloadRequestFile()) {
@@ -1832,7 +1833,8 @@ bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
     }
     if (!ctx && threadMgr_) {
         ComPtr<ITfDocumentMgr> dm;
-        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) &&
+            dm) {
             dm->GetTop(ctx.ReleaseAndGetAddressOf());
         }
     }
@@ -2150,13 +2152,12 @@ void Tsf::showShellTrayContextMenu() {
 
 void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
     if (currentProcessIsExplorer()) {
-        tsfTrace(std::string(
-                     "showShellTrayContextMenuAt explorer helper-only pt=") +
-                 std::to_string(static_cast<long long>(pt.x)) + "," +
-                 std::to_string(static_cast<long long>(pt.y)) + " owner=" +
-                 std::to_string(
-                     static_cast<unsigned long long>(
-                         reinterpret_cast<uintptr_t>(owner))));
+        tsfTrace(
+            std::string("showShellTrayContextMenuAt explorer helper-only pt=") +
+            std::to_string(static_cast<long long>(pt.x)) + "," +
+            std::to_string(static_cast<long long>(pt.y)) + " owner=" +
+            std::to_string(static_cast<unsigned long long>(
+                reinterpret_cast<uintptr_t>(owner))));
         explorerTrayHelperPrimedOnce();
         return;
     }
@@ -2267,18 +2268,17 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                     shuangpinSchemeIndexFromValue(loadShuangpinSchemeValue());
                 HMENU shuangpinMenu = CreatePopupMenu();
                 if (shuangpinMenu) {
-                    for (size_t i = 0;
-                         i < sizeof(kShuangpinSchemes) /
-                                  sizeof(kShuangpinSchemes[0]);
+                    for (size_t i = 0; i < sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]);
                          ++i) {
-                        AppendMenuW(shuangpinMenu,
-                                    MF_STRING |
-                                        (static_cast<int>(i) == currentSchemeIndex
-                                             ? MF_CHECKED
-                                             : 0),
-                                    IDM_SHUANGPIN_SCHEME_BASE +
-                                        static_cast<UINT>(i),
-                                    kShuangpinSchemes[i].menuText);
+                        AppendMenuW(
+                            shuangpinMenu,
+                            MF_STRING |
+                                (static_cast<int>(i) == currentSchemeIndex
+                                     ? MF_CHECKED
+                                     : 0),
+                            IDM_SHUANGPIN_SCHEME_BASE + static_cast<UINT>(i),
+                            kShuangpinSchemes[i].menuText);
                     }
                     AppendMenuW(statusMenu, MF_POPUP,
                                 reinterpret_cast<UINT_PTR>(shuangpinMenu),
@@ -2286,7 +2286,8 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                 }
             }
             AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
-            AppendMenuW(statusMenu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 设置...");
+            AppendMenuW(statusMenu, MF_STRING, IDM_SETTINGS_GUI,
+                        L"Fcitx5 设置...");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_CONFIG_DIR,
                         L"打开配置文件夹");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_LOG_DIR,
@@ -2422,8 +2423,7 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                     langBarNotifyIconUpdate();
                 }
                 tsfTrace(std::string(ok ? "saved" : "failed") +
-                         " shuangpin scheme=" +
-                         kShuangpinSchemes[index].value);
+                         " shuangpin scheme=" + kShuangpinSchemes[index].value);
                 return;
             }
             break;
