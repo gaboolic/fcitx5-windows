@@ -1073,10 +1073,20 @@ void appendRadioMenuItem(HMENU menu, UINT id, const wchar_t *label) {
 static std::atomic<bool> g_explorerTrayHelperPrimed{false};
 
 bool explorerTrayHelperPrimedOnce() {
-    if (g_explorerTrayHelperPrimed.load(std::memory_order_relaxed)) {
+    const bool cached = g_explorerTrayHelperPrimed.load(std::memory_order_relaxed);
+    if (cached && standaloneTrayHelperWindowExists()) {
+        tsfTrace("explorerTrayHelperPrimedOnce cached=true helperWindow=true");
         return true;
     }
-    if (!ensureStandaloneTrayHelperRunning()) {
+    if (cached) {
+        tsfTrace(
+            "explorerTrayHelperPrimedOnce cached=true helperWindow=false; "
+            "retrying helper startup");
+    }
+    const bool helperReady = ensureStandaloneTrayHelperRunning();
+    tsfTrace(std::string("explorerTrayHelperPrimedOnce ensure helperReady=") +
+             (helperReady ? "true" : "false"));
+    if (!helperReady) {
         return false;
     }
     g_explorerTrayHelperPrimed.store(true, std::memory_order_relaxed);
@@ -1188,6 +1198,18 @@ STDMETHODIMP FcitxLangBarButton::OnClick(TfLBIClick click, POINT pt,
         return S_OK;
     }
     if (click == TF_LBI_CLK_RIGHT) {
+        const bool explorer = currentProcessIsExplorer();
+        tsfTrace(std::string("FcitxLangBarButton::OnClick right explorer=") +
+                 (explorer ? "true" : "false") + " pt=" +
+                 std::to_string(static_cast<long long>(pt.x)) + "," +
+                 std::to_string(static_cast<long long>(pt.y)));
+        if (explorer) {
+            tsfTrace(
+                "FcitxLangBarButton::OnClick right explorer conservative "
+                "helper-only path");
+            tsf_->showShellTrayContextMenu();
+            return S_OK;
+        }
         HWND owner = GetForegroundWindow();
         if (!owner) {
             owner = GetDesktopWindow();
@@ -1940,6 +1962,7 @@ void Tsf::recreateShellTrayIcon() {
 
 void Tsf::showShellTrayContextMenu() {
     if (currentProcessIsExplorer()) {
+        tsfTrace("showShellTrayContextMenu explorer helper-only");
         explorerTrayHelperPrimedOnce();
         return;
     }
@@ -1955,9 +1978,21 @@ void Tsf::showShellTrayContextMenu() {
 
 void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
     if (currentProcessIsExplorer()) {
+        tsfTrace(std::string(
+                     "showShellTrayContextMenuAt explorer helper-only pt=") +
+                 std::to_string(static_cast<long long>(pt.x)) + "," +
+                 std::to_string(static_cast<long long>(pt.y)) + " owner=" +
+                 std::to_string(
+                     static_cast<unsigned long long>(
+                         reinterpret_cast<uintptr_t>(owner))));
         explorerTrayHelperPrimedOnce();
         return;
     }
+    tsfTrace(std::string("showShellTrayContextMenuAt enter pt=") +
+             std::to_string(static_cast<long long>(pt.x)) + "," +
+             std::to_string(static_cast<long long>(pt.y)) + " owner=" +
+             std::to_string(static_cast<unsigned long long>(
+                 reinterpret_cast<uintptr_t>(owner))));
     ScopedDllPin menuPin;
     for (;;) {
         HMENU menu = CreatePopupMenu();
