@@ -129,6 +129,22 @@ if [[ ! -f "$CHINESE_SRC/CMakeLists.txt" ]]; then
   exit 1
 fi
 
+# libime: Windows runtime passes LIBIME_MODEL_DIRS as a native path like
+# C:\Program Files\Fcitx5\lib\libime. Upstream splits only on ':', which
+# breaks the drive letter and makes zh_CN.lm disappear at runtime.
+apply_libime_patch() {
+  local pf="$ROOT/patches/libime-windows-model-dirs.patch"
+  [[ "${LIBIME_SKIP_PATCH:-0}" == "1" ]] && return 0
+  [[ -f "$pf" ]] || return 0
+  [[ $_is_msys -eq 1 ]] || return 0
+  if git -C "$LIBIME_SRC" apply --check --whitespace=nowarn "$pf" 2>/dev/null; then
+    echo "==> applying $(basename "$pf") to $LIBIME_SRC (set LIBIME_SKIP_PATCH=1 to skip)"
+    git -C "$LIBIME_SRC" apply --whitespace=nowarn "$pf"
+  fi
+}
+
+apply_libime_patch
+
 # Upstream fcitx5-chinese-addons: MSYS2 CLANG64 + libc++ (path→string) and scel2org5 (no sys/endian.h).
 # Patch lives in this repo only; set CHINESE_ADDONS_SKIP_PATCH=1 to skip (e.g. upstream fixed or you use GCC only).
 apply_fcitx5_chinese_addons_patch() {

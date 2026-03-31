@@ -1,0 +1,24 @@
+diff --git a/src/libime/core/languagemodel.cpp b/src/libime/core/languagemodel.cpp
+index feb3865..15ee2fb 100644
+--- a/src/libime/core/languagemodel.cpp
++++ b/src/libime/core/languagemodel.cpp
+@@ -311,7 +311,18 @@ std::string DefaultLanguageModelResolver::languageModelFileNameForLanguage(
+     const char *modelDirs = getenv("LIBIME_MODEL_DIRS");
+     std::vector<std::string> dirs;
+     if (modelDirs && modelDirs[0]) {
++#ifdef _WIN32
++        std::string_view modelDirsView(modelDirs);
++        if (modelDirsView.find(';') != std::string_view::npos) {
++            dirs = fcitx::stringutils::split(modelDirsView, ";");
++        } else {
++            // A single native Windows path like C:\Program Files\Fcitx5\lib\libime
++            // must stay intact; splitting on ':' would destroy the drive letter.
++            dirs.emplace_back(modelDirs);
++        }
++#else
+         dirs = fcitx::stringutils::split(modelDirs, ":");
++#endif
+     } else {
+         dirs.push_back(LIBIME_INSTALL_LIBDATADIR);
+     }
+ 
