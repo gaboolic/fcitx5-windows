@@ -27,6 +27,7 @@
 #include <uv.h>
 
 #include <Windows.h>
+#include <winreg.h>
 
 #include <algorithm>
 #include <cstdlib>
@@ -36,6 +37,7 @@
 #include <iostream>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <streambuf>
 #include <string>
 
@@ -161,6 +163,33 @@ std::wstring trayStatusActionLabel(std::string_view actionName, bool checked) {
     return {};
 }
 
+bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
+
+/** User env from "System Properties" is in HKCU\\Environment; child processes
+ * only see it after explorer restarts. Read registry here so set-fcitx-ts-disable-rime.ps1 works immediately. */
+bool userPersistentEnvWideTruthy(const wchar_t *valueName) {
+    wchar_t buf[64];
+    DWORD size = sizeof(buf);
+    DWORD typ = 0;
+    const LSTATUS st =
+        RegGetValueW(HKEY_CURRENT_USER, L"Environment", valueName,
+                     RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, &typ, buf, &size);
+    if (st != ERROR_SUCCESS) {
+        return false;
+    }
+    if (buf[0] == L'\0' || wcscmp(buf, L"0") == 0) {
+        return false;
+    }
+    return true;
+}
+
+bool disableRimeDueToUserEnvOrRegistry() {
+    if (envTruthy(std::getenv("FCITX_TS_DISABLE_RIME"))) {
+        return true;
+    }
+    return userPersistentEnvWideTruthy(L"FCITX_TS_DISABLE_RIME");
+}
+
 std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     HMODULE mod = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -213,6 +242,12 @@ struct InstanceArgv {
 };
 
 bool shouldDisableRimeForCurrentHost() {
+    // Rime loads native librime / deps; mis-matched DLLs or broken deploy can AV
+    // the host. FCITX_TS_DISABLE_RIME=1 (process env or HKCU\Environment) adds
+    // --disable=rime for diagnosis (pinyin/table still work).
+    if (disableRimeDueToUserEnvOrRegistry()) {
+        return true;
+    }
     return currentProcessIsQQForTsf() || currentProcessIsCursorForTsf();
 }
 
@@ -484,8 +519,6 @@ bool isChineseToggleVk(unsigned vk) {
     return vk == VK_SPACE && (GetKeyState(VK_CONTROL) & 0x8000);
 }
 
-bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
-
 /// Optional TSF IME logging: `Log::setLogStream` is process-global; refcount
 /// when multiple engines exist. Lines are UTF-8; converted for
 /// OutputDebugStringW.
@@ -653,8 +686,13 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         setupImeFcitxEnvironment();
         const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
         if (disableRimeForHost) {
-            tsfTrace(
-                "Fcitx5ImeEngine::init disabling rime addon for risky host");
+            if (disableRimeDueToUserEnvOrRegistry()) {
+                tsfTrace("Fcitx5ImeEngine::init disabling rime (FCITX_TS_DISABLE_"
+                         "RIME env or HKCU\\\\Environment)");
+            } else {
+                tsfTrace(
+                    "Fcitx5ImeEngine::init disabling rime addon for risky host");
+            }
         }
         InstanceArgv instanceArgv(disableRimeForHost);
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
@@ -671,8 +709,11 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         }
         instance_ = std::make_unique<Instance>(instanceArgv.argc(),
                                                instanceArgv.data());
+        tsfTrace("Fcitx5ImeEngine::init Instance constructed");
         instance_->addonManager().registerDefaultLoader(nullptr);
+        tsfTrace("Fcitx5ImeEngine::init before initialize()");
         instance_->initialize();
+        tsfTrace("Fcitx5ImeEngine::init after initialize()");
         tsfTrace("Fcitx5ImeEngine::init instance initialized");
 
         ic_ = std::make_unique<TsfInputContext>(
@@ -904,6 +945,7 @@ void Fcitx5ImeEngine::syncUiFromIc() {
         preU8 = std::move(serverU8);
         cursorBytes = serverTxt.cursor();
     }
+    const bool traceLatinO = (preU8 == "o" || preU8 == "O");
     preeditWide_ = utf8ToWide(preU8);
     if (cursorBytes < 0) {
         preeditCaretWide_ = static_cast<int>(preeditWide_.size());
@@ -916,6 +958,12 @@ void Fcitx5ImeEngine::syncUiFromIc() {
     }
     auto list = ic_->inputPanel().candidateList();
     if (!list || list->empty()) {
+        if (traceLatinO) {
+            tsfTrace("o-syncUiFromIc preedit=" + preU8 +
+                     " clientPreedit=" + clientTxt.toString() +
+                     " serverPreedit=" + serverTxt.toString() +
+                     " candidates=<empty>");
+        }
         return;
     }
     const int n = list->size();
@@ -929,6 +977,21 @@ void Fcitx5ImeEngine::syncUiFromIc() {
         highlightIndex_ >= static_cast<int>(candidatesWide_.size())) {
         highlightIndex_ = 0;
     }
+    if (traceLatinO) {
+        std::ostringstream ss;
+        ss << "o-syncUiFromIc preedit=" << preU8
+           << " clientPreedit=" << clientTxt.toString()
+           << " serverPreedit=" << serverTxt.toString()
+           << " highlight=" << highlightIndex_ << " topCandidates=";
+        const int topN = std::min(5, list->size());
+        for (int i = 0; i < topN; ++i) {
+            if (i) {
+                ss << "|";
+            }
+            ss << list->candidate(i).text().toString();
+        }
+        tsfTrace(ss.str());
+    }
 }
 
 bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
@@ -941,6 +1004,17 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
     KeyEvent ev(ic_.get(), Key(sym), false);
     const bool keyOk = ic_->keyEvent(ev);
     syncUiFromIc();
+    if (sym == FcitxKey_o || sym == FcitxKey_O) {
+        std::ostringstream ss;
+        ss << "o-sendKeySym sym=" << static_cast<unsigned>(sym)
+           << " keyEventRet=" << (keyOk ? "true" : "false")
+           << " preeditWide=" << preeditWide_.size()
+           << " candidatesWide=" << candidatesWide_.size();
+        if (!candidatesWide_.empty()) {
+            ss << " top0=" << ic_->inputPanel().candidateList()->candidate(0).text().toString();
+        }
+        tsfTrace(ss.str());
+    }
     if (loggingAttached_ && instance_) {
         const auto &panel = ic_->inputPanel();
         FCITX_INFO() << "tsf sendKeySym sym=" << static_cast<unsigned>(sym)
@@ -1339,6 +1413,20 @@ bool Fcitx5ImeEngine::activateTrayStatusAction(const std::string &uniqueName) {
     flushLibuvLoopForIme(instance_->eventLoop());
     instance_->save();
     syncUiFromIc();
+    return true;
+}
+
+bool Fcitx5ImeEngine::reloadPinyinConfig() {
+    if (!instance_) {
+        return false;
+    }
+    ScopedDllDirectory scopedDllDirectory(imeBinDir());
+    instance_->reloadAddonConfig("pinyin");
+    instance_->eventDispatcher().dispatchPending();
+    flushLibuvLoopForIme(instance_->eventLoop());
+    if (ic_) {
+        syncUiFromIc();
+    }
     return true;
 }
 

@@ -48,6 +48,8 @@ bool ImeEngine::activateTrayStatusAction(const std::string & /*uniqueName*/) {
     return false;
 }
 
+bool ImeEngine::reloadPinyinConfig() { return false; }
+
 bool ImeEngine::invokeInputMethodSubConfig(const std::string & /*uniqueName*/,
                                            const std::string & /*subPath*/) {
     return false;
@@ -76,9 +78,6 @@ class StubImeEngine : public ImeEngine {
     }
 
     void appendLatinLowercase(wchar_t ch) override {
-        if (preedit_.size() >= 32) {
-            return;
-        }
         preedit_.push_back(ch);
         regenerateCandidates();
     }

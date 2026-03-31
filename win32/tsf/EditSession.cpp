@@ -55,6 +55,23 @@ wchar_t tsfLatinLetterFromVk(unsigned vk) {
                  : static_cast<wchar_t>(vk - L'A' + L'a');
 }
 
+std::string tsfWideToUtf8(const std::wstring &text) {
+    if (text.empty()) {
+        return {};
+    }
+    const int size =
+        WideCharToMultiByte(CP_UTF8, 0, text.data(),
+                            static_cast<int>(text.size()), nullptr, 0, nullptr,
+                            nullptr);
+    if (size <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(size), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                        utf8.data(), size, nullptr, nullptr);
+    return utf8;
+}
+
 /// Caret in client coords of hwndCaret → screen. Many hosts return empty
 /// ITfContextView::GetTextExt; GUI thread caret matches the real insertion
 /// point. US-keyboard punctuation keys: must reach fcitx (punctuation addon)
@@ -799,7 +816,9 @@ void Tsf::updatePreeditText(TfEditCookie ec) {
     textEditSinkContext_->SetSelection(ec, 1, &sel);
 }
 
-void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
+void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text,
+                               bool clearEngineState) {
+    tsfTrace("endCompositionCommit text=" + tsfWideToUtf8(text));
     candidateWin_.hide();
     endCandidateListUiElement();
     if (compositionRange_) {
@@ -841,7 +860,7 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
     }
     composition_.Reset();
     compositionRange_.Reset();
-    if (engine_) {
+    if (clearEngineState && engine_) {
         engine_->clear();
     }
 }
@@ -871,7 +890,11 @@ void Tsf::drainCommitsAfterEngine(TfEditCookie ec) {
         if (w.empty()) {
             break;
         }
-        endCompositionCommit(ec, w);
+        // A single key may both commit the previous segment and leave a new
+        // preedit/candidate state (common for table IMs like Wubi). Commit the
+        // old TSF composition first, then let afterFcitxEngineKey() rebuild
+        // composition from the engine's current state.
+        endCompositionCommit(ec, w, false);
     }
 }
 
@@ -1124,6 +1147,15 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
     const UINT vk = static_cast<UINT>(wp);
+    const bool traceLatinO = (vk == 'O');
+    if (traceLatinO) {
+        tsfTrace(std::string("o-runKeyEditSession enter release=") +
+                 (isRelease ? "true" : "false") + " chineseActive=" +
+                 (chineseActive_ ? "true" : "false") + " ctrlAlt=" +
+                 (tsfChordHasCtrlOrAlt() ? "true" : "false") + " preedit=" +
+                 tsfWideToUtf8(engine_->preedit()) + " candidateCount=" +
+                 std::to_string(engine_->candidates().size()));
+    }
     if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
             vk, static_cast<std::uintptr_t>(lp), isRelease);
@@ -1284,6 +1316,9 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     if (vk >= 'A' && vk <= 'Z') {
         if (tsfLatinKeyShouldPassToApp()) {
+            if (traceLatinO) {
+                tsfTrace("o-runKeyEditSession pass-to-app");
+            }
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
@@ -1292,15 +1327,18 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        if (engine_->preedit().size() < 32) {
-            pendingKeyHandled_ = true;
-            engine_->appendLatinLowercase(ch);
-            if (!ensureCompositionStarted(ec)) {
-                drainCommitsAfterEngine(ec);
-                return S_OK;
-            }
-            updatePreeditText(ec);
-            syncCandidateWindow(ec);
+        pendingKeyHandled_ = true;
+        engine_->appendLatinLowercase(ch);
+        afterFcitxEngineKey(ec);
+        if (traceLatinO) {
+            tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
+                     tsfWideToUtf8(engine_->preedit()) +
+                     " candidateCount=" +
+                     std::to_string(engine_->candidates().size()) +
+                     " top0=" +
+                     (engine_->candidates().empty()
+                          ? std::string()
+                          : tsfWideToUtf8(engine_->candidateText(0))));
         }
         drainCommitsAfterEngine(ec);
         return S_OK;
@@ -1361,6 +1399,14 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         return S_OK;
     }
     if (!engine_) {
+        return S_OK;
+    }
+    if (pendingTrayReloadPinyinConfig_) {
+        pendingTrayReloadPinyinConfig_ = false;
+        if (engine_->reloadPinyinConfig()) {
+            clearSharedTrayPinyinReloadRequest();
+            langBarNotifyIconUpdate();
+        }
         return S_OK;
     }
     if (!pendingTrayStatusAction_.empty()) {

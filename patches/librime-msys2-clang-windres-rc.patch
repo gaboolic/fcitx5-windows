@@ -1,0 +1,23 @@
+diff --git a/cmake/AddRCInfo.cmake b/cmake/AddRCInfo.cmake
+--- a/cmake/AddRCInfo.cmake
++++ b/cmake/AddRCInfo.cmake
+@@ -61,10 +61,16 @@ endif(build_release)
+ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+   set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -c 65001")
+ endif()
+-# if clang build, use llvm-rc to compile resource file
++# Clang + MinGW: Ninja invokes the RC tool with two positional args (.rc + .obj); llvm-rc
++# rejects that ("Exactly one input file"). Use windres like the GNU MinGW path.
+ if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+-  set(CMAKE_RC_COMPILER "llvm-rc")
+-  set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -finput-charset=UTF-8")
++  if(MINGW)
++    set(CMAKE_RC_COMPILER windres)
++    set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -c 65001")
++  else()
++    set(CMAKE_RC_COMPILER "llvm-rc")
++    set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} -finput-charset=UTF-8")
++  endif()
+ endif()
+ 
+ # set resource file

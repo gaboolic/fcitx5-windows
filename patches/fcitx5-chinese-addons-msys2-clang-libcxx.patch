@@ -1,0 +1,44 @@
+diff --git a/im/pinyin/pinyin.cpp b/im/pinyin/pinyin.cpp
+--- a/im/pinyin/pinyin.cpp
++++ b/im/pinyin/pinyin.cpp
+@@ -890,7 +890,7 @@ void PinyinEngine::loadBuiltInDict() {
+     {
+         auto file = standardPath.locate(StandardPathsType::PkgData,
+                                         "pinyin/chaizi.dict");
+-        loadDict(file, persistentTask_);
++        loadDict(file.string(), persistentTask_);
+     }
+     {
+         auto file =
+@@ -900,7 +900,7 @@ void PinyinEngine::loadBuiltInDict() {
+             file = standardPath.locate(StandardPathsType::Data,
+                                        LIBIME_INSTALL_PKGDATADIR "/extb.dict");
+         }
+-        loadDict(file, persistentTask_);
++        loadDict(file.string(), persistentTask_);
+     }
+     if (ime_->dict()->dictSize() !=
+         libime::TrieDictionary::UserDict + 1 + NumBuiltInDict) {
+@@ -933,7 +933,7 @@ void PinyinEngine::loadExtraDict() {
+             continue;
+         }
+         PINYIN_DEBUG() << "Loading extra dictionary: " << file.first;
+-        loadDict(file.second, tasks_);
++        loadDict(file.second.string(), tasks_);
+     }
+ }
+ 
+diff --git a/tools/scel2org5.cpp b/tools/scel2org5.cpp
+--- a/tools/scel2org5.cpp
++++ b/tools/scel2org5.cpp
+@@ -44,6 +44,10 @@
+ #include <libkern/OSByteOrder.h>
+ #define le16toh(x) OSSwapLittleToHostInt16(x)
+ #define le32toh(x) OSSwapLittleToHostInt32(x)
++#elif defined(_WIN32) || defined(__CYGWIN__)
++// Windows targets are little-endian; SCEL uses little-endian words.
++#define le16toh(x) (static_cast<uint16_t>(x))
++#define le32toh(x) (static_cast<uint32_t>(x))
+ #else
+ #include <sys/endian.h>
+ #endif

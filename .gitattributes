@@ -1,2 +1,0 @@
-# Unified diffs must stay LF-only; Windows checkouts with core.autocrlf can break patch(1).
-scripts/patches/**/*.patch text eol=lf

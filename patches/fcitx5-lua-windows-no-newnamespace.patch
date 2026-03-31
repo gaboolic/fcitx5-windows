@@ -1,0 +1,22 @@
+diff --git a/src/addonloader/luaaddonloader.cpp b/src/addonloader/luaaddonloader.cpp
+index 24db63a..b1d2fc8 100644
+--- a/src/addonloader/luaaddonloader.cpp
++++ b/src/addonloader/luaaddonloader.cpp
+@@ -22,8 +22,15 @@ namespace fcitx {
+ LuaAddonLoader::LuaAddonLoader() {
+ #ifdef USE_DLOPEN
+     luaLibrary_ = std::make_unique<Library>(LUA_LIBRARY_PATH);
+-    luaLibrary_->load(
+-        {LibraryLoadHint::NewNameSpace, LibraryLoadHint::DefaultHint});
++    auto hint = Flags<LibraryLoadHint>{LibraryLoadHint::DefaultHint};
++#if !defined(_WIN32)
++    hint |= LibraryLoadHint::NewNameSpace;
++#else
++    // MSYS2/MinGW Lua addons run inside native Windows host processes
++    // (e.g. TSF TIP hosts like Notepad.exe). A separate loader namespace is
++    // unstable there and can AV before the Lua source itself starts running.
++#endif
++    luaLibrary_->load(hint);
+     if (!luaLibrary_->loaded()) {
+         FCITX_LUA_ERROR() << "Failed to load lua library: "
+                           << luaLibrary_->error();

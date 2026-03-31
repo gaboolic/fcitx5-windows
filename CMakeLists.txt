@@ -28,7 +28,7 @@ if (CYGWIN)
     add_compile_definitions(-D_GNU_SOURCE)
 else()
     # Default to C: only when the user did not pass -DCMAKE_INSTALL_PREFIX. An unconditional
-    # assignment would override e.g. -DCMAKE_INSTALL_PREFIX=$STAGE from build-pinyin-stage.sh,
+    # assignment would override e.g. -DCMAKE_INSTALL_PREFIX=$STAGE from 01-build-fcitx5-windows.ps1 / 02-build-deps.sh,
     # breaking Fcitx5UtilsConfig.cmake (FCITX_INSTALL_CMAKECONFIG_DIR would become C:/lib/cmake).
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
         set(CMAKE_INSTALL_PREFIX "C:" CACHE PATH "Install path prefix" FORCE)

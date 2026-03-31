@@ -86,6 +86,11 @@ enum CmdId : int {
     IDC_BTN_SAVE,
     IDC_BTN_RELOAD = 2100,
     IDC_BTN_FOLDER,
+    IDC_GROUP_PINYIN,
+    IDC_LABEL_SHUANGPIN,
+    IDC_COMBO_SHUANGPIN,
+    IDC_BTN_APPLY_POPULAR_PROFILE,
+    IDC_LABEL_PROFILE_HINT,
 };
 
 enum class UiLang {
@@ -119,12 +124,17 @@ enum class TextId {
     EnumerateGroupForward,
     EnumerateBackwardKeys,
     EnumerateGroupBackward,
+    PinyinConfig,
+    ShuangpinScheme,
     ProfileRawIni,
+    ProfileEditHint,
+    ApplyRecommendedProfile,
     SaveAll,
     ReloadFromDisk,
     OpenConfigFolder,
     Record,
     SaveConfigFailed,
+    SavePinyinFailed,
     SaveProfileFailed,
     SaveSuccess,
     PageSizeInvalid,
@@ -215,10 +225,24 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::EnumerateGroupBackward:
         return lang == UiLang::ZhCN ? L"向后轮换分组："
                                     : L"Enumerate group backward:";
+    case TextId::PinyinConfig:
+        return lang == UiLang::ZhCN ? L"拼音 / 双拼"
+                                    : L"Pinyin / Shuangpin";
+    case TextId::ShuangpinScheme:
+        return lang == UiLang::ZhCN ? L"双拼方案："
+                                    : L"Shuangpin scheme:";
     case TextId::ProfileRawIni:
         return lang == UiLang::ZhCN
                    ? L"配置（输入法 / 分组）- 原始 INI"
                    : L"Profile (input methods / groups) - raw INI";
+    case TextId::ProfileEditHint:
+        return lang == UiLang::ZhCN
+                   ? L"其他输入法仍可在下方原始 INI 中继续添加、删除或修改。"
+                   : L"You can still add, remove, or edit other input methods in "
+                     L"the raw INI below.";
+    case TextId::ApplyRecommendedProfile:
+        return lang == UiLang::ZhCN ? L"填入热门输入法模板"
+                                    : L"Fill popular IM template";
     case TextId::SaveAll:
         return lang == UiLang::ZhCN ? L"全部保存" : L"Save all";
     case TextId::ReloadFromDisk:
@@ -230,6 +254,9 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::SaveConfigFailed:
         return lang == UiLang::ZhCN ? L"无法写入 conf/fcitx5/config。"
                                     : L"Could not write conf/fcitx5/config.";
+    case TextId::SavePinyinFailed:
+        return lang == UiLang::ZhCN ? L"无法写入 conf/pinyin.conf。"
+                                    : L"Could not write conf/pinyin.conf.";
     case TextId::SaveProfileFailed:
         return lang == UiLang::ZhCN ? L"无法写入 profile 文件。"
                                     : L"Could not write profile file.";
@@ -364,6 +391,104 @@ bool writeProfileUtf8(const std::string &utf8) {
     return static_cast<bool>(out);
 }
 
+std::filesystem::path appDataRoot() {
+    wchar_t appData[MAX_PATH] = {};
+    DWORD len = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5";
+}
+
+void persistSharedTrayPinyinReloadRequest() {
+    const auto path = appDataRoot() / L"pending-tray-pinyin-reload.txt";
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return;
+    }
+    out << "1";
+}
+
+struct ShuangpinSchemeOption {
+    const char *value;
+    const wchar_t *zhText;
+    const wchar_t *enText;
+};
+
+constexpr ShuangpinSchemeOption kShuangpinSchemes[] = {
+    {"Ziranma", L"自然码", L"Ziranma"},
+    {"MS", L"微软双拼", L"Microsoft Shuangpin"},
+    {"Xiaohe", L"小鹤双拼", L"Xiaohe"},
+    {"Ziguang", L"紫光双拼", L"Ziguang"},
+    {"ABC", L"智能 ABC", L"ABC"},
+    {"Zhongwenzhixing", L"中文之星", L"Zhongwenzhixing"},
+    {"PinyinJiajia", L"拼音加加", L"PinyinJiajia"},
+    {"Custom", L"自定义", L"Custom"},
+};
+
+constexpr const char kPinyinConfigPath[] = "conf/pinyin.conf";
+
+std::string defaultPopularProfileUtf8() {
+    return "# Recommended default group: pinyin + shuangpin + wubi + rime\r\n"
+           "[Groups/0]\r\n"
+           "Name=Default\r\n"
+           "Default Layout=us\r\n"
+           "DefaultIM=pinyin\r\n"
+           "\r\n"
+           "[Groups/0/Items/0]\r\n"
+           "Name=pinyin\r\n"
+           "Layout=\r\n"
+           "\r\n"
+           "[Groups/0/Items/1]\r\n"
+           "Name=shuangpin\r\n"
+           "Layout=\r\n"
+           "\r\n"
+           "[Groups/0/Items/2]\r\n"
+           "Name=wbx\r\n"
+           "Layout=\r\n"
+           "\r\n"
+           "[Groups/0/Items/3]\r\n"
+           "Name=rime\r\n"
+           "Layout=\r\n"
+           "\r\n"
+           "[GroupOrder]\r\n"
+           "0=Default\r\n";
+}
+
+int shuangpinSchemeIndexFromValue(std::string_view value) {
+    for (size_t i = 0; i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]);
+         ++i) {
+        if (value == kShuangpinSchemes[i].value) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
+std::string shuangpinSchemeValueFromIndex(int index) {
+    if (index < 0 || index >=
+                         static_cast<int>(sizeof(kShuangpinSchemes) /
+                                          sizeof(kShuangpinSchemes[0]))) {
+        return kShuangpinSchemes[0].value;
+    }
+    return kShuangpinSchemes[index].value;
+}
+
+const wchar_t *shuangpinSchemeLabel(int index, UiLang lang) {
+    if (index < 0 || index >=
+                         static_cast<int>(sizeof(kShuangpinSchemes) /
+                                          sizeof(kShuangpinSchemes[0]))) {
+        index = 0;
+    }
+    return lang == UiLang::ZhCN ? kShuangpinSchemes[index].zhText
+                                : kShuangpinSchemes[index].enText;
+}
+
 struct UiState {
     GlobalConfig gc;
     UiLang lang = UiLang::ZhCN;
@@ -385,12 +510,49 @@ struct UiState {
     HWND editEnumG = nullptr;
     HWND editEnumB = nullptr;
     HWND editEnumGroupB = nullptr;
+    HWND comboShuangpin = nullptr;
     HWND editProfile = nullptr;
 };
 
 void loadGcFromDisk(UiState &s) {
     readAsIni(s.gc.config(), StandardPathsType::PkgConfig,
               std::filesystem::path("config"));
+}
+
+void reloadShuangpinCombo(UiState &st) {
+    if (!st.comboShuangpin) {
+        return;
+    }
+    const LRESULT currentSel = SendMessageW(st.comboShuangpin, CB_GETCURSEL, 0, 0);
+    SendMessageW(st.comboShuangpin, CB_RESETCONTENT, 0, 0);
+    for (int i = 0;
+         i < static_cast<int>(sizeof(kShuangpinSchemes) /
+                              sizeof(kShuangpinSchemes[0]));
+         ++i) {
+        SendMessageW(st.comboShuangpin, CB_ADDSTRING, 0,
+                     reinterpret_cast<LPARAM>(shuangpinSchemeLabel(i, st.lang)));
+    }
+    SendMessageW(st.comboShuangpin, CB_SETCURSEL,
+                 currentSel == CB_ERR ? 0 : currentSel, 0);
+}
+
+void syncShuangpinSchemeFromDisk(UiState &st) {
+    if (!st.comboShuangpin) {
+        return;
+    }
+    RawConfig raw;
+    try {
+        readAsIni(raw, StandardPathsType::PkgConfig,
+                  std::filesystem::path(kPinyinConfigPath));
+    } catch (...) {
+    }
+    const auto *rootValue = raw.valueByPath("ShuangpinProfile");
+    const auto *configValue = raw.valueByPath("Config/ShuangpinProfile");
+    const auto value = rootValue ? *rootValue
+                                 : (configValue ? *configValue
+                                                : std::string_view("Ziranma"));
+    const int index = shuangpinSchemeIndexFromValue(value);
+    SendMessageW(st.comboShuangpin, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
 }
 
 void syncControlsFromGc(HWND hwnd, UiState &st) {
@@ -455,6 +617,7 @@ void syncControlsFromGc(HWND hwnd, UiState &st) {
                                         KeyStringFormat::Portable))
             .c_str());
 
+    syncShuangpinSchemeFromDisk(st);
     SetWindowTextW(st.editProfile, utf8ToWide(readProfileUtf8()).c_str());
 }
 
@@ -574,6 +737,27 @@ bool saveAll(HWND hwnd, UiState &st) {
         return false;
     }
 
+    {
+        RawConfig raw;
+        try {
+            readAsIni(raw, StandardPathsType::PkgConfig,
+                      std::filesystem::path(kPinyinConfigPath));
+        } catch (...) {
+        }
+        const int shuangpinSel = static_cast<int>(
+            SendMessageW(st.comboShuangpin, CB_GETCURSEL, 0, 0));
+        const auto value = shuangpinSchemeValueFromIndex(shuangpinSel);
+        raw.setValueByPath("ShuangpinProfile", value);
+        raw.setValueByPath("Config/ShuangpinProfile", value);
+        if (!safeSaveAsIni(raw, StandardPathsType::PkgConfig,
+                           std::filesystem::path(kPinyinConfigPath))) {
+            MessageBoxW(hwnd, tr(TextId::SavePinyinFailed, st.lang),
+                        tr(TextId::MessageBoxCaption, st.lang), MB_ICONERROR);
+            return false;
+        }
+        persistSharedTrayPinyinReloadRequest();
+    }
+
     std::wstring prof;
     const int plen = GetWindowTextLengthW(st.editProfile);
     prof.resize(static_cast<size_t>(plen + 1), L'\0');
@@ -684,7 +868,16 @@ void applyLanguage(HWND hwnd, UiState &st) {
                    tr(TextId::EnumerateBackwardKeys, st.lang));
     setControlText(hwnd, IDC_LABEL_ENUMGB,
                    tr(TextId::EnumerateGroupBackward, st.lang));
+    setControlText(hwnd, IDC_GROUP_PINYIN, tr(TextId::PinyinConfig, st.lang));
+    setControlText(hwnd, IDC_LABEL_SHUANGPIN,
+                   tr(TextId::ShuangpinScheme, st.lang));
+    reloadShuangpinCombo(st);
+    syncShuangpinSchemeFromDisk(st);
     setControlText(hwnd, IDC_GROUP_PROF, tr(TextId::ProfileRawIni, st.lang));
+    setControlText(hwnd, IDC_LABEL_PROFILE_HINT,
+                   tr(TextId::ProfileEditHint, st.lang));
+    setControlText(hwnd, IDC_BTN_APPLY_POPULAR_PROFILE,
+                   tr(TextId::ApplyRecommendedProfile, st.lang));
     setControlText(hwnd, IDC_BTN_SAVE, tr(TextId::SaveAll, st.lang));
     setControlText(hwnd, IDC_BTN_RELOAD, tr(TextId::ReloadFromDisk, st.lang));
     setControlText(hwnd, IDC_BTN_FOLDER, tr(TextId::OpenConfigFolder, st.lang));
@@ -1150,6 +1343,26 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
           26);
     y += 28;
 
+    label(hwnd, IDC_GROUP_PINYIN, tr(TextId::PinyinConfig, st.lang), 12, y, 500,
+          18);
+    y += 20;
+    label(hwnd, IDC_LABEL_SHUANGPIN, tr(TextId::ShuangpinScheme, st.lang), 12,
+          y + 3, 150, 20);
+    st.comboShuangpin = CreateWindowExW(
+        0, L"COMBOBOX", L"",
+        WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 168, y, 170, 180,
+        hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_SHUANGPIN)), inst,
+        nullptr);
+    setGuiFont(st.comboShuangpin);
+    reloadShuangpinCombo(st);
+    mkBtn(hwnd, IDC_BTN_APPLY_POPULAR_PROFILE,
+          tr(TextId::ApplyRecommendedProfile, st.lang), 346, y - 1, 166, 26);
+    y += 32;
+    label(hwnd, IDC_LABEL_PROFILE_HINT, tr(TextId::ProfileEditHint, st.lang), 12,
+          y, 500, 18);
+    y += 24;
+
     label(hwnd, IDC_GROUP_PROF, tr(TextId::ProfileRawIni, st.lang), 12, y, 500,
           18);
     y += 20;
@@ -1232,6 +1445,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             }
             return 0;
         }
+        if (id == IDC_BTN_APPLY_POPULAR_PROFILE) {
+            SetWindowTextW(st->editProfile,
+                           utf8ToWide(defaultPopularProfileUtf8()).c_str());
+            return 0;
+        }
         const HINSTANCE inst = reinterpret_cast<HINSTANCE>(
             GetWindowLongPtrW(hwnd, GWLP_HINSTANCE));
         if (id == IDC_BTN_REC_TRIG) {
@@ -1286,7 +1504,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     HWND hwnd = CreateWindowExW(
         WS_EX_APPWINDOW, cls, tr(TextId::WindowTitle, g_uiLang),
         WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, CW_USEDEFAULT,
-        CW_USEDEFAULT, 560, 900, nullptr, nullptr, hInst, nullptr);
+        CW_USEDEFAULT, 560, 980, nullptr, nullptr, hInst, nullptr);
     ShowWindow(hwnd, SW_SHOW);
 
     MSG msg{};

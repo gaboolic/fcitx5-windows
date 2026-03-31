@@ -6,11 +6,13 @@
 #include "../tsf/Win32GnuApiCompat.h"
 
 #include <cwchar>
+#include <algorithm>
 #include <filesystem>
 #include <iterator>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -43,6 +45,11 @@ struct TrayStatusActionItem {
     std::string uniqueName;
     std::wstring displayName;
     bool isChecked = false;
+};
+
+struct ShuangpinSchemeOption {
+    const char *value;
+    const wchar_t *menuText;
 };
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
@@ -82,6 +89,20 @@ enum TrayMenuId : UINT {
     IDM_RIME_OPEN_LOG_DIR,
     IDM_STATUS_ACTION_BASE = 0x4200,
     IDM_INPUT_METHOD_BASE = 0x4300,
+    IDM_SHUANGPIN_SCHEME_BASE = 0x4400,
+};
+
+constexpr const wchar_t kPinyinConfigRelativePath[] =
+    L"config\\fcitx5\\conf\\pinyin.conf";
+constexpr ShuangpinSchemeOption kShuangpinSchemes[] = {
+    {"Ziranma", L"自然码 (Ziranma)"},
+    {"MS", L"微软双拼 (MS)"},
+    {"Xiaohe", L"小鹤双拼 (Xiaohe)"},
+    {"Ziguang", L"紫光双拼 (Ziguang)"},
+    {"ABC", L"智能 ABC 双拼 (ABC)"},
+    {"Zhongwenzhixing", L"中文之星 (Zhongwenzhixing)"},
+    {"PinyinJiajia", L"拼音加加 (PinyinJiajia)"},
+    {"Custom", L"自定义 (Custom)"},
 };
 
 HWND g_hwnd = nullptr;
@@ -97,6 +118,86 @@ std::string g_lastCurrentIm;
 POINT g_reopenMenuPoint = {};
 bool g_reopenMenuPending = false;
 bool g_contextMenuShowing = false;
+
+std::filesystem::path portableRoot();
+std::filesystem::path appDataRoot();
+std::string trimAscii(std::string value);
+
+int shuangpinSchemeIndexFromValue(std::string_view value) {
+    for (size_t i = 0; i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]);
+         ++i) {
+        if (value == kShuangpinSchemes[i].value) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
+std::filesystem::path sharedPinyinConfigFile() {
+    const auto roaming = appDataRoot() / kPinyinConfigRelativePath;
+    const auto portable = portableRoot() / kPinyinConfigRelativePath;
+    std::error_code ec;
+    if (std::filesystem::exists(roaming, ec)) {
+        return roaming;
+    }
+    if (std::filesystem::exists(portable, ec)) {
+        return portable;
+    }
+    return roaming;
+}
+
+std::string loadShuangpinSchemeValue() {
+    std::ifstream in(sharedPinyinConfigFile(), std::ios::binary);
+    if (!in.is_open()) {
+        return kShuangpinSchemes[0].value;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        if (line.rfind("ShuangpinProfile=", 0) == 0) {
+            return trimAscii(line.substr(sizeof("ShuangpinProfile=") - 1));
+        }
+    }
+    return kShuangpinSchemes[0].value;
+}
+
+bool saveShuangpinSchemeValue(std::string_view value) {
+    const auto path = sharedPinyinConfigFile();
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ifstream in(path, std::ios::binary);
+    std::vector<std::string> lines;
+    std::string line;
+    bool replaced = false;
+    bool hasConfigSection = false;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line == "[Config]") {
+            hasConfigSection = true;
+        }
+        if (line.rfind("ShuangpinProfile=", 0) == 0) {
+            line = "ShuangpinProfile=" + std::string(value);
+            replaced = true;
+        }
+        lines.push_back(line);
+    }
+    in.close();
+    if (!replaced) {
+        if (!hasConfigSection) {
+            lines.push_back("[Config]");
+        }
+        lines.push_back("ShuangpinProfile=" + std::string(value));
+    }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    for (const auto &entry : lines) {
+        out << entry << "\r\n";
+    }
+    return static_cast<bool>(out);
+}
 
 struct TrayServiceState {
     /// TSF **Ui** message received (engine tray visibility).
@@ -211,6 +312,17 @@ std::string wideToUtf8(const std::wstring &wide) {
     return utf8;
 }
 
+std::string trimAscii(std::string value) {
+    auto notSpace = [](unsigned char ch) {
+        return ch != ' ' && ch != '\t' && ch != '\r' && ch != '\n';
+    };
+    value.erase(value.begin(),
+                std::find_if(value.begin(), value.end(), notSpace));
+    value.erase(std::find_if(value.rbegin(), value.rend(), notSpace).base(),
+                value.end());
+    return value;
+}
+
 std::filesystem::path helperExePath() {
     WCHAR exePath[MAX_PATH] = {};
     if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
@@ -320,6 +432,10 @@ std::filesystem::path sharedTrayStatusActionRequestFile() {
     return appDataRoot() / L"pending-tray-status-action.txt";
 }
 
+std::filesystem::path sharedTrayPinyinReloadRequestFile() {
+    return appDataRoot() / L"pending-tray-pinyin-reload.txt";
+}
+
 std::filesystem::path sharedTrayStatusActionStateFile() {
     return appDataRoot() / L"current-tray-status-actions.txt";
 }
@@ -422,6 +538,10 @@ void persistSharedTrayStatusActionRequest(const std::string &uniqueName) {
         writeSharedTrayTextFile(sharedTrayStatusActionRequestFile(),
                                 uniqueName);
     }
+}
+
+void persistSharedTrayPinyinReloadRequest() {
+    writeSharedTrayTextFile(sharedTrayPinyinReloadRequestFile(), "1");
 }
 
 std::vector<TrayStatusActionItem> readSharedTrayStatusActions() {
@@ -651,6 +771,8 @@ std::string trayMenuCommandName(UINT cmd) {
         return "punctuation_chinese";
     case IDM_PUNCTUATION_ENGLISH:
         return "punctuation_english";
+    case IDM_SETTINGS_GUI:
+        return "settings_gui";
     case IDM_OPEN_CONFIG_DIR:
         return "open_config_dir";
     case IDM_OPEN_LOG_DIR:
@@ -662,6 +784,11 @@ std::string trayMenuCommandName(UINT cmd) {
     case IDM_RIME_OPEN_LOG_DIR:
         return "rime_open_log_dir";
     default:
+        if (cmd >= IDM_SHUANGPIN_SCHEME_BASE &&
+            cmd < IDM_SHUANGPIN_SCHEME_BASE +
+                      (sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]))) {
+            return "shuangpin_scheme";
+        }
         if (cmd >= IDM_INPUT_METHOD_BASE) {
             return "input_method_index";
         }
@@ -791,6 +918,9 @@ std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
     if (item.uniqueName == "pinyin") {
         return L"\x62fc\x97f3";
     }
+    if (item.uniqueName == "shuangpin") {
+        return L"\x53cc\x62fc";
+    }
     if (item.uniqueName == "wbx") {
         return L"\x4e94\x7b14\x5b57\x578b";
     }
@@ -850,6 +980,41 @@ bool launchDetachedProcess(const std::wstring &application,
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
     return true;
+}
+
+std::vector<wchar_t> buildEnvironmentWithGlogLogDir(
+    const std::wstring &glogLogDir) {
+    if (glogLogDir.empty()) {
+        return {};
+    }
+    LPWCH envBlock = GetEnvironmentStringsW();
+    if (!envBlock) {
+        return {};
+    }
+    std::vector<std::wstring> entries;
+    for (const wchar_t *cursor = envBlock; *cursor;) {
+        std::wstring entry(cursor);
+        cursor += entry.size() + 1;
+        if (entry.rfind(L"GLOG_log_dir=", 0) == 0) {
+            continue;
+        }
+        entries.push_back(std::move(entry));
+    }
+    FreeEnvironmentStringsW(envBlock);
+    entries.push_back(L"GLOG_log_dir=" + glogLogDir);
+
+    size_t totalChars = 1;
+    for (const auto &entry : entries) {
+        totalChars += entry.size() + 1;
+    }
+    std::vector<wchar_t> block;
+    block.reserve(totalChars);
+    for (const auto &entry : entries) {
+        block.insert(block.end(), entry.begin(), entry.end());
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
 }
 
 void launchSettingsGui() {
@@ -1244,10 +1409,13 @@ bool launchRimeDeployWithNotification() {
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
+    auto env = buildEnvironmentWithGlogLogDir(fcitx5LogDir().wstring());
     const auto cwdString = deployer.parent_path().wstring();
     const wchar_t *cwd = cwdString.empty() ? nullptr : cwdString.c_str();
-    if (!CreateProcessW(nullptr, buffer.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, cwd, &si, &pi)) {
+    const DWORD flags =
+        CREATE_NO_WINDOW | (env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
+    if (!CreateProcessW(nullptr, buffer.data(), nullptr, nullptr, FALSE, flags,
+                        env.empty() ? nullptr : env.data(), cwd, &si, &pi)) {
         showTrayBalloon(L"\x4e2d\x5dde\x97f5\x90e8\x7f72",
                         L"\x9519\x8bef\xff1a\x542f\x52a8\x90e8\x7f72\x5de5"
                         L"\x5177\x5931\x8d25",
@@ -1291,12 +1459,15 @@ void showContextMenu() {
             " profileItems=" +
             std::to_string(static_cast<unsigned long>(profileItems.size())));
         bool currentIsRime = false;
+        bool currentIsShuangpin = g_trayState.currentInputMethod == "shuangpin";
         for (const auto &item : profileItems) {
             if (item.isCurrent && item.uniqueName == "rime") {
                 currentIsRime = true;
-                break;
             }
         }
+        trayHelperTrace("showContextMenu current=" + g_trayState.currentInputMethod +
+                        " currentIsShuangpin=" +
+                        std::string(currentIsShuangpin ? "true" : "false"));
 
         HMENU menu = CreatePopupMenu();
         if (!menu) {
@@ -1382,6 +1553,29 @@ void showContextMenu() {
                                     .c_str());
                 }
             }
+            if (currentIsShuangpin) {
+                const int currentSchemeIndex =
+                    shuangpinSchemeIndexFromValue(loadShuangpinSchemeValue());
+                HMENU shuangpinMenu = CreatePopupMenu();
+                if (shuangpinMenu) {
+                    for (size_t i = 0;
+                         i < sizeof(kShuangpinSchemes) /
+                                  sizeof(kShuangpinSchemes[0]);
+                         ++i) {
+                        AppendMenuW(shuangpinMenu,
+                                    MF_STRING |
+                                        (static_cast<int>(i) == currentSchemeIndex
+                                             ? MF_CHECKED
+                                             : 0),
+                                    IDM_SHUANGPIN_SCHEME_BASE +
+                                        static_cast<UINT>(i),
+                                    kShuangpinSchemes[i].menuText);
+                    }
+                    AppendMenuW(statusMenu, MF_POPUP,
+                                reinterpret_cast<UINT_PTR>(shuangpinMenu),
+                                L"\x53cc\x62fc\x65b9\x6848");
+                }
+            }
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(statusMenu),
                         L"\x8f93\x5165\x72b6\x6001");
         }
@@ -1420,6 +1614,8 @@ void showContextMenu() {
         }
 
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI,
+                    L"Fcitx5 \x8bbe\x7f6e...");
         AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR,
                     L"\x6253\x5f00\x914d\x7f6e\x6587\x4ef6\x5939");
         AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR,
@@ -1507,6 +1703,9 @@ void showContextMenu() {
         case IDM_OPEN_CONFIG_DIR:
             exploreUserFcitxConfig();
             return;
+        case IDM_SETTINGS_GUI:
+            launchSettingsGui();
+            return;
         case IDM_OPEN_LOG_DIR:
             exploreFcitx5LogDir();
             return;
@@ -1520,10 +1719,39 @@ void showContextMenu() {
             exploreRimeLogDir();
             return;
         }
+        if (cmd >= IDM_SHUANGPIN_SCHEME_BASE &&
+            cmd < IDM_SHUANGPIN_SCHEME_BASE +
+                      (sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]))) {
+            const auto index = cmd - IDM_SHUANGPIN_SCHEME_BASE;
+            const bool ok = saveShuangpinSchemeValue(kShuangpinSchemes[index].value);
+            if (ok) {
+                persistSharedTrayPinyinReloadRequest();
+            }
+            trayHelperTrace(std::string(ok ? "saved" : "failed") +
+                            " shuangpin scheme=" +
+                            kShuangpinSchemes[index].value);
+            refreshTrayState();
+            return;
+        }
         if (reopenMenu) {
             trayHelperTrace("showContextMenu reopen disabled for stability");
         }
         return;
+    }
+}
+
+void deferContextMenuOpen() {
+    if (g_reopenMenuPending) {
+        return;
+    }
+    GetCursorPos(&g_reopenMenuPoint);
+    g_reopenMenuPending = true;
+    trayHelperTrace(
+        "tray context menu deferred via PostMessage for shell foreground");
+    if (!PostMessageW(g_hwnd, kReopenContextMenuMessage, 0, 0)) {
+        trayHelperTrace(
+            "tray context menu defer PostMessage failed; opening inline");
+        showContextMenu();
     }
 }
 
@@ -1621,6 +1849,11 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             s_lastContextMenuTick = now;
+            updateForegroundTrayValidityState();
+            if (g_foregroundTrayValidity.foregroundIsShellOrHelper) {
+                deferContextMenuOpen();
+                return 0;
+            }
             showContextMenu();
         }
         return 0;
@@ -1631,6 +1864,9 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     switch (msg) {
+    case kReopenContextMenuMessage:
+        showContextMenu();
+        return 0;
     case WM_COPYDATA:
         if (handleTrayServiceCopyData(
                 reinterpret_cast<const COPYDATASTRUCT *>(lp))) {

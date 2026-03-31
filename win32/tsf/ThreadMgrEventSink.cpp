@@ -50,6 +50,7 @@ STDMETHODIMP Tsf::OnSetFocus(ITfDocumentMgr *pDocMgrFocus,
         sharedTrayFocusSchedulePending_ = false;
         scheduleSharedTrayChineseModeRequest();
         scheduleSharedTrayStatusActionRequest();
+        scheduleSharedTrayPinyinReloadRequest();
     } else {
         sharedTrayFocusSchedulePending_ = true;
     }
@@ -64,6 +65,7 @@ void Tsf::flushSharedTrayScheduleFromFocusIfPending() {
     sharedTrayFocusScheduleTick_ = GetTickCount64();
     scheduleSharedTrayChineseModeRequest();
     scheduleSharedTrayStatusActionRequest();
+    scheduleSharedTrayPinyinReloadRequest();
 }
 
 STDMETHODIMP Tsf::OnPushContext(ITfContext *pContext) { return S_OK; }
