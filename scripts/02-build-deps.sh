@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Step 2 — 依赖链：libime → fcitx5-chinese-addons → 可选 table-extra / rime / lua（同一 STAGE）。
+# Step 2 — 依赖链：libime → 可选 lua → fcitx5-chinese-addons → 可选 table-extra / rime（同一 STAGE）。
 # 默认先执行 fcitx5-windows 安装到 STAGE。若已用 PowerShell 跑过 01-build-fcitx5-windows.ps1 装入同一 STAGE，可 export SKIP_FCITX_WINDOWS=1 跳过本节。
 # 默认 CMAKE_BUILD_TYPE 与 01-build-fcitx5-windows.ps1 一致为 Release；RelWithDebInfo 会令 libFcitx5Core / libfcitx5-x86_64 等体积显著变大。可 export CMAKE_BUILD_TYPE=RelWithDebInfo 覆盖。
 # 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
@@ -334,36 +334,6 @@ ensure_libime_tool_names() {
 }
 ensure_libime_tool_names
 
-echo "==> [3/3] fcitx5-chinese-addons"
-# Stale build.ninja can keep old paths / deps from a previous failed run (e.g. self-hosted or retried step).
-rm -rf "$CHINESE_BUILD"
-cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
-  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-  -DCMAKE_INSTALL_PREFIX="$STAGE" \
-  -DCMAKE_PREFIX_PATH="$STAGE" \
-  -DENABLE_GUI=OFF \
-  -DENABLE_OPENCC=OFF \
-  -DENABLE_BROWSER=OFF \
-  -DENABLE_CLOUDPINYIN=OFF \
-  -DENABLE_TEST=OFF
-cmake --build "$CHINESE_BUILD" -j"$JOBS"
-cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
-
-# --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
-if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
-  echo "==> [4] fcitx5-table-extra"
-  rm -rf "$TABLE_EXTRA_BUILD"
-  cmake -S "$TABLE_EXTRA_SRC" -B "$TABLE_EXTRA_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$STAGE" \
-    -DCMAKE_PREFIX_PATH="$STAGE"
-  cmake --build "$TABLE_EXTRA_BUILD" -j"$JOBS"
-  cmake --install "$TABLE_EXTRA_BUILD" --prefix "$STAGE"
-else
-  echo "==> skip fcitx5-table-extra (TABLE_EXTRA_SRC not set or missing CMakeLists.txt)"
-fi
-
-# --- Optional: fcitx5-rime (needs MSYS2 librime + rime-data; runtime DLLs from Clang64 bin) ---
 mingw_dll_source_bin() {
   if [[ -d /clang64/bin ]]; then
     echo /clang64/bin
@@ -416,6 +386,80 @@ mingw_package_prefix() {
   fi
 }
 
+native_path() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+copy_lua_runtime_dlls() {
+  local _bin
+  _bin="$(mingw_dll_source_bin)"
+  [[ -n "$_bin" ]] || return 0
+  mkdir -p "$STAGE/bin"
+  local _f
+  shopt -s nullglob
+  for _f in "$_bin"/liblua-*.dll "$_bin"/liblua.dll "$_bin"/lua5*.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  shopt -u nullglob
+}
+
+# --- Optional: fcitx5-lua (build before chinese-addons so pinyin.lua is installed) ---
+if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
+  echo "==> [3] fcitx5-lua"
+  if [[ $_is_msys -eq 1 ]] && command -v pkg-config >/dev/null 2>&1 && ! pkg-config --exists lua 2>/dev/null; then
+    echo "warning: pkg-config module 'lua' not found; skip fcitx5-lua (optional addon)." >&2
+    echo "  MSYS2 CLANG64: pacman -S mingw-w64-clang-x86_64-lua" >&2
+  else
+    rm -rf "$LUA_BUILD"
+    cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
+      -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+      -DCMAKE_INSTALL_PREFIX="$STAGE" \
+      -DCMAKE_PREFIX_PATH="$STAGE" \
+      -DENABLE_TEST=OFF
+    cmake --build "$LUA_BUILD" -j"$JOBS"
+    cmake --install "$LUA_BUILD" --prefix "$STAGE"
+    copy_lua_runtime_dlls
+  fi
+else
+  echo "==> skip fcitx5-lua (LUA_SRC not set or missing CMakeLists.txt)"
+fi
+
+echo "==> [4] fcitx5-chinese-addons"
+# Stale build.ninja can keep old paths / deps from a previous failed run (e.g. self-hosted or retried step).
+rm -rf "$CHINESE_BUILD"
+cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
+  -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+  -DCMAKE_INSTALL_PREFIX="$STAGE" \
+  -DCMAKE_PREFIX_PATH="$STAGE" \
+  -DENABLE_GUI=OFF \
+  -DENABLE_OPENCC=OFF \
+  -DENABLE_BROWSER=OFF \
+  -DENABLE_CLOUDPINYIN=OFF \
+  -DENABLE_TEST=OFF
+cmake --build "$CHINESE_BUILD" -j"$JOBS"
+cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
+
+# --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
+if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
+  echo "==> [5] fcitx5-table-extra"
+  rm -rf "$TABLE_EXTRA_BUILD"
+  cmake -S "$TABLE_EXTRA_SRC" -B "$TABLE_EXTRA_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="$STAGE"
+  cmake --build "$TABLE_EXTRA_BUILD" -j"$JOBS"
+  cmake --install "$TABLE_EXTRA_BUILD" --prefix "$STAGE"
+else
+  echo "==> skip fcitx5-table-extra (TABLE_EXTRA_SRC not set or missing CMakeLists.txt)"
+fi
+
+# --- Optional: fcitx5-rime (needs MSYS2 librime + rime-data; runtime DLLs from Clang64 bin) ---
+
 download_runtime_package() {
   local url="$1" dest="$2"
   mkdir -p "$(dirname "$dest")"
@@ -433,15 +477,6 @@ download_runtime_package() {
   else
     echo "error: no downloader available (need curl, wget, or powershell.exe) for $url" >&2
     exit 1
-  fi
-}
-
-native_path() {
-  local p="$1"
-  if command -v cygpath >/dev/null 2>&1; then
-    cygpath -m "$p"
-  else
-    printf '%s\n' "$p"
   fi
 }
 
@@ -752,19 +787,6 @@ copy_librime_dlls_from_msys() {
   shopt -u nullglob
 }
 
-copy_lua_runtime_dlls() {
-  local _bin
-  _bin="$(mingw_dll_source_bin)"
-  [[ -n "$_bin" ]] || return 0
-  mkdir -p "$STAGE/bin"
-  local _f
-  shopt -s nullglob
-  for _f in "$_bin"/liblua-*.dll "$_bin"/liblua.dll "$_bin"/lua5*.dll; do
-    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
-  done
-  shopt -u nullglob
-}
-
 generate_rime_pc() {
   local _version="$1" _prefix_native
   _prefix_native="$(native_path "$STAGE")"
@@ -831,7 +853,7 @@ verify_librime_in_stage() {
 }
 
 if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
-  echo "==> [5] fcitx5-rime"
+  echo "==> [6] fcitx5-rime"
   if ! vendor_rime_share_into_stage; then
     echo "error: rime-data missing under stage and not found under /clang64 or /mingw64." >&2
     echo "  Install: pacman -S mingw-w64-clang-x86_64-librime-data (CLANG64; replaces old rime-data)" >&2
@@ -849,27 +871,6 @@ if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
   cmake --install "$RIME_BUILD" --prefix "$STAGE"
 else
   echo "==> skip fcitx5-rime (RIME_SRC not set or missing CMakeLists.txt)"
-fi
-
-# --- Optional: fcitx5-lua (addon luaaddonloader; default USE_DLOPEN — ship liblua*.dll in bin) ---
-if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
-  echo "==> [6] fcitx5-lua"
-  if [[ $_is_msys -eq 1 ]] && command -v pkg-config >/dev/null 2>&1 && ! pkg-config --exists lua 2>/dev/null; then
-    echo "warning: pkg-config module 'lua' not found; skip fcitx5-lua (optional addon)." >&2
-    echo "  MSYS2 CLANG64: pacman -S mingw-w64-clang-x86_64-lua" >&2
-  else
-    rm -rf "$LUA_BUILD"
-    cmake -S "$LUA_SRC" -B "$LUA_BUILD" -G Ninja \
-      -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-      -DCMAKE_INSTALL_PREFIX="$STAGE" \
-      -DCMAKE_PREFIX_PATH="$STAGE" \
-      -DENABLE_TEST=OFF
-    cmake --build "$LUA_BUILD" -j"$JOBS"
-    cmake --install "$LUA_BUILD" --prefix "$STAGE"
-    copy_lua_runtime_dlls
-  fi
-else
-  echo "==> skip fcitx5-lua (LUA_SRC not set or missing CMakeLists.txt)"
 fi
 
 # MinGW produces libpinyin.dll (matches Library=libpinyin in pinyin.conf); MSVC layouts may use pinyin.dll.
