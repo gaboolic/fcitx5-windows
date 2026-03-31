@@ -469,18 +469,16 @@ int shuangpinSchemeIndexFromValue(std::string_view value) {
 }
 
 std::string shuangpinSchemeValueFromIndex(int index) {
-    if (index < 0 ||
-        index >= static_cast<int>(sizeof(kShuangpinSchemes) /
-                                  sizeof(kShuangpinSchemes[0]))) {
+    if (index < 0 || index >= static_cast<int>(sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]))) {
         return kShuangpinSchemes[0].value;
     }
     return kShuangpinSchemes[index].value;
 }
 
 const wchar_t *shuangpinSchemeLabel(int index, UiLang lang) {
-    if (index < 0 ||
-        index >= static_cast<int>(sizeof(kShuangpinSchemes) /
-                                  sizeof(kShuangpinSchemes[0]))) {
+    if (index < 0 || index >= static_cast<int>(sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]))) {
         index = 0;
     }
     return lang == UiLang::ZhCN ? kShuangpinSchemes[index].zhText
@@ -524,9 +522,8 @@ void reloadShuangpinCombo(UiState &st) {
     const LRESULT currentSel =
         SendMessageW(st.comboShuangpin, CB_GETCURSEL, 0, 0);
     SendMessageW(st.comboShuangpin, CB_RESETCONTENT, 0, 0);
-    for (int i = 0;
-         i < static_cast<int>(sizeof(kShuangpinSchemes) /
-                              sizeof(kShuangpinSchemes[0]));
+    for (int i = 0; i < static_cast<int>(sizeof(kShuangpinSchemes) /
+                                         sizeof(kShuangpinSchemes[0]));
          ++i) {
         SendMessageW(
             st.comboShuangpin, CB_ADDSTRING, 0,
@@ -1352,7 +1349,8 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     st.comboShuangpin = CreateWindowExW(
         0, L"COMBOBOX", L"",
         WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST | WS_VSCROLL, 168, y, 170, 180,
-        hwnd, reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_SHUANGPIN)),
+        hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_COMBO_SHUANGPIN)),
         inst, nullptr);
     setGuiFont(st.comboShuangpin);
     reloadShuangpinCombo(st);
