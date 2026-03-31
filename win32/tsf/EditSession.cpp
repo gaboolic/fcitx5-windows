@@ -59,10 +59,9 @@ std::string tsfWideToUtf8(const std::wstring &text) {
     if (text.empty()) {
         return {};
     }
-    const int size =
-        WideCharToMultiByte(CP_UTF8, 0, text.data(),
-                            static_cast<int>(text.size()), nullptr, 0, nullptr,
-                            nullptr);
+    const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(),
+                                         static_cast<int>(text.size()), nullptr,
+                                         0, nullptr, nullptr);
     if (size <= 0) {
         return {};
     }
@@ -1149,12 +1148,13 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     const UINT vk = static_cast<UINT>(wp);
     const bool traceLatinO = (vk == 'O');
     if (traceLatinO) {
-        tsfTrace(std::string("o-runKeyEditSession enter release=") +
-                 (isRelease ? "true" : "false") + " chineseActive=" +
-                 (chineseActive_ ? "true" : "false") + " ctrlAlt=" +
-                 (tsfChordHasCtrlOrAlt() ? "true" : "false") + " preedit=" +
-                 tsfWideToUtf8(engine_->preedit()) + " candidateCount=" +
-                 std::to_string(engine_->candidates().size()));
+        tsfTrace(
+            std::string("o-runKeyEditSession enter release=") +
+            (isRelease ? "true" : "false") +
+            " chineseActive=" + (chineseActive_ ? "true" : "false") +
+            " ctrlAlt=" + (tsfChordHasCtrlOrAlt() ? "true" : "false") +
+            " preedit=" + tsfWideToUtf8(engine_->preedit()) +
+            " candidateCount=" + std::to_string(engine_->candidates().size()));
     }
     if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
@@ -1332,10 +1332,8 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         afterFcitxEngineKey(ec);
         if (traceLatinO) {
             tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
-                     tsfWideToUtf8(engine_->preedit()) +
-                     " candidateCount=" +
-                     std::to_string(engine_->candidates().size()) +
-                     " top0=" +
+                     tsfWideToUtf8(engine_->preedit()) + " candidateCount=" +
+                     std::to_string(engine_->candidates().size()) + " top0=" +
                      (engine_->candidates().empty()
                           ? std::string()
                           : tsfWideToUtf8(engine_->candidateText(0))));

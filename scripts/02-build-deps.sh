@@ -444,6 +444,32 @@ cmake -S "$CHINESE_SRC" -B "$CHINESE_BUILD" -G Ninja \
 cmake --build "$CHINESE_BUILD" -j"$JOBS"
 cmake --install "$CHINESE_BUILD" --prefix "$STAGE"
 
+normalize_windows_libime_table_paths() {
+  local _inputmethod_dir="$STAGE/share/fcitx5/inputmethod"
+  local _conf
+  [[ -d "$_inputmethod_dir" ]] || return 0
+  # These configs point at libime-installed dictionaries under share/libime.
+  # On Windows, the generated File= entry may contain the absolute build-stage
+  # path, which breaks installed packages on other machines. Re-anchor them
+  # relative to share/fcitx5/inputmethod/.
+  shopt -s nullglob
+  for _conf in \
+    "$_inputmethod_dir"/cangjie.conf \
+    "$_inputmethod_dir"/db.conf \
+    "$_inputmethod_dir"/erbi.conf \
+    "$_inputmethod_dir"/qxm.conf \
+    "$_inputmethod_dir"/wanfeng.conf \
+    "$_inputmethod_dir"/wbpy.conf \
+    "$_inputmethod_dir"/wbx.conf \
+    "$_inputmethod_dir"/zrm.conf; do
+    [[ -f "$_conf" ]] || continue
+    sed -E -i 's#^File=.*/([^/]+\.main\.dict)$#File=../libime/\1#' "$_conf"
+  done
+  shopt -u nullglob
+}
+
+normalize_windows_libime_table_paths
+
 # --- Optional: fcitx5-table-extra (extra table IMs / dicts; needs LibIMETable from stage) ---
 if [[ -f "$TABLE_EXTRA_SRC/CMakeLists.txt" ]]; then
   echo "==> [5] fcitx5-table-extra"

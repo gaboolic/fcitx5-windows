@@ -81,7 +81,7 @@ jobs:
           cmake --build (Join-Path $root 'build')
 
   # Installer stage = libime + chinese-addons + table-extra + rime + lua (MSYS2: prebuilt librime + librime-data, lua). scripts/01-build-fcitx5-windows.ps1 is core-only.
-  # This job runs scripts/02-build-deps.sh (see docs/PINYIN_WINDOWS.md, installer/README.txt).
+  # This job runs scripts/02-build-deps.ps1 + scripts/03-build-installer.ps1 (see docs/PINYIN_WINDOWS.md, installer/README.txt).
   package-fcitx5-tsf-installer:
     needs: lint
     runs-on: windows-2025
@@ -90,7 +90,7 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install dependencies (CLANG64 + Boost for libime)
+      - name: Prepare MSYS2 CLANG64 environment
         run: |
           C:/msys64/usr/bin/pacman -Syu --noconfirm
           C:/msys64/usr/bin/pacman -S --noconfirm `
@@ -120,41 +120,9 @@ jobs:
           cp -r windows-cross/its C:/msys64/usr/share/gettext
           Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
           Add-Content $env:GITHUB_PATH "C:/msys64/usr/bin"
+          choco install imagemagick innosetup -y --no-progress
 
-      - name: Install ImageMagick (win32 penguin.ico)
-        run: choco install imagemagick -y --no-progress
-
-      - name: Install Inno Setup 6
-        run: choco install innosetup -y --no-progress
-
-      - name: Clone libime, chinese-addons, table-extra, rime, lua (librime = MSYS2 pacman prebuilt)
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $root = $env:GITHUB_WORKSPACE
-          $repos = @(
-            @{ name = 'libime'; url = 'https://github.com/fcitx/libime.git' },
-            @{ name = 'fcitx5-chinese-addons'; url = 'https://github.com/fcitx/fcitx5-chinese-addons.git' },
-            @{ name = 'fcitx5-table-extra'; url = 'https://github.com/fcitx/fcitx5-table-extra.git' },
-            @{ name = 'fcitx5-lua'; url = 'https://github.com/fcitx/fcitx5-lua.git' }
-          )
-          foreach ($r in $repos) {
-            $dest = Join-Path $root $r.name
-            if (Test-Path -LiteralPath $dest) { Remove-Item -LiteralPath $dest -Recurse -Force }
-            git clone --depth 1 $r.url $dest
-          }
-          $rime = Join-Path $root 'fcitx5-rime'
-          if (Test-Path -LiteralPath $rime) { Remove-Item -LiteralPath $rime -Recurse -Force }
-          git clone --depth 1 --branch 5.1.13 https://github.com/fcitx/fcitx5-rime.git $rime
-          $libime = Join-Path $root 'libime'
-          Push-Location $libime
-          try {
-            git submodule update --init --recursive
-          } finally {
-            Pop-Location
-          }
-
-      - name: Build stage (02-build-deps.sh → stage-installer)
+      - name: Build stage (02-build-deps.ps1 -> stage-installer)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -163,72 +131,27 @@ jobs:
             Write-Error "cygpath not found: $cygpath"
           }
           $wsUnix = (& $cygpath -u $env:GITHUB_WORKSPACE).Trim()
-          $env:CI_WS_UNIX = $wsUnix
-          $runnerSh = Join-Path $env:RUNNER_TEMP 'ci-pinyin-stage.sh'
-          $bashLines = @(
-            'set -euo pipefail',
-            'export PATH="/clang64/bin:/usr/bin:$PATH"',
-            'export MSYSTEM=CLANG64',
-            'cd "$CI_WS_UNIX"',
-            'export STAGE="$CI_WS_UNIX/stage-installer"',
-            'export FCITX_BUILD="$CI_WS_UNIX/build-portable-ci"',
-            'export LIBIME_SRC="$CI_WS_UNIX/libime"',
-            'export CHINESE_SRC="$CI_WS_UNIX/fcitx5-chinese-addons"',
-            'export TABLE_EXTRA_SRC="$CI_WS_UNIX/fcitx5-table-extra"',
-            'export RIME_SRC="$CI_WS_UNIX/fcitx5-rime"',
-            'export LUA_SRC="$CI_WS_UNIX/fcitx5-lua"',
-            'export LIBIME_BUILD=/tmp/fcitx5-pinyin-libime',
-            'export CHINESE_BUILD=/tmp/fcitx5-pinyin-chinese',
-            'export TABLE_EXTRA_BUILD=/tmp/fcitx5-pinyin-table-extra',
-            'export RIME_BUILD=/tmp/fcitx5-pinyin-rime',
-            'export LUA_BUILD=/tmp/fcitx5-pinyin-lua',
-            'export CMAKE_BUILD_TYPE=Release',
-            'export JOBS=8',
-            'exec ./scripts/02-build-deps.sh \',
-            '  -DCMAKE_C_COMPILER=/clang64/bin/clang.exe \',
-            '  -DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe'
-          )
-          $utf8NoBom = New-Object System.Text.UTF8Encoding $false
-          [System.IO.File]::WriteAllText($runnerSh, (($bashLines -join "`n") + "`n"), $utf8NoBom)
-          & C:/msys64/usr/bin/bash.exe -e $runnerSh
-          $stage = Join-Path $env:GITHUB_WORKSPACE 'stage-installer'
-          $addonDir = Join-Path $stage 'lib\fcitx5'
-          $pinyinDll = Join-Path $addonDir 'libpinyin.dll'
-          $pinyinDllAlt = Join-Path $addonDir 'pinyin.dll'
-          if (-not (Test-Path -LiteralPath $pinyinDll) -and -not (Test-Path -LiteralPath $pinyinDllAlt)) {
-            Write-Host '--- lib/fcitx5 ---'
-            Get-ChildItem -LiteralPath $addonDir -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-            Write-Host '--- *pinyin*.dll under stage-installer ---'
-            Get-ChildItem -LiteralPath $stage -Recurse -Filter '*pinyin*.dll' -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
-            Write-Error 'stage-installer/lib/fcitx5/libpinyin.dll (or pinyin.dll) missing — see listing above. On MSYS2 the addon is almost always libpinyin.dll (not pinyin.dll); an older workflow that only checked pinyin.dll would fail spuriously.'
-          }
-          $rimeDll = Join-Path $addonDir 'librime.dll'
-          $rimeDllAlt = Join-Path $addonDir 'rime.dll'
-          if (-not (Test-Path -LiteralPath $rimeDll) -and -not (Test-Path -LiteralPath $rimeDllAlt)) {
-            Write-Error 'stage-installer/lib/fcitx5/librime.dll (or rime.dll) missing — fcitx5-rime stage failed'
-          }
-          $rimeData = Join-Path $stage 'share\rime-data'
-          if (-not (Test-Path -LiteralPath $rimeData)) {
-            Write-Error 'stage-installer/share/rime-data missing — rime-data not vendored into stage'
-          }
-          $luaAddon = Join-Path $addonDir 'libluaaddonloader.dll'
-          $luaAddonAlt = Join-Path $addonDir 'luaaddonloader.dll'
-          if (-not (Test-Path -LiteralPath $luaAddon) -and -not (Test-Path -LiteralPath $luaAddonAlt)) {
-            Write-Error 'stage-installer/lib/fcitx5/libluaaddonloader.dll (or luaaddonloader.dll) missing — fcitx5-lua stage failed'
-          }
-          $luaDll = Get-ChildItem -LiteralPath (Join-Path $stage 'bin') -Filter 'liblua*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
-          if (-not $luaDll) {
-            $luaDll = Get-ChildItem -LiteralPath (Join-Path $stage 'bin') -Filter 'lua5*.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
-          }
-          if (-not $luaDll) {
-            Write-Error 'stage-installer/bin missing liblua*.dll or lua5*.dll — copy_lua_runtime_dlls did not find MSYS2 Lua'
-          }
+          $env:STAGE = "$wsUnix/stage-installer"
+          $env:FCITX_BUILD = "$wsUnix/build-portable-ci"
+          $env:LIBIME_SRC = "$wsUnix/libime"
+          $env:LIBIME_TAG = '1.1.14'
+          $env:CHINESE_SRC = "$wsUnix/fcitx5-chinese-addons"
+          $env:CHINESE_ADDONS_TAG = '5.1.12'
+          $env:TABLE_EXTRA_SRC = "$wsUnix/fcitx5-table-extra"
+          $env:TABLE_EXTRA_TAG = '5.1.11'
+          $env:RIME_SRC = "$wsUnix/fcitx5-rime"
+          $env:LUA_SRC = "$wsUnix/fcitx5-lua"
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/02-build-deps.ps1') `
+            -BashArgs @(
+              '-DCMAKE_C_COMPILER=/clang64/bin/clang.exe',
+              '-DCMAKE_CXX_COMPILER=/clang64/bin/clang++.exe'
+            )
 
-      - name: Build TSF installer (fcitx5-windows-setup.exe)
+      - name: Build TSF installer (03-build-installer.ps1)
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          & (Join-Path $env:GITHUB_WORKSPACE 'installer/build-installer.ps1') `
+          & (Join-Path $env:GITHUB_WORKSPACE 'scripts/03-build-installer.ps1') `
             -StageDir (Join-Path $env:GITHUB_WORKSPACE 'stage-installer')
 
       - name: Upload TSF installer artifact

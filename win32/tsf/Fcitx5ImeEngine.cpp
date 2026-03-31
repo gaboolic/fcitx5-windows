@@ -166,7 +166,8 @@ std::wstring trayStatusActionLabel(std::string_view actionName, bool checked) {
 bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
 
 /** User env from "System Properties" is in HKCU\\Environment; child processes
- * only see it after explorer restarts. Read registry here so set-fcitx-ts-disable-rime.ps1 works immediately. */
+ * only see it after explorer restarts. Read registry here so
+ * set-fcitx-ts-disable-rime.ps1 works immediately. */
 bool userPersistentEnvWideTruthy(const wchar_t *valueName) {
     wchar_t buf[64];
     DWORD size = sizeof(buf);
@@ -242,8 +243,9 @@ struct InstanceArgv {
 };
 
 bool shouldDisableRimeForCurrentHost() {
-    // Rime loads native librime / deps; mis-matched DLLs or broken deploy can AV
-    // the host. FCITX_TS_DISABLE_RIME=1 (process env or HKCU\Environment) adds
+    // Rime loads native librime / deps; mis-matched DLLs or broken deploy can
+    // AV the host. FCITX_TS_DISABLE_RIME=1 (process env or HKCU\Environment)
+    // adds
     // --disable=rime for diagnosis (pinyin/table still work).
     if (disableRimeDueToUserEnvOrRegistry()) {
         return true;
@@ -687,11 +689,12 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
         if (disableRimeForHost) {
             if (disableRimeDueToUserEnvOrRegistry()) {
-                tsfTrace("Fcitx5ImeEngine::init disabling rime (FCITX_TS_DISABLE_"
-                         "RIME env or HKCU\\\\Environment)");
-            } else {
                 tsfTrace(
-                    "Fcitx5ImeEngine::init disabling rime addon for risky host");
+                    "Fcitx5ImeEngine::init disabling rime (FCITX_TS_DISABLE_"
+                    "RIME env or HKCU\\\\Environment)");
+            } else {
+                tsfTrace("Fcitx5ImeEngine::init disabling rime addon for risky "
+                         "host");
             }
         }
         InstanceArgv instanceArgv(disableRimeForHost);
@@ -1011,7 +1014,12 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
            << " preeditWide=" << preeditWide_.size()
            << " candidatesWide=" << candidatesWide_.size();
         if (!candidatesWide_.empty()) {
-            ss << " top0=" << ic_->inputPanel().candidateList()->candidate(0).text().toString();
+            ss << " top0="
+               << ic_->inputPanel()
+                      .candidateList()
+                      ->candidate(0)
+                      .text()
+                      .toString();
         }
         tsfTrace(ss.str());
     }

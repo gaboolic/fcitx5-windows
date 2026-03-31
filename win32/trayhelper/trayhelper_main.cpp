@@ -124,8 +124,8 @@ std::filesystem::path appDataRoot();
 std::string trimAscii(std::string value);
 
 int shuangpinSchemeIndexFromValue(std::string_view value) {
-    for (size_t i = 0; i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]);
-         ++i) {
+    for (size_t i = 0;
+         i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]); ++i) {
         if (value == kShuangpinSchemes[i].value) {
             return static_cast<int>(i);
         }
@@ -785,8 +785,8 @@ std::string trayMenuCommandName(UINT cmd) {
         return "rime_open_log_dir";
     default:
         if (cmd >= IDM_SHUANGPIN_SCHEME_BASE &&
-            cmd < IDM_SHUANGPIN_SCHEME_BASE +
-                      (sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]))) {
+            cmd < IDM_SHUANGPIN_SCHEME_BASE + (sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]))) {
             return "shuangpin_scheme";
         }
         if (cmd >= IDM_INPUT_METHOD_BASE) {
@@ -982,8 +982,8 @@ bool launchDetachedProcess(const std::wstring &application,
     return true;
 }
 
-std::vector<wchar_t> buildEnvironmentWithGlogLogDir(
-    const std::wstring &glogLogDir) {
+std::vector<wchar_t>
+buildEnvironmentWithGlogLogDir(const std::wstring &glogLogDir) {
     if (glogLogDir.empty()) {
         return {};
     }
@@ -1465,9 +1465,10 @@ void showContextMenu() {
                 currentIsRime = true;
             }
         }
-        trayHelperTrace("showContextMenu current=" + g_trayState.currentInputMethod +
-                        " currentIsShuangpin=" +
-                        std::string(currentIsShuangpin ? "true" : "false"));
+        trayHelperTrace(
+            "showContextMenu current=" + g_trayState.currentInputMethod +
+            " currentIsShuangpin=" +
+            std::string(currentIsShuangpin ? "true" : "false"));
 
         HMENU menu = CreatePopupMenu();
         if (!menu) {
@@ -1558,18 +1559,17 @@ void showContextMenu() {
                     shuangpinSchemeIndexFromValue(loadShuangpinSchemeValue());
                 HMENU shuangpinMenu = CreatePopupMenu();
                 if (shuangpinMenu) {
-                    for (size_t i = 0;
-                         i < sizeof(kShuangpinSchemes) /
-                                  sizeof(kShuangpinSchemes[0]);
+                    for (size_t i = 0; i < sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]);
                          ++i) {
-                        AppendMenuW(shuangpinMenu,
-                                    MF_STRING |
-                                        (static_cast<int>(i) == currentSchemeIndex
-                                             ? MF_CHECKED
-                                             : 0),
-                                    IDM_SHUANGPIN_SCHEME_BASE +
-                                        static_cast<UINT>(i),
-                                    kShuangpinSchemes[i].menuText);
+                        AppendMenuW(
+                            shuangpinMenu,
+                            MF_STRING |
+                                (static_cast<int>(i) == currentSchemeIndex
+                                     ? MF_CHECKED
+                                     : 0),
+                            IDM_SHUANGPIN_SCHEME_BASE + static_cast<UINT>(i),
+                            kShuangpinSchemes[i].menuText);
                     }
                     AppendMenuW(statusMenu, MF_POPUP,
                                 reinterpret_cast<UINT_PTR>(shuangpinMenu),
@@ -1720,16 +1720,17 @@ void showContextMenu() {
             return;
         }
         if (cmd >= IDM_SHUANGPIN_SCHEME_BASE &&
-            cmd < IDM_SHUANGPIN_SCHEME_BASE +
-                      (sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]))) {
+            cmd < IDM_SHUANGPIN_SCHEME_BASE + (sizeof(kShuangpinSchemes) /
+                                               sizeof(kShuangpinSchemes[0]))) {
             const auto index = cmd - IDM_SHUANGPIN_SCHEME_BASE;
-            const bool ok = saveShuangpinSchemeValue(kShuangpinSchemes[index].value);
+            const bool ok =
+                saveShuangpinSchemeValue(kShuangpinSchemes[index].value);
             if (ok) {
                 persistSharedTrayPinyinReloadRequest();
             }
-            trayHelperTrace(std::string(ok ? "saved" : "failed") +
-                            " shuangpin scheme=" +
-                            kShuangpinSchemes[index].value);
+            trayHelperTrace(
+                std::string(ok ? "saved" : "failed") +
+                " shuangpin scheme=" + kShuangpinSchemes[index].value);
             refreshTrayState();
             return;
         }
