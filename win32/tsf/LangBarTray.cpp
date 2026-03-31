@@ -189,8 +189,9 @@ HWND standaloneTrayHelperWindow() {
 }
 
 std::vector<wchar_t>
-buildEnvironmentWithPathPrefix(const std::wstring &pathPrefix) {
-    if (pathPrefix.empty()) {
+buildEnvironmentWithPathPrefix(const std::wstring &pathPrefix,
+                               const std::wstring &glogLogDir = {}) {
+    if (pathPrefix.empty() && glogLogDir.empty()) {
         return {};
     }
     LPWCH envBlock = GetEnvironmentStringsW();
@@ -208,18 +209,28 @@ buildEnvironmentWithPathPrefix(const std::wstring &pathPrefix) {
                 eq == std::wstring::npos ? L"" : entry.substr(eq + 1);
             continue;
         }
+        if (entry.rfind(L"GLOG_log_dir=", 0) == 0) {
+            continue;
+        }
         entries.push_back(std::move(entry));
     }
     FreeEnvironmentStringsW(envBlock);
 
-    std::wstring mergedPath = pathPrefix;
-    if (!existingPath.empty()) {
-        if (!mergedPath.empty() && mergedPath.back() != L';') {
-            mergedPath += L';';
+    if (!pathPrefix.empty()) {
+        std::wstring mergedPath = pathPrefix;
+        if (!existingPath.empty()) {
+            if (!mergedPath.empty() && mergedPath.back() != L';') {
+                mergedPath += L';';
+            }
+            mergedPath += existingPath;
         }
-        mergedPath += existingPath;
+        entries.push_back(L"PATH=" + mergedPath);
+    } else if (!existingPath.empty()) {
+        entries.push_back(L"PATH=" + existingPath);
     }
-    entries.push_back(L"PATH=" + mergedPath);
+    if (!glogLogDir.empty()) {
+        entries.push_back(L"GLOG_log_dir=" + glogLogDir);
+    }
 
     size_t totalChars = 1;
     for (const auto &entry : entries) {
@@ -333,6 +344,8 @@ std::filesystem::path sharedTrayStatusActionStateFile() {
     return std::filesystem::path(appData) / L"Fcitx5" /
            L"current-tray-status-actions.txt";
 }
+
+std::filesystem::path fcitx5LogDir();
 
 std::string trimSharedTrayValue(std::string value) {
     while (!value.empty() && (value.back() == '\r' || value.back() == '\n' ||
@@ -847,8 +860,8 @@ bool launchRimeDeployWithNotification(HWND trayHwnd) {
     std::vector<wchar_t> buffer(commandLine.begin(), commandLine.end());
     buffer.push_back(L'\0');
 
-    auto env =
-        buildEnvironmentWithPathPrefix((portableRoot / L"bin").wstring());
+    auto env = buildEnvironmentWithPathPrefix((portableRoot / L"bin").wstring(),
+                                              fcitx5LogDir().wstring());
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};

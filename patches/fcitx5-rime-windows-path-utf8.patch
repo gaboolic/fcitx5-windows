@@ -11,11 +11,16 @@ diff --git a/src/rimeengine.cpp b/src/rimeengine.cpp
          if (defaultYaml.empty()) {
              throw std::runtime_error("Fail to locate shared data directory");
          }
-@@ -249,9 +250,10 @@ void RimeEngine::rimeStart(bool fullcheck) {
+@@ -249,23 +250,30 @@ void RimeEngine::rimeStart(bool fullcheck) {
      auto userDir =
          StandardPaths::global().userDirectory(StandardPathsType::PkgData) /
          "rime";
 +    const std::string userDirUtf8 = userDir.string();
++    auto logDir =
++        StandardPaths::global().userDirectory(StandardPathsType::Config)
++            .parent_path() /
++        "log";
++    const std::string logDirUtf8 = logDir.string();
      RIME_DEBUG() << "Rime data directory: " << userDir;
      if (!fs::makePath(userDir)) {
 -        if (!fs::isdir(userDir)) {
@@ -23,7 +28,10 @@ diff --git a/src/rimeengine.cpp b/src/rimeengine.cpp
              RIME_ERROR() << "Failed to create user directory: " << userDir;
          }
      }
-@@ -259,7 +261,7 @@ void RimeEngine::rimeStart(bool fullcheck) {
++    if (!logDir.empty() && !fs::makePath(logDir)) {
++        RIME_ERROR() << "Failed to create Rime log directory: " << logDir;
++    }
+ 
      RIME_STRUCT(RimeTraits, fcitx_rime_traits);
      fcitx_rime_traits.shared_data_dir = sharedDataDir_.c_str();
      fcitx_rime_traits.app_name = "rime.fcitx-rime";
@@ -32,3 +40,10 @@ diff --git a/src/rimeengine.cpp b/src/rimeengine.cpp
      fcitx_rime_traits.distribution_name = "Rime";
      fcitx_rime_traits.distribution_code_name = "fcitx-rime";
      fcitx_rime_traits.distribution_version = FCITX_RIME_VERSION;
+-    // make librime only log to stderr
+-    // https://github.com/rime/librime/commit/6d1b9b65de4e7784a68a17d10a3e5c900e4fd511
+-    fcitx_rime_traits.log_dir = "";
++    fcitx_rime_traits.log_dir = logDirUtf8.c_str();
+     switch (rime_log().logLevel()) {
+     case NoLog:
+         fcitx_rime_traits.min_log_level = 4;

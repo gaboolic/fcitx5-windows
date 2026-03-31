@@ -852,6 +852,41 @@ bool launchDetachedProcess(const std::wstring &application,
     return true;
 }
 
+std::vector<wchar_t> buildEnvironmentWithGlogLogDir(
+    const std::wstring &glogLogDir) {
+    if (glogLogDir.empty()) {
+        return {};
+    }
+    LPWCH envBlock = GetEnvironmentStringsW();
+    if (!envBlock) {
+        return {};
+    }
+    std::vector<std::wstring> entries;
+    for (const wchar_t *cursor = envBlock; *cursor;) {
+        std::wstring entry(cursor);
+        cursor += entry.size() + 1;
+        if (entry.rfind(L"GLOG_log_dir=", 0) == 0) {
+            continue;
+        }
+        entries.push_back(std::move(entry));
+    }
+    FreeEnvironmentStringsW(envBlock);
+    entries.push_back(L"GLOG_log_dir=" + glogLogDir);
+
+    size_t totalChars = 1;
+    for (const auto &entry : entries) {
+        totalChars += entry.size() + 1;
+    }
+    std::vector<wchar_t> block;
+    block.reserve(totalChars);
+    for (const auto &entry : entries) {
+        block.insert(block.end(), entry.begin(), entry.end());
+        block.push_back(L'\0');
+    }
+    block.push_back(L'\0');
+    return block;
+}
+
 void launchSettingsGui() {
     const auto exe = portableRoot() / L"bin" / L"fcitx5-config-win32.exe";
     const auto exeStr = exe.wstring();
@@ -1244,10 +1279,13 @@ bool launchRimeDeployWithNotification() {
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
     PROCESS_INFORMATION pi = {};
+    auto env = buildEnvironmentWithGlogLogDir(fcitx5LogDir().wstring());
     const auto cwdString = deployer.parent_path().wstring();
     const wchar_t *cwd = cwdString.empty() ? nullptr : cwdString.c_str();
-    if (!CreateProcessW(nullptr, buffer.data(), nullptr, nullptr, FALSE,
-                        CREATE_NO_WINDOW, nullptr, cwd, &si, &pi)) {
+    const DWORD flags =
+        CREATE_NO_WINDOW | (env.empty() ? 0 : CREATE_UNICODE_ENVIRONMENT);
+    if (!CreateProcessW(nullptr, buffer.data(), nullptr, nullptr, FALSE, flags,
+                        env.empty() ? nullptr : env.data(), cwd, &si, &pi)) {
         showTrayBalloon(L"\x4e2d\x5dde\x97f5\x90e8\x7f72",
                         L"\x9519\x8bef\xff1a\x542f\x52a8\x90e8\x7f72\x5de5"
                         L"\x5177\x5931\x8d25",
