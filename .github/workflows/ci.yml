@@ -134,8 +134,11 @@ jobs:
           $env:STAGE = "$wsUnix/stage-installer"
           $env:FCITX_BUILD = "$wsUnix/build-portable-ci"
           $env:LIBIME_SRC = "$wsUnix/libime"
+          $env:LIBIME_TAG = '1.1.14'
           $env:CHINESE_SRC = "$wsUnix/fcitx5-chinese-addons"
+          $env:CHINESE_ADDONS_TAG = '5.1.12'
           $env:TABLE_EXTRA_SRC = "$wsUnix/fcitx5-table-extra"
+          $env:TABLE_EXTRA_TAG = '5.1.11'
           $env:RIME_SRC = "$wsUnix/fcitx5-rime"
           $env:LUA_SRC = "$wsUnix/fcitx5-lua"
           & (Join-Path $env:GITHUB_WORKSPACE 'scripts/02-build-deps.ps1') `
