@@ -816,7 +816,8 @@ void Tsf::updatePreeditText(TfEditCookie ec) {
     textEditSinkContext_->SetSelection(ec, 1, &sel);
 }
 
-void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
+void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text,
+                               bool clearEngineState) {
     tsfTrace("endCompositionCommit text=" + tsfWideToUtf8(text));
     candidateWin_.hide();
     endCandidateListUiElement();
@@ -859,7 +860,7 @@ void Tsf::endCompositionCommit(TfEditCookie ec, const std::wstring &text) {
     }
     composition_.Reset();
     compositionRange_.Reset();
-    if (engine_) {
+    if (clearEngineState && engine_) {
         engine_->clear();
     }
 }
@@ -889,7 +890,11 @@ void Tsf::drainCommitsAfterEngine(TfEditCookie ec) {
         if (w.empty()) {
             break;
         }
-        endCompositionCommit(ec, w);
+        // A single key may both commit the previous segment and leave a new
+        // preedit/candidate state (common for table IMs like Wubi). Commit the
+        // old TSF composition first, then let afterFcitxEngineKey() rebuild
+        // composition from the engine's current state.
+        endCompositionCommit(ec, w, false);
     }
 }
 
@@ -1324,12 +1329,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         }
         pendingKeyHandled_ = true;
         engine_->appendLatinLowercase(ch);
-        if (!ensureCompositionStarted(ec)) {
-            drainCommitsAfterEngine(ec);
-            return S_OK;
-        }
-        updatePreeditText(ec);
-        syncCandidateWindow(ec);
+        afterFcitxEngineKey(ec);
         if (traceLatinO) {
             tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
                      tsfWideToUtf8(engine_->preedit()) +

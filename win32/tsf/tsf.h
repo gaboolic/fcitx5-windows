@@ -299,7 +299,8 @@ class Tsf : public ITfTextInputProcessorEx,
     bool keyUpWouldBeHandled(WPARAM wParam, LPARAM lParam) const;
     HRESULT runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
                               bool isRelease);
-    void endCompositionCommit(TfEditCookie ec, const std::wstring &text);
+    void endCompositionCommit(TfEditCookie ec, const std::wstring &text,
+                              bool clearEngineState = true);
     void endCompositionCancel(TfEditCookie ec);
     bool ensureCompositionStarted(TfEditCookie ec);
     void updatePreeditText(TfEditCookie ec);
