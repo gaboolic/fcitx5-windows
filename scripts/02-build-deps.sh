@@ -5,13 +5,15 @@
 # 依赖：MSYS2 CLANG64（或 MINGW64/UCRT64）、Ninja、Boost、libzstd、gettext；Rime 等见 docs/PINYIN_WINDOWS.md。
 # 缺源码目录时会 git clone --depth 1（需 git）。可覆盖：LIBIME_GIT / LIBIME_TAG、CHINESE_ADDONS_GIT / CHINESE_ADDONS_TAG、
 # RIME_TAG（默认 5.1.13）；可选仓库在 KenLM 子模块就绪后、[1/3] fcitx5-windows 之前统一克隆。
-# librime：不再源码合并构建；从 MSYS2 安装包拷贝预编 librime-*.dll（无 Rime 内置 Lua，与 MSYS2 官方包一致）。
+# librime 运行时按 weasel CI 逻辑处理：下载 librime GitHub Release 的 Windows-clang-x64 主包与 deps 包，
+# 直接取 dist/lib/rime.dll、rime.lib、头文件，并拷贝 share/opencc；不走本地 librime 源码构建。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGE="${STAGE:-$ROOT/stage}"
 FCITX_BUILD="${FCITX_BUILD:-$ROOT/build-pinyin-fcitx}"
 LIBIME_SRC="${LIBIME_SRC:-$ROOT/../libime}"
+LIBRIME_SRC="${LIBRIME_SRC:-$ROOT/../librime}"
 CHINESE_SRC="${CHINESE_SRC:-$ROOT/../fcitx5-chinese-addons}"
 TABLE_EXTRA_SRC="${TABLE_EXTRA_SRC:-$ROOT/../fcitx5-table-extra}"
 RIME_SRC="${RIME_SRC:-$ROOT/../fcitx5-rime}"
@@ -25,12 +27,14 @@ case "$(uname -s 2>/dev/null)" in
 esac
 if [[ $_is_msys -eq 1 ]]; then
   LIBIME_BUILD="${LIBIME_BUILD:-/tmp/fcitx5-pinyin-libime}"
+  LIBRIME_BUILD="${LIBRIME_BUILD:-/tmp/fcitx5-pinyin-librime}"
   CHINESE_BUILD="${CHINESE_BUILD:-/tmp/fcitx5-pinyin-chinese}"
   TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-/tmp/fcitx5-pinyin-table-extra}"
   RIME_BUILD="${RIME_BUILD:-/tmp/fcitx5-pinyin-rime}"
   LUA_BUILD="${LUA_BUILD:-/tmp/fcitx5-pinyin-lua}"
 else
   LIBIME_BUILD="${LIBIME_BUILD:-$ROOT/build-pinyin-libime}"
+  LIBRIME_BUILD="${LIBRIME_BUILD:-$ROOT/build-pinyin-librime}"
   CHINESE_BUILD="${CHINESE_BUILD:-$ROOT/build-pinyin-chinese}"
   TABLE_EXTRA_BUILD="${TABLE_EXTRA_BUILD:-$ROOT/build-pinyin-table-extra}"
   RIME_BUILD="${RIME_BUILD:-$ROOT/build-pinyin-rime}"
@@ -45,8 +49,16 @@ RIME_RUNTIME_DOWNLOAD="${RIME_RUNTIME_DOWNLOAD:-1}"
 MSYS2_MIRROR_ROOT="${MSYS2_MIRROR_ROOT:-https://mirror.msys2.org/mingw}"
 OPENCC_DOWNLOAD_VERSION="${OPENCC_DOWNLOAD_VERSION:-}"
 LIBRIME_DOWNLOAD_VERSION="${LIBRIME_DOWNLOAD_VERSION:-}"
+LIBRIME_RELEASE_TAG="${LIBRIME_RELEASE_TAG:-latest}"
+LIBRIME_RELEASE_PKG_FILE="${LIBRIME_RELEASE_PKG_FILE:-}"
+LIBRIME_RELEASE_DEPS_PKG_FILE="${LIBRIME_RELEASE_DEPS_PKG_FILE:-}"
+LIBRIME_RELEASE_ROOT="${LIBRIME_RELEASE_ROOT:-$RIME_RUNTIME_ROOT/librime-release}"
 _RIME_RUNTIME_PREPARED=0
 _RIME_RUNTIME_PREFIX=""
+_LIBRIME_RELEASE_PREPARED=0
+_LIBRIME_RELEASE_MAIN_DIR=""
+_LIBRIME_RELEASE_DEPS_DIR=""
+_LIBRIME_RELEASE_VERSION=""
 
 # Clone into $1 if there is no CMakeLists.txt yet and $1 does not exist.
 ensure_repo() {
@@ -424,6 +436,77 @@ download_runtime_package() {
   fi
 }
 
+native_path() {
+  local p="$1"
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -m "$p"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+resolve_librime_release_assets() {
+  local _tag="${LIBRIME_RELEASE_TAG:-latest}" _pattern_main _pattern_deps _ps _out
+  case "$(mingw_prefix_dir)" in
+    /clang64)
+      _pattern_main='^rime-[0-9A-Fa-f]+-Windows-clang-x64\.7z$'
+      _pattern_deps='^rime-deps-[0-9A-Fa-f]+-Windows-clang-x64\.7z$'
+      ;;
+    *)
+      echo "error: librime release download is currently configured only for CLANG64." >&2
+      exit 1
+      ;;
+  esac
+  _ps=$(cat <<EOF
+\$ErrorActionPreference = 'Stop'
+\$tag = '${_tag}'
+\$api = if (\$tag -eq 'latest') {
+  'https://api.github.com/repos/rime/librime/releases/latest'
+} else {
+  'https://api.github.com/repos/rime/librime/releases/tags/' + \$tag
+}
+\$resp = Invoke-RestMethod -UseBasicParsing -Headers @{ Accept = 'application/vnd.github.v3+json' } -Uri \$api
+\$main = \$resp.assets | Where-Object { \$_.name -match '${_pattern_main}' } | Select-Object -First 1
+\$deps = \$resp.assets | Where-Object { \$_.name -match '${_pattern_deps}' } | Select-Object -First 1
+if (-not \$main) { throw 'missing main Windows-clang-x64 asset in librime release' }
+if (-not \$deps) { throw 'missing deps Windows-clang-x64 asset in librime release' }
+Write-Output \$resp.tag_name
+Write-Output \$main.browser_download_url
+Write-Output \$deps.browser_download_url
+EOF
+)
+  _out="$(powershell.exe -NoLogo -NoProfile -Command "$_ps" | tr -d '\r')"
+  [[ -n "$_out" ]] || {
+    echo "error: failed to resolve librime release asset URLs." >&2
+    exit 1
+  }
+  printf '%s\n' "$_out"
+}
+
+ensure_librime_release_packages_downloaded() {
+  local _resolved _tag _main_url _deps_url
+  if [[ -n "$LIBRIME_RELEASE_PKG_FILE" && -n "$LIBRIME_RELEASE_DEPS_PKG_FILE" ]]; then
+    return 0
+  fi
+  mapfile -t _resolved < <(resolve_librime_release_assets)
+  [[ ${#_resolved[@]} -ge 3 ]] || {
+    echo "error: incomplete librime release metadata." >&2
+    exit 1
+  }
+  _tag="${_resolved[0]}"
+  _LIBRIME_RELEASE_VERSION="$_tag"
+  _main_url="${_resolved[1]}"
+  _deps_url="${_resolved[2]}"
+  if [[ -z "$LIBRIME_RELEASE_PKG_FILE" ]]; then
+    LIBRIME_RELEASE_PKG_FILE="$RIME_RUNTIME_ROOT/releases/${_tag}/$(basename "$_main_url")"
+    download_runtime_package "$_main_url" "$LIBRIME_RELEASE_PKG_FILE"
+  fi
+  if [[ -z "$LIBRIME_RELEASE_DEPS_PKG_FILE" ]]; then
+    LIBRIME_RELEASE_DEPS_PKG_FILE="$RIME_RUNTIME_ROOT/releases/${_tag}/$(basename "$_deps_url")"
+    download_runtime_package "$_deps_url" "$LIBRIME_RELEASE_DEPS_PKG_FILE"
+  fi
+}
+
 extract_runtime_package() {
   local pkg="$1" dest="$2"
   [[ -f "$pkg" ]] || {
@@ -533,6 +616,23 @@ prepare_rime_runtime_prefix() {
   fi
   _RIME_RUNTIME_PREPARED=1
   printf '%s\n' "$_RIME_RUNTIME_PREFIX"
+}
+
+prepare_librime_release_root() {
+  if [[ $_LIBRIME_RELEASE_PREPARED -eq 1 ]]; then
+    return 0
+  fi
+  ensure_librime_release_packages_downloaded
+  mkdir -p "$LIBRIME_RELEASE_ROOT"
+  _LIBRIME_RELEASE_MAIN_DIR="$LIBRIME_RELEASE_ROOT/main"
+  _LIBRIME_RELEASE_DEPS_DIR="$LIBRIME_RELEASE_ROOT/deps"
+  rm -rf "$_LIBRIME_RELEASE_MAIN_DIR" "$_LIBRIME_RELEASE_DEPS_DIR"
+  mkdir -p "$_LIBRIME_RELEASE_MAIN_DIR" "$_LIBRIME_RELEASE_DEPS_DIR"
+  echo "==> extracting librime release package: $LIBRIME_RELEASE_PKG_FILE" >&2
+  extract_runtime_package "$LIBRIME_RELEASE_PKG_FILE" "$_LIBRIME_RELEASE_MAIN_DIR"
+  echo "==> extracting librime release deps package: $LIBRIME_RELEASE_DEPS_PKG_FILE" >&2
+  extract_runtime_package "$LIBRIME_RELEASE_DEPS_PKG_FILE" "$_LIBRIME_RELEASE_DEPS_DIR"
+  _LIBRIME_RELEASE_PREPARED=1
 }
 
 find_llvm_readobj() {
@@ -652,56 +752,6 @@ copy_librime_dlls_from_msys() {
   shopt -u nullglob
 }
 
-copy_librime_runtime_dlls() {
-  copy_librime_dependency_dlls
-  copy_librime_dlls_from_msys
-}
-
-verify_librime_prebuilt_in_stage() {
-  shopt -s nullglob
-  local _lr=( "$STAGE/bin"/librime-*.dll )
-  shopt -u nullglob
-  if [[ ${#_lr[@]} -eq 0 ]]; then
-    echo "error: no librime-*.dll under $STAGE/bin (MSYS2 prebuilt)." >&2
-    echo "  CLANG64: pacman -S mingw-w64-clang-x86_64-librime mingw-w64-clang-x86_64-librime-data" >&2
-    echo "  MINGW64: pacman -S mingw-w64-x86_64-librime mingw-w64-x86_64-librime-data" >&2
-    exit 1
-  fi
-  local _opencc_required
-  _opencc_required="$(detect_librime_opencc_import_name_from_dir "$STAGE/bin" || true)"
-  if [[ -n "$_opencc_required" ]] && [[ ! -f "$STAGE/bin/$_opencc_required" ]]; then
-    echo "error: staged librime requires $_opencc_required but it is missing under $STAGE/bin." >&2
-    echo "  Provide matching package files via OPENCC_PKG_FILE=... LIBRIME_PKG_FILE=..." >&2
-    exit 1
-  fi
-  echo "==> [5a] librime: MSYS2 prebuilt $(basename "${_lr[0]}") + deps (no merged librime-lua in DLL)"
-}
-
-if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
-  echo "==> [5] fcitx5-rime"
-  if ! vendor_rime_share_into_stage; then
-    echo "error: rime-data missing under stage and not found under /clang64 or /mingw64." >&2
-    echo "  Install: pacman -S mingw-w64-clang-x86_64-librime-data (CLANG64; replaces old rime-data)" >&2
-    exit 1
-  fi
-  copy_librime_runtime_dlls
-  if [[ $_is_msys -eq 1 ]]; then
-    verify_librime_prebuilt_in_stage
-  else
-    echo "==> [5a] librime: non-MSYS — copy skipped MSYS bin paths; ensure fcitx5-rime links and runtime can find librime" >&2
-  fi
-  rm -rf "$RIME_BUILD"
-  cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
-    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$STAGE" \
-    -DCMAKE_PREFIX_PATH="$STAGE"
-  cmake --build "$RIME_BUILD" -j"$JOBS"
-  cmake --install "$RIME_BUILD" --prefix "$STAGE"
-else
-  echo "==> skip fcitx5-rime (RIME_SRC not set or missing CMakeLists.txt)"
-fi
-
-# --- Optional: fcitx5-lua (addon luaaddonloader; default USE_DLOPEN — ship liblua*.dll in bin) ---
 copy_lua_runtime_dlls() {
   local _bin
   _bin="$(mingw_dll_source_bin)"
@@ -715,6 +765,93 @@ copy_lua_runtime_dlls() {
   shopt -u nullglob
 }
 
+generate_rime_pc() {
+  local _version="$1" _prefix_native
+  _prefix_native="$(native_path "$STAGE")"
+  mkdir -p "$STAGE/lib/pkgconfig"
+  cat >"$STAGE/lib/pkgconfig/rime.pc" <<EOF
+prefix=${_prefix_native}
+exec_prefix=${_prefix_native}
+libdir=${_prefix_native}/lib
+includedir=${_prefix_native}/include
+pkgdatadir=${_prefix_native}/share/rime-data
+pluginsdir=${_prefix_native}/lib/rime-plugins
+
+Name: Rime
+Description: Rime Input Method Engine
+Version: ${_version#v}
+Cflags: -I\${includedir}
+Libs: -L\${libdir} -lrime
+EOF
+}
+
+copy_librime_release_into_stage() {
+  local _main _deps _version
+  prepare_librime_release_root
+  _main="$_LIBRIME_RELEASE_MAIN_DIR"
+  _deps="$_LIBRIME_RELEASE_DEPS_DIR"
+  _version="$_LIBRIME_RELEASE_VERSION"
+  echo "==> [5a] librime: GitHub release package (${_version#v}, Windows-clang-x64)"
+  mkdir -p "$STAGE/bin" "$STAGE/lib" "$STAGE/include" "$STAGE/share" "$STAGE/share/cmake"
+  rm -f "$STAGE/bin"/librime*.dll "$STAGE/bin"/rime.dll
+  rm -f "$STAGE/lib"/librime.dll "$STAGE/lib"/librime.dll.a "$STAGE/lib"/rime.lib
+  cp -f "$_main/dist/lib/rime.dll" "$STAGE/bin/"
+  cp -f "$_main/dist/lib/rime.lib" "$STAGE/lib/"
+  cp -f "$_main/dist/include"/rime_*.h "$STAGE/include/"
+  cp -f "$_main/dist/bin"/rime_*.exe "$STAGE/bin/"
+  rm -rf "$STAGE/share/cmake/rime"
+  cp -a "$_main/dist/share/cmake/rime" "$STAGE/share/cmake/"
+  if [[ -d "$_deps/share/opencc" ]]; then
+    rm -rf "$STAGE/share/opencc"
+    cp -a "$_deps/share/opencc" "$STAGE/share/"
+  fi
+  generate_rime_pc "$_version"
+}
+
+verify_librime_in_stage() {
+  local _source_desc="${1:-runtime}"
+  if [[ ! -f "$STAGE/bin/rime.dll" ]]; then
+    echo "error: no rime.dll under $STAGE/bin ($_source_desc)." >&2
+    echo "  MINGW64: pacman -S mingw-w64-x86_64-librime mingw-w64-x86_64-librime-data" >&2
+    exit 1
+  fi
+  if [[ ! -f "$STAGE/lib/rime.lib" ]]; then
+    echo "error: no rime.lib under $STAGE/lib ($_source_desc)." >&2
+    exit 1
+  fi
+  if [[ ! -f "$STAGE/include/rime_api.h" ]]; then
+    echo "error: no rime_api.h under $STAGE/include ($_source_desc)." >&2
+    exit 1
+  fi
+  if [[ ! -f "$STAGE/lib/pkgconfig/rime.pc" ]]; then
+    echo "error: no rime.pc under $STAGE/lib/pkgconfig ($_source_desc)." >&2
+    exit 1
+  fi
+  echo "==> [5a] librime ready in stage: rime.dll + rime.lib from $_source_desc"
+}
+
+if [[ -f "$RIME_SRC/CMakeLists.txt" ]]; then
+  echo "==> [5] fcitx5-rime"
+  if ! vendor_rime_share_into_stage; then
+    echo "error: rime-data missing under stage and not found under /clang64 or /mingw64." >&2
+    echo "  Install: pacman -S mingw-w64-clang-x86_64-librime-data (CLANG64; replaces old rime-data)" >&2
+    exit 1
+  fi
+  copy_librime_release_into_stage
+  verify_librime_in_stage "GitHub release package"
+  rm -rf "$RIME_BUILD"
+  PKG_CONFIG_PATH="$STAGE/lib/pkgconfig${PKG_CONFIG_PATH:+:$PKG_CONFIG_PATH}" \
+    cmake -S "$RIME_SRC" -B "$RIME_BUILD" -G Ninja \
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
+    -DCMAKE_INSTALL_PREFIX="$STAGE" \
+    -DCMAKE_PREFIX_PATH="$STAGE"
+  cmake --build "$RIME_BUILD" -j"$JOBS"
+  cmake --install "$RIME_BUILD" --prefix "$STAGE"
+else
+  echo "==> skip fcitx5-rime (RIME_SRC not set or missing CMakeLists.txt)"
+fi
+
+# --- Optional: fcitx5-lua (addon luaaddonloader; default USE_DLOPEN — ship liblua*.dll in bin) ---
 if [[ -f "$LUA_SRC/CMakeLists.txt" ]]; then
   echo "==> [6] fcitx5-lua"
   if [[ $_is_msys -eq 1 ]] && command -v pkg-config >/dev/null 2>&1 && ! pkg-config --exists lua 2>/dev/null; then
@@ -748,7 +885,7 @@ fi
 
 echo ""
 echo "Done. Portable root: $STAGE"
-echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built), librime (MSYS2 prebuilt) + rime deps, lua if built"
+echo "  bin/     — Fcitx5.exe, *.dll, fcitx5-x86_64.dll (if built), rime.dll + rime tools (GitHub release), lua if built"
 echo "  lib/fcitx5/ — addons (libpinyin.dll; optional librime.dll, libluaaddonloader.dll, …)"
 echo "  share/fcitx5/ — data; profile example: share/fcitx5/profile.windows.example"
 echo "  share/rime-data/ — when fcitx5-rime is built; share/opencc/ if vendored for Rime schemas"
