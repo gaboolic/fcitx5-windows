@@ -90,6 +90,8 @@ class ImeEngine {
     virtual std::vector<TrayStatusActionItem> trayStatusActions() const;
     /// Activate one status-area action by unique name.
     virtual bool activateTrayStatusAction(const std::string &uniqueName);
+    /// Reload pinyin addon config from disk so shuangpin changes apply now.
+    virtual bool reloadPinyinConfig();
     /// Invoke addon sub-config action for a specific input method engine.
     virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                             const std::string &subPath);

@@ -48,6 +48,8 @@ bool ImeEngine::activateTrayStatusAction(const std::string & /*uniqueName*/) {
     return false;
 }
 
+bool ImeEngine::reloadPinyinConfig() { return false; }
+
 bool ImeEngine::invokeInputMethodSubConfig(const std::string & /*uniqueName*/,
                                            const std::string & /*subPath*/) {
     return false;

@@ -391,6 +391,29 @@ bool writeProfileUtf8(const std::string &utf8) {
     return static_cast<bool>(out);
 }
 
+std::filesystem::path appDataRoot() {
+    wchar_t appData[MAX_PATH] = {};
+    DWORD len = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
+    if (len == 0 || len >= MAX_PATH) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5";
+}
+
+void persistSharedTrayPinyinReloadRequest() {
+    const auto path = appDataRoot() / L"pending-tray-pinyin-reload.txt";
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out) {
+        return;
+    }
+    out << "1";
+}
+
 struct ShuangpinSchemeOption {
     const char *value;
     const wchar_t *zhText;
@@ -523,9 +546,12 @@ void syncShuangpinSchemeFromDisk(UiState &st) {
                   std::filesystem::path(kPinyinConfigPath));
     } catch (...) {
     }
-    const auto *value = raw.valueByPath("Config/ShuangpinProfile");
-    const int index =
-        shuangpinSchemeIndexFromValue(value ? *value : std::string_view("Ziranma"));
+    const auto *rootValue = raw.valueByPath("ShuangpinProfile");
+    const auto *configValue = raw.valueByPath("Config/ShuangpinProfile");
+    const auto value = rootValue ? *rootValue
+                                 : (configValue ? *configValue
+                                                : std::string_view("Ziranma"));
+    const int index = shuangpinSchemeIndexFromValue(value);
     SendMessageW(st.comboShuangpin, CB_SETCURSEL, static_cast<WPARAM>(index), 0);
 }
 
@@ -720,14 +746,16 @@ bool saveAll(HWND hwnd, UiState &st) {
         }
         const int shuangpinSel = static_cast<int>(
             SendMessageW(st.comboShuangpin, CB_GETCURSEL, 0, 0));
-        raw.setValueByPath("Config/ShuangpinProfile",
-                           shuangpinSchemeValueFromIndex(shuangpinSel));
+        const auto value = shuangpinSchemeValueFromIndex(shuangpinSel);
+        raw.setValueByPath("ShuangpinProfile", value);
+        raw.setValueByPath("Config/ShuangpinProfile", value);
         if (!safeSaveAsIni(raw, StandardPathsType::PkgConfig,
                            std::filesystem::path(kPinyinConfigPath))) {
             MessageBoxW(hwnd, tr(TextId::SavePinyinFailed, st.lang),
                         tr(TextId::MessageBoxCaption, st.lang), MB_ICONERROR);
             return false;
         }
+        persistSharedTrayPinyinReloadRequest();
     }
 
     std::wstring prof;

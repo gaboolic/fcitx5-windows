@@ -180,14 +180,17 @@ STDMETHODIMP Tsf::OnTestKeyDown(ITfContext *pContext, WPARAM wParam,
     trackShiftToggleKeyDown(wParam, lParam);
     if (sharedTrayChineseModeRequestPending() ||
         sharedTrayInputMethodRequestPending() ||
-        sharedTrayStatusActionRequestPending()) {
+        sharedTrayStatusActionRequestPending() ||
+        sharedTrayPinyinReloadRequestPending()) {
         tsfTrace("OnTestKeyDown shared tray request pending");
         scheduleSharedTrayChineseModeRequest(pContext);
         scheduleSharedTrayInputMethodRequest(pContext);
         scheduleSharedTrayStatusActionRequest(pContext);
+        scheduleSharedTrayPinyinReloadRequest(pContext);
         if (sharedTrayChineseModeRequestPending() ||
             sharedTrayInputMethodRequestPending() ||
-            sharedTrayStatusActionRequestPending()) {
+            sharedTrayStatusActionRequestPending() ||
+            sharedTrayPinyinReloadRequestPending()) {
             *pfEaten = TRUE;
             return S_OK;
         }
@@ -206,6 +209,7 @@ STDMETHODIMP Tsf::OnKeyDown(ITfContext *pContext, WPARAM wParam, LPARAM lParam,
     scheduleSharedTrayChineseModeRequest(pContext);
     scheduleSharedTrayInputMethodRequest(pContext);
     scheduleSharedTrayStatusActionRequest(pContext);
+    scheduleSharedTrayPinyinReloadRequest(pContext);
     if (!canProcessKeyDown(wParam, lParam)) {
         tsfTrace("OnKeyDown not handled by IME");
         *pfEaten = FALSE;
@@ -222,13 +226,16 @@ STDMETHODIMP Tsf::OnTestKeyUp(ITfContext *pContext, WPARAM wParam,
     trackShiftToggleKeyUp(wParam, lParam);
     if (sharedTrayChineseModeRequestPending() ||
         sharedTrayInputMethodRequestPending() ||
-        sharedTrayStatusActionRequestPending()) {
+        sharedTrayStatusActionRequestPending() ||
+        sharedTrayPinyinReloadRequestPending()) {
         scheduleSharedTrayChineseModeRequest(pContext);
         scheduleSharedTrayInputMethodRequest(pContext);
         scheduleSharedTrayStatusActionRequest(pContext);
+        scheduleSharedTrayPinyinReloadRequest(pContext);
         if (sharedTrayChineseModeRequestPending() ||
             sharedTrayInputMethodRequestPending() ||
-            sharedTrayStatusActionRequestPending()) {
+            sharedTrayStatusActionRequestPending() ||
+            sharedTrayPinyinReloadRequestPending()) {
             *pfEaten = TRUE;
             return S_OK;
         }

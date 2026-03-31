@@ -1403,6 +1403,14 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
     if (!engine_) {
         return S_OK;
     }
+    if (pendingTrayReloadPinyinConfig_) {
+        pendingTrayReloadPinyinConfig_ = false;
+        if (engine_->reloadPinyinConfig()) {
+            clearSharedTrayPinyinReloadRequest();
+            langBarNotifyIconUpdate();
+        }
+        return S_OK;
+    }
     if (!pendingTrayStatusAction_.empty()) {
         const auto actionName = std::move(pendingTrayStatusAction_);
         pendingTrayStatusAction_.clear();

@@ -1416,6 +1416,20 @@ bool Fcitx5ImeEngine::activateTrayStatusAction(const std::string &uniqueName) {
     return true;
 }
 
+bool Fcitx5ImeEngine::reloadPinyinConfig() {
+    if (!instance_) {
+        return false;
+    }
+    ScopedDllDirectory scopedDllDirectory(imeBinDir());
+    instance_->reloadAddonConfig("pinyin");
+    instance_->eventDispatcher().dispatchPending();
+    flushLibuvLoopForIme(instance_->eventLoop());
+    if (ic_) {
+        syncUiFromIc();
+    }
+    return true;
+}
+
 bool Fcitx5ImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,
                                                  const std::string &subPath) {
     if (!instance_ || uniqueName.empty() || subPath.empty()) {

@@ -171,11 +171,14 @@ class Tsf : public ITfTextInputProcessorEx,
     bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
     bool sharedTrayStatusActionRequestPending() const;
+    bool sharedTrayPinyinReloadRequestPending() const;
     bool scheduleSharedTrayChineseModeRequest(
         ITfContext *preferredContext = nullptr);
     bool scheduleSharedTrayInputMethodRequest(
         ITfContext *preferredContext = nullptr);
     bool scheduleSharedTrayStatusActionRequest(
+        ITfContext *preferredContext = nullptr);
+    bool scheduleSharedTrayPinyinReloadRequest(
         ITfContext *preferredContext = nullptr);
     HWND shellTrayHostHwnd() const { return shellTrayHostHwnd_; }
 
@@ -210,6 +213,7 @@ class Tsf : public ITfTextInputProcessorEx,
     void
     persistSharedTrayInputMethodRequest(const std::string &uniqueName) const;
     void clearSharedTrayInputMethodRequest() const;
+    void clearSharedTrayPinyinReloadRequest() const;
     void persistSharedTrayStatusActionState() const;
     void clearSharedTrayStatusActionRequest() const;
     static LRESULT CALLBACK shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
@@ -272,6 +276,7 @@ class Tsf : public ITfTextInputProcessorEx,
     bool pendingTrayInputMethodFromSharedRequest_ = false;
     std::string pendingTrayStatusAction_;
     bool pendingTrayStatusActionFromSharedRequest_ = false;
+    bool pendingTrayReloadPinyinConfig_ = false;
     std::string deferredSharedTrayInputMethod_;
     std::unique_ptr<ImeEngine> engine_;
     ComPtr<ITfCandidateListUIElement> candidateListUi_;

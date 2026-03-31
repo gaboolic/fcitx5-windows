@@ -79,6 +79,7 @@ enum TrayMenuId : UINT {
     IDM_SCRIPT_SIMPLIFIED,
     IDM_PUNCTUATION_CHINESE,
     IDM_PUNCTUATION_ENGLISH,
+    IDM_PINYIN_SETTINGS_GUI,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
     IDM_OPEN_LOG_DIR,
@@ -88,6 +89,25 @@ enum TrayMenuId : UINT {
     IDM_RIME_OPEN_LOG_DIR,
     IDM_STATUS_ACTION_BASE = 0x4200,
     IDM_INPUT_METHOD_BASE = 0x4300,
+    IDM_SHUANGPIN_SCHEME_BASE = 0x4400,
+};
+
+struct ShuangpinSchemeOption {
+    const char *value;
+    const wchar_t *menuText;
+};
+
+constexpr const wchar_t kPinyinConfigRelativePath[] =
+    L"config\\fcitx5\\conf\\pinyin.conf";
+constexpr ShuangpinSchemeOption kShuangpinSchemes[] = {
+    {"Ziranma", L"自然码 (Ziranma)"},
+    {"MS", L"微软双拼 (MS)"},
+    {"Xiaohe", L"小鹤双拼 (Xiaohe)"},
+    {"Ziguang", L"紫光双拼 (Ziguang)"},
+    {"ABC", L"智能 ABC 双拼 (ABC)"},
+    {"Zhongwenzhixing", L"中文之星 (Zhongwenzhixing)"},
+    {"PinyinJiajia", L"拼音加加 (PinyinJiajia)"},
+    {"Custom", L"自定义 (Custom)"},
 };
 
 constexpr UINT kShellTrayCallback = WM_APP + 88;
@@ -336,6 +356,15 @@ std::filesystem::path sharedTrayStatusActionRequestFile() {
            L"pending-tray-status-action.txt";
 }
 
+std::filesystem::path sharedTrayPinyinReloadRequestFile() {
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return {};
+    }
+    return std::filesystem::path(appData) / L"Fcitx5" /
+           L"pending-tray-pinyin-reload.txt";
+}
+
 std::filesystem::path sharedTrayStatusActionStateFile() {
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
@@ -346,6 +375,7 @@ std::filesystem::path sharedTrayStatusActionStateFile() {
 }
 
 std::filesystem::path fcitx5LogDir();
+std::filesystem::path fcitxPortableRoot();
 
 std::string trimSharedTrayValue(std::string value) {
     while (!value.empty() && (value.back() == '\r' || value.back() == '\n' ||
@@ -437,6 +467,10 @@ std::string readSharedTrayStatusActionRequestFile() {
     return readSharedTrayTextFile(sharedTrayStatusActionRequestFile());
 }
 
+bool readSharedTrayPinyinReloadRequestFile() {
+    return readSharedTrayTextFile(sharedTrayPinyinReloadRequestFile()) == "1";
+}
+
 void persistSharedTrayCurrentInputMethodState(const std::string &uniqueName) {
     if (!uniqueName.empty()) {
         writeSharedTrayTextFile(sharedTrayCurrentInputMethodFile(), uniqueName);
@@ -466,6 +500,10 @@ void persistSharedTrayChineseModeRequest(bool chineseMode) {
                                    chineseMode);
 }
 
+void persistSharedTrayPinyinReloadRequest() {
+    writeSharedTrayTextFile(sharedTrayPinyinReloadRequestFile(), "1");
+}
+
 bool readSharedTrayChineseModeRequest(bool *value) {
     return readSharedTrayChineseModeFile(sharedTrayChineseModeRequestFile(),
                                          value);
@@ -473,6 +511,15 @@ bool readSharedTrayChineseModeRequest(bool *value) {
 
 void clearSharedTrayChineseModeRequest() {
     const auto path = sharedTrayChineseModeRequestFile();
+    if (path.empty()) {
+        return;
+    }
+    std::error_code ec;
+    std::filesystem::remove(path, ec);
+}
+
+void clearSharedTrayPinyinReloadRequestFile() {
+    const auto path = sharedTrayPinyinReloadRequestFile();
     if (path.empty()) {
         return;
     }
@@ -1056,6 +1103,88 @@ findTrayStatusAction(const std::vector<TrayStatusActionItem> &items,
     return nullptr;
 }
 
+int shuangpinSchemeIndexFromValue(std::string_view value) {
+    for (size_t i = 0; i < sizeof(kShuangpinSchemes) / sizeof(kShuangpinSchemes[0]);
+         ++i) {
+        if (value == kShuangpinSchemes[i].value) {
+            return static_cast<int>(i);
+        }
+    }
+    return 0;
+}
+
+std::filesystem::path sharedPinyinConfigFile() {
+    const auto portable = fcitxPortableRoot() / kPinyinConfigRelativePath;
+    WCHAR appData[MAX_PATH];
+    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
+        return portable;
+    }
+    const auto roaming = std::filesystem::path(appData) / L"Fcitx5" /
+                         kPinyinConfigRelativePath;
+    std::error_code ec;
+    if (std::filesystem::exists(roaming, ec)) {
+        return roaming;
+    }
+    if (std::filesystem::exists(portable, ec)) {
+        return portable;
+    }
+    return roaming;
+}
+
+std::string loadShuangpinSchemeValue() {
+    std::ifstream in(sharedPinyinConfigFile(), std::ios::binary);
+    if (!in.is_open()) {
+        return kShuangpinSchemes[0].value;
+    }
+    std::string line;
+    while (std::getline(in, line)) {
+        line = trimSharedTrayValue(std::move(line));
+        if (line.rfind("ShuangpinProfile=", 0) == 0) {
+            return trimSharedTrayValue(line.substr(sizeof("ShuangpinProfile=") - 1));
+        }
+    }
+    return kShuangpinSchemes[0].value;
+}
+
+bool saveShuangpinSchemeValue(std::string_view value) {
+    const auto path = sharedPinyinConfigFile();
+    std::error_code ec;
+    std::filesystem::create_directories(path.parent_path(), ec);
+    std::ifstream in(path, std::ios::binary);
+    std::vector<std::string> lines;
+    std::string line;
+    bool replaced = false;
+    bool hasConfigSection = false;
+    while (std::getline(in, line)) {
+        if (!line.empty() && line.back() == '\r') {
+            line.pop_back();
+        }
+        if (line == "[Config]") {
+            hasConfigSection = true;
+        }
+        if (line.rfind("ShuangpinProfile=", 0) == 0) {
+            line = "ShuangpinProfile=" + std::string(value);
+            replaced = true;
+        }
+        lines.push_back(line);
+    }
+    in.close();
+    if (!replaced) {
+        if (!hasConfigSection) {
+            lines.push_back("[Config]");
+        }
+        lines.push_back("ShuangpinProfile=" + std::string(value));
+    }
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out.is_open()) {
+        return false;
+    }
+    for (const auto &entry : lines) {
+        out << entry << "\r\n";
+    }
+    return static_cast<bool>(out);
+}
+
 void appendRadioMenuItem(HMENU menu, UINT id, const wchar_t *label) {
     if (!menu || !label) {
         return;
@@ -1446,6 +1575,10 @@ void Tsf::clearSharedTrayInputMethodRequest() const {
     std::filesystem::remove(path, ec);
 }
 
+void Tsf::clearSharedTrayPinyinReloadRequest() const {
+    clearSharedTrayPinyinReloadRequestFile();
+}
+
 void Tsf::persistSharedTrayStatusActionState() const {
     const auto path = sharedTrayStatusActionStateFile();
     if (path.empty()) {
@@ -1486,6 +1619,10 @@ bool Tsf::sharedTrayInputMethodRequestPending() const {
 
 bool Tsf::sharedTrayStatusActionRequestPending() const {
     return !readSharedTrayStatusActionRequestFile().empty();
+}
+
+bool Tsf::sharedTrayPinyinReloadRequestPending() const {
+    return readSharedTrayPinyinReloadRequestFile();
 }
 
 bool Tsf::scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext) {
@@ -1672,6 +1809,42 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
         if (engine_->activateTrayStatusAction(action)) {
             clearSharedTrayStatusActionRequest();
             persistSharedTrayStatusActionState();
+            langBarNotifyIconUpdate();
+        }
+        return false;
+    }
+    return true;
+}
+
+bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
+    if (!engine_ || pendingTrayReloadPinyinConfig_ || currentProcessIsExplorer()) {
+        return false;
+    }
+    if (!readSharedTrayPinyinReloadRequestFile()) {
+        return false;
+    }
+    pendingTrayReloadPinyinConfig_ = true;
+    HRESULT hr = E_FAIL;
+    ComPtr<ITfContext> ctx;
+    if (preferredContext) {
+        ctx = preferredContext;
+    } else {
+        ctx = textEditSinkContext_;
+    }
+    if (!ctx && threadMgr_) {
+        ComPtr<ITfDocumentMgr> dm;
+        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) && dm) {
+            dm->GetTop(ctx.ReleaseAndGetAddressOf());
+        }
+    }
+    if (ctx) {
+        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
+                                &hr);
+    }
+    if (FAILED(hr)) {
+        pendingTrayReloadPinyinConfig_ = false;
+        if (engine_->reloadPinyinConfig()) {
+            clearSharedTrayPinyinReloadRequestFile();
             langBarNotifyIconUpdate();
         }
         return false;
@@ -2007,13 +2180,18 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         const auto statusActions = engine_
                                        ? engine_->trayStatusActions()
                                        : std::vector<TrayStatusActionItem>{};
+        const std::string currentInputMethod =
+            engine_ ? engine_->currentInputMethod() : std::string{};
         bool currentIsRime = false;
+        bool currentIsShuangpin = currentInputMethod == "shuangpin";
         for (const auto &item : profileItems) {
             if (item.isCurrent && item.uniqueName == "rime") {
                 currentIsRime = true;
-                break;
             }
         }
+        tsfTrace("showShellTrayContextMenuAt current=" + currentInputMethod +
+                 " currentIsShuangpin=" +
+                 std::string(currentIsShuangpin ? "true" : "false"));
         HMENU statusMenu = CreatePopupMenu();
         if (statusMenu) {
             HMENU inputModeMenu = CreatePopupMenu();
@@ -2085,6 +2263,31 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                                 trayStatusToggleMenuText(*item).c_str());
                 }
             }
+            if (currentIsShuangpin) {
+                const int currentSchemeIndex =
+                    shuangpinSchemeIndexFromValue(loadShuangpinSchemeValue());
+                HMENU shuangpinMenu = CreatePopupMenu();
+                if (shuangpinMenu) {
+                    for (size_t i = 0;
+                         i < sizeof(kShuangpinSchemes) /
+                                  sizeof(kShuangpinSchemes[0]);
+                         ++i) {
+                        AppendMenuW(shuangpinMenu,
+                                    MF_STRING |
+                                        (static_cast<int>(i) == currentSchemeIndex
+                                             ? MF_CHECKED
+                                             : 0),
+                                    IDM_SHUANGPIN_SCHEME_BASE +
+                                        static_cast<UINT>(i),
+                                    kShuangpinSchemes[i].menuText);
+                    }
+                    AppendMenuW(statusMenu, MF_POPUP,
+                                reinterpret_cast<UINT_PTR>(shuangpinMenu),
+                                L"双拼方案");
+                }
+            }
+            AppendMenuW(statusMenu, MF_STRING, IDM_PINYIN_SETTINGS_GUI,
+                        L"拼音 / 双拼设置...");
             AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(statusMenu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 设置...");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_CONFIG_DIR,
@@ -2149,6 +2352,7 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
             }
             reopenMenu = true;
             break;
+        case IDM_PINYIN_SETTINGS_GUI:
         case IDM_SETTINGS_GUI:
             launchSettingsGui();
             return;
@@ -2208,6 +2412,22 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                 cmd < IDM_INPUT_METHOD_BASE + profileItems.size()) {
                 langBarScheduleActivateInputMethod(
                     profileItems[cmd - IDM_INPUT_METHOD_BASE].uniqueName);
+                return;
+            }
+            if (cmd >= IDM_SHUANGPIN_SCHEME_BASE &&
+                cmd < IDM_SHUANGPIN_SCHEME_BASE +
+                          (sizeof(kShuangpinSchemes) /
+                           sizeof(kShuangpinSchemes[0]))) {
+                const auto index = cmd - IDM_SHUANGPIN_SCHEME_BASE;
+                const bool ok =
+                    saveShuangpinSchemeValue(kShuangpinSchemes[index].value);
+                if (ok && engine_) {
+                    engine_->reloadPinyinConfig();
+                    langBarNotifyIconUpdate();
+                }
+                tsfTrace(std::string(ok ? "saved" : "failed") +
+                         " shuangpin scheme=" +
+                         kShuangpinSchemes[index].value);
                 return;
             }
             break;
