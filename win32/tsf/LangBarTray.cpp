@@ -79,7 +79,6 @@ enum TrayMenuId : UINT {
     IDM_SCRIPT_SIMPLIFIED,
     IDM_PUNCTUATION_CHINESE,
     IDM_PUNCTUATION_ENGLISH,
-    IDM_PINYIN_SETTINGS_GUI,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
     IDM_OPEN_LOG_DIR,
@@ -2286,8 +2285,6 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                                 L"双拼方案");
                 }
             }
-            AppendMenuW(statusMenu, MF_STRING, IDM_PINYIN_SETTINGS_GUI,
-                        L"拼音 / 双拼设置...");
             AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(statusMenu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 设置...");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_CONFIG_DIR,
@@ -2352,7 +2349,6 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
             }
             reopenMenu = true;
             break;
-        case IDM_PINYIN_SETTINGS_GUI:
         case IDM_SETTINGS_GUI:
             launchSettingsGui();
             return;

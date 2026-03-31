@@ -81,7 +81,6 @@ enum TrayMenuId : UINT {
     IDM_SCRIPT_SIMPLIFIED,
     IDM_PUNCTUATION_CHINESE,
     IDM_PUNCTUATION_ENGLISH,
-    IDM_PINYIN_SETTINGS_GUI,
     IDM_SETTINGS_GUI,
     IDM_OPEN_CONFIG_DIR,
     IDM_OPEN_LOG_DIR,
@@ -772,8 +771,6 @@ std::string trayMenuCommandName(UINT cmd) {
         return "punctuation_chinese";
     case IDM_PUNCTUATION_ENGLISH:
         return "punctuation_english";
-    case IDM_PINYIN_SETTINGS_GUI:
-        return "pinyin_settings_gui";
     case IDM_SETTINGS_GUI:
         return "settings_gui";
     case IDM_OPEN_CONFIG_DIR:
@@ -1579,9 +1576,6 @@ void showContextMenu() {
                                 L"\x53cc\x62fc\x65b9\x6848");
                 }
             }
-            AppendMenuW(statusMenu, MF_STRING, IDM_PINYIN_SETTINGS_GUI,
-                        L"\x62fc\x97f3 / \x53cc\x62fc\x8bbe\x7f6e...");
-            AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
             AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(statusMenu),
                         L"\x8f93\x5165\x72b6\x6001");
         }
@@ -1709,7 +1703,6 @@ void showContextMenu() {
         case IDM_OPEN_CONFIG_DIR:
             exploreUserFcitxConfig();
             return;
-        case IDM_PINYIN_SETTINGS_GUI:
         case IDM_SETTINGS_GUI:
             launchSettingsGui();
             return;
