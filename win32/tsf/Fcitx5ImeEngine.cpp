@@ -1044,7 +1044,7 @@ void Fcitx5ImeEngine::appendLatinLowercase(wchar_t ch) {
         return;
     }
     if (ch >= L'A' && ch <= L'Z') {
-        sendKeySym(static_cast<KeySym>(FcitxKey_A + (ch - L'A')));
+        sendKeySym(static_cast<KeySym>(FcitxKey_a + (ch - L'A')));
     }
 }
 
