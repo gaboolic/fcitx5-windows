@@ -11,7 +11,7 @@
 
 示例（CLANG64 终端）：`pacman -S --needed mingw-w64-clang-x86_64-boost mingw-w64-clang-x86_64-libzstd mingw-w64-clang-x86_64-gettext mingw-w64-clang-x86_64-ninja`
 
-若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime`**、**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及 Rime 运行时常用的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**（脚本会从 **`/clang64/bin`** 或 **`/mingw64/bin`** 拷依赖 DLL 进 **`$STAGE/bin`**）。**`scripts/02-build-deps.sh` 不再从源码合并编译 librime**：始终使用 MSYS2 预编的 **`librime-*.dll`**（与官方 **`mingw-w64-*-librime`** 包一致，**不含** 合并进 DLL 的 **Rime 内置 Lua**；若需要 librime-lua，需自行改回源码合并构建或换用带 Lua 的 librime 构建）。**fcitx5-rime** 仍由源码编，**CI 固定 tag `5.1.13`**。
+若还要编 **fcitx5-rime**、**fcitx5-lua**（与 CI 安装包一致），额外安装：**`mingw-w64-clang-x86_64-librime`**、**`mingw-w64-clang-x86_64-librime-data`**（MSYS2 上已取代旧包名 **`rime-data`**）、**`opencc`**、**`lua`**，以及 Rime 运行时常用的 **`yaml-cpp`、`leveldb`、`glog`、`gflags`、`marisa`**（脚本会从 **`/clang64/bin`** 或 **`/mingw64/bin`** 拷依赖 DLL 进 **`$STAGE/bin`**）。若当前 MSYS2 仓库里的 **`librime`** / **`opencc`** 暂时不匹配，推荐直接下载一组能配套的 MSYS2 二进制包文件（如 **`mingw-w64-clang-x86_64-librime-*.pkg.tar.zst`** + **`mingw-w64-clang-x86_64-opencc-*.pkg.tar.zst`**），让 `scripts/02-build-deps.sh` 从这组包里提取 **`librime-*.dll`**、**`rime_deployer.exe`**、**`libopencc-*.dll`**、**`share/rime-data`** 与 **`share/opencc`**。**`scripts/02-build-deps.sh` 不再从源码合并编译 librime**：始终使用 MSYS2 预编的 **`librime-*.dll`**（与官方 **`mingw-w64-*-librime`** 包一致，**不含** 合并进 DLL 的 **Rime 内置 Lua**；若需要 librime-lua，需自行改回源码合并构建或换用带 Lua 的 librime 构建）。**fcitx5-rime** 仍由源码编，**CI 固定 tag `5.1.13`**。
 
 **fcitx5-table-extra** 只需基础依赖（在 **chinese-addons 已安装到 prefix** 之后编）。
 
@@ -36,7 +36,16 @@ git submodule update --init --recursive
 ### 编号脚本流程（推荐）
 
 1. **`scripts/01-build-fcitx5-windows.ps1`**（**管理员 PowerShell**，使用 MSYS2 **CLANG64** 的 `cmake`/`ninja`）— 将本仓库 **cmake --install** 到默认 **`./stage`**（可用 **`-Stage`** 改前缀）。
-2. **`scripts/02-build-deps.sh`**（**MSYS2 CLANG64**）— 在同一 **`STAGE`** 下构建并安装 **libime**、**fcitx5-chinese-addons**，以及源码存在时的 **fcitx5-table-extra** / **fcitx5-rime** / **fcitx5-lua** 等。若已执行过 (1)，可设 **`SKIP_FCITX_WINDOWS=1`** 跳过 fcitx5-windows 安装块（要求 **`$STAGE/lib/cmake/Fcitx5Core`** 已存在）。环境变量 **`STAGE`**、**`FCITX_BUILD`**、**`LIBIME_SRC`**、**`CHINESE_SRC`** 等见脚本内注释。
+2. **`scripts/02-build-deps.sh`**（**MSYS2 CLANG64**）— 在同一 **`STAGE`** 下构建并安装 **libime**、**fcitx5-chinese-addons**，以及源码存在时的 **`fcitx5-table-extra`** / **`fcitx5-rime`** / **`fcitx5-lua`** 等。若已执行过 (1)，可设 **`SKIP_FCITX_WINDOWS=1`** 跳过 fcitx5-windows 安装块（要求 **`$STAGE/lib/cmake/Fcitx5Core`** 已存在）。环境变量 **`STAGE`**、**`FCITX_BUILD`**、**`LIBIME_SRC`**、**`CHINESE_SRC`** 等见脚本内注释。若要强制使用一组匹配的 MSYS2 Rime 运行时包，可设置 **`OPENCC_PKG_FILE=/path/to/mingw-w64-clang-x86_64-opencc-*.pkg.tar.zst`**、**`LIBRIME_PKG_FILE=/path/to/mingw-w64-clang-x86_64-librime-*.pkg.tar.zst`**；脚本会先解包到 **`RIME_RUNTIME_ROOT`**（默认 **`/tmp/rime-runtime`**），再从中拷贝 `librime` / `opencc` 相关运行时与数据文件。若你已手动解包：
+
+```bash
+mkdir -p /tmp/rime-runtime
+bsdtar -xf mingw-w64-clang-x86_64-opencc-1.1.9-1-any.pkg.tar.zst -C /tmp/rime-runtime
+bsdtar -xf mingw-w64-clang-x86_64-librime-1.14.0-1-any.pkg.tar.zst -C /tmp/rime-runtime
+RIME_RUNTIME_ROOT=/tmp/rime-runtime bash scripts/02-build-deps.sh
+```
+
+脚本也会直接优先使用该目录下的 `clang64` / `mingw64` 运行时树。
 3. **`scripts/03-build-installer.ps1`** — 用 Inno 生成安装包（最终用户只跑安装向导时，效果等价于下面的 (4)+(5)）。
 4. **`scripts/04-deploy-to-portable.ps1`** — 将完整 stage 树复制到 **`C:\Fcitx5Portable`**（或 **`-DeployDir`**）。
 5. **`scripts/05-register-ime.ps1`** — **`regsvr32`** 注册 TSF IME。

@@ -38,6 +38,15 @@ else
 fi
 BUILD_TYPE="${CMAKE_BUILD_TYPE:-Release}"
 JOBS="${JOBS:-$(nproc 2>/dev/null || echo 8)}"
+OPENCC_PKG_FILE="${OPENCC_PKG_FILE:-}"
+LIBRIME_PKG_FILE="${LIBRIME_PKG_FILE:-}"
+RIME_RUNTIME_ROOT="${RIME_RUNTIME_ROOT:-/tmp/rime-runtime}"
+RIME_RUNTIME_DOWNLOAD="${RIME_RUNTIME_DOWNLOAD:-1}"
+MSYS2_MIRROR_ROOT="${MSYS2_MIRROR_ROOT:-https://mirror.msys2.org/mingw}"
+OPENCC_DOWNLOAD_VERSION="${OPENCC_DOWNLOAD_VERSION:-}"
+LIBRIME_DOWNLOAD_VERSION="${LIBRIME_DOWNLOAD_VERSION:-}"
+_RIME_RUNTIME_PREPARED=0
+_RIME_RUNTIME_PREFIX=""
 
 # Clone into $1 if there is no CMakeLists.txt yet and $1 does not exist.
 ensure_repo() {
@@ -353,13 +362,218 @@ mingw_dll_source_bin() {
   fi
 }
 
+mingw_prefix_dir() {
+  if [[ -d /clang64 ]]; then
+    echo /clang64
+  elif [[ -d /mingw64 ]]; then
+    echo /mingw64
+  elif [[ -d /ucrt64 ]]; then
+    echo /ucrt64
+  elif [[ -d /clangarm64 ]]; then
+    echo /clangarm64
+  else
+    echo ""
+  fi
+}
+
+mingw_repo_name() {
+  if [[ -d /clang64 ]]; then
+    echo clang64
+  elif [[ -d /mingw64 ]]; then
+    echo mingw64
+  elif [[ -d /ucrt64 ]]; then
+    echo ucrt64
+  elif [[ -d /clangarm64 ]]; then
+    echo clangarm64
+  else
+    echo ""
+  fi
+}
+
+mingw_package_prefix() {
+  if [[ -d /clang64 ]]; then
+    echo mingw-w64-clang-x86_64
+  elif [[ -d /mingw64 ]]; then
+    echo mingw-w64-x86_64
+  elif [[ -d /ucrt64 ]]; then
+    echo mingw-w64-ucrt-x86_64
+  elif [[ -d /clangarm64 ]]; then
+    echo mingw-w64-clang-aarch64
+  else
+    echo ""
+  fi
+}
+
+download_runtime_package() {
+  local url="$1" dest="$2"
+  mkdir -p "$(dirname "$dest")"
+  if [[ -f "$dest" ]]; then
+    return 0
+  fi
+  echo "==> downloading $(basename "$dest")"
+  if command -v curl >/dev/null 2>&1; then
+    curl -L --fail --retry 3 --output "$dest" "$url"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -O "$dest" "$url"
+  elif command -v powershell.exe >/dev/null 2>&1; then
+    powershell.exe -NoLogo -NoProfile -Command \
+      "[Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri '$url' -OutFile '$dest'"
+  else
+    echo "error: no downloader available (need curl, wget, or powershell.exe) for $url" >&2
+    exit 1
+  fi
+}
+
+extract_runtime_package() {
+  local pkg="$1" dest="$2"
+  [[ -f "$pkg" ]] || {
+    echo "error: runtime package file not found: $pkg" >&2
+    exit 1
+  }
+  mkdir -p "$dest"
+  if command -v bsdtar >/dev/null 2>&1; then
+    bsdtar -xf "$pkg" -C "$dest"
+  else
+    tar -xf "$pkg" -C "$dest"
+  fi
+}
+
+msys2_installed_pkg_version() {
+  local pkg="$1"
+  command -v pacman >/dev/null 2>&1 || return 1
+  pacman -Q "$pkg" 2>/dev/null | awk 'NR==1 { print $2 }'
+}
+
+ensure_matching_runtime_packages_downloaded() {
+  local required_opencc_dll="$1"
+  local repo pkg_prefix opencc_version librime_version opencc_url librime_url
+  repo="$(mingw_repo_name)"
+  pkg_prefix="$(mingw_package_prefix)"
+  [[ -n "$repo" && -n "$pkg_prefix" ]] || {
+    echo "error: unable to determine MSYS2 repo/package prefix for runtime download." >&2
+    exit 1
+  }
+  if [[ -z "$OPENCC_PKG_FILE" ]]; then
+    opencc_version="$OPENCC_DOWNLOAD_VERSION"
+    if [[ -z "$opencc_version" ]]; then
+      case "$required_opencc_dll" in
+        libopencc-1.1.dll) opencc_version="1.1.9-1" ;;
+        libopencc-1.2.dll) opencc_version="$(msys2_installed_pkg_version "${pkg_prefix}-opencc" || true)" ;;
+      esac
+    fi
+    [[ -n "$opencc_version" ]] || {
+      echo "error: unable to infer OpenCC package version for $required_opencc_dll." >&2
+      echo "  Set OPENCC_PKG_FILE or OPENCC_DOWNLOAD_VERSION explicitly." >&2
+      exit 1
+    }
+    OPENCC_PKG_FILE="$RIME_RUNTIME_ROOT/packages/${pkg_prefix}-opencc-${opencc_version}-any.pkg.tar.zst"
+    opencc_url="$MSYS2_MIRROR_ROOT/$repo/$(basename "$OPENCC_PKG_FILE")"
+    download_runtime_package "$opencc_url" "$OPENCC_PKG_FILE"
+  fi
+  if [[ -z "$LIBRIME_PKG_FILE" ]]; then
+    librime_version="$LIBRIME_DOWNLOAD_VERSION"
+    if [[ -z "$librime_version" ]]; then
+      librime_version="$(msys2_installed_pkg_version "${pkg_prefix}-librime" || true)"
+    fi
+    [[ -n "$librime_version" ]] || {
+      echo "error: unable to infer librime package version." >&2
+      echo "  Set LIBRIME_PKG_FILE or LIBRIME_DOWNLOAD_VERSION explicitly." >&2
+      exit 1
+    }
+    LIBRIME_PKG_FILE="$RIME_RUNTIME_ROOT/packages/${pkg_prefix}-librime-${librime_version}-any.pkg.tar.zst"
+    librime_url="$MSYS2_MIRROR_ROOT/$repo/$(basename "$LIBRIME_PKG_FILE")"
+    download_runtime_package "$librime_url" "$LIBRIME_PKG_FILE"
+  fi
+}
+
+prepare_rime_runtime_prefix() {
+  local _prefix _required_opencc
+  _prefix="$(mingw_prefix_dir)"
+  [[ -n "$_prefix" ]] || return 1
+  if [[ $_RIME_RUNTIME_PREPARED -eq 1 ]]; then
+    printf '%s\n' "$_RIME_RUNTIME_PREFIX"
+    return 0
+  fi
+  if [[ -d "$RIME_RUNTIME_ROOT$_prefix/bin" ]]; then
+    _RIME_RUNTIME_PREFIX="$RIME_RUNTIME_ROOT$_prefix"
+    _RIME_RUNTIME_PREPARED=1
+    printf '%s\n' "$_RIME_RUNTIME_PREFIX"
+    return 0
+  fi
+  if [[ -z "$OPENCC_PKG_FILE" && -z "$LIBRIME_PKG_FILE" ]]; then
+    _required_opencc="$(detect_librime_opencc_import_name_from_dir "$_prefix/bin" || true)"
+    if [[ -z "$_required_opencc" || -f "$_prefix/bin/$_required_opencc" ]]; then
+      _RIME_RUNTIME_PREFIX="$_prefix"
+      _RIME_RUNTIME_PREPARED=1
+      printf '%s\n' "$_RIME_RUNTIME_PREFIX"
+      return 0
+    fi
+    if [[ "$RIME_RUNTIME_DOWNLOAD" != "1" ]]; then
+      echo "error: librime runtime expects $_required_opencc but it is missing under $_prefix/bin" >&2
+      echo "  Set OPENCC_PKG_FILE/LIBRIME_PKG_FILE, pre-extract RIME_RUNTIME_ROOT, or set RIME_RUNTIME_DOWNLOAD=1." >&2
+      exit 1
+    fi
+    echo "==> missing $_required_opencc under $_prefix/bin; downloading matching MSYS2 runtime packages"
+    ensure_matching_runtime_packages_downloaded "$_required_opencc"
+  fi
+  mkdir -p "$RIME_RUNTIME_ROOT"
+  rm -rf "$RIME_RUNTIME_ROOT$_prefix"
+  if [[ -n "$OPENCC_PKG_FILE" ]]; then
+    echo "==> extracting OpenCC runtime package: $OPENCC_PKG_FILE"
+    extract_runtime_package "$OPENCC_PKG_FILE" "$RIME_RUNTIME_ROOT"
+  fi
+  if [[ -n "$LIBRIME_PKG_FILE" ]]; then
+    echo "==> extracting librime runtime package: $LIBRIME_PKG_FILE"
+    extract_runtime_package "$LIBRIME_PKG_FILE" "$RIME_RUNTIME_ROOT"
+  fi
+  _RIME_RUNTIME_PREFIX="$RIME_RUNTIME_ROOT$_prefix"
+  if [[ ! -d "$_RIME_RUNTIME_PREFIX" ]]; then
+    echo "error: extracted runtime prefix missing: $_RIME_RUNTIME_PREFIX" >&2
+    exit 1
+  fi
+  _RIME_RUNTIME_PREPARED=1
+  printf '%s\n' "$_RIME_RUNTIME_PREFIX"
+}
+
+find_llvm_readobj() {
+  local _tool
+  for _tool in \
+    /clang64/bin/llvm-readobj.exe \
+    /mingw64/bin/llvm-readobj.exe \
+    /ucrt64/bin/llvm-readobj.exe \
+    /clangarm64/bin/llvm-readobj.exe; do
+    [[ -x "$_tool" ]] && {
+      echo "$_tool"
+      return 0
+    }
+  done
+  command -v llvm-readobj 2>/dev/null || true
+}
+
+detect_librime_opencc_import_name_from_dir() {
+  local _dir="$1" _tool
+  shopt -s nullglob
+  local _lr=( "$_dir"/librime-*.dll )
+  shopt -u nullglob
+  [[ ${#_lr[@]} -gt 0 ]] || return 1
+  _tool="$(find_llvm_readobj)"
+  [[ -n "$_tool" ]] || return 1
+  "$_tool" --coff-imports "${_lr[0]}" 2>/dev/null |
+    sed -n 's/^[[:space:]]*Name: \(libopencc-[^[:space:]]*\.dll\)$/\1/p' |
+    sed -n '1p'
+}
+
 vendor_rime_share_into_stage() {
   local rime_data="$STAGE/share/rime-data"
   if [[ -d "$rime_data" ]] && [[ -n "$(ls -A "$rime_data" 2>/dev/null)" ]]; then
     return 0
   fi
-  local src
-  for src in /clang64/share/rime-data /mingw64/share/rime-data; do
+  local src _runtime_prefix
+  _runtime_prefix="$(prepare_rime_runtime_prefix || true)"
+  for src in \
+    "${_runtime_prefix:+$_runtime_prefix/share/rime-data}" \
+    /clang64/share/rime-data /mingw64/share/rime-data; do
+    [[ -n "$src" ]] || continue
     if [[ -d "$src" ]]; then
       mkdir -p "$STAGE/share"
       cp -a "$src" "$rime_data"
@@ -373,13 +587,27 @@ vendor_rime_share_into_stage() {
 # Rime 依赖 DLL（不含 librime 本体 — 本体由 MSYS2 预编包拷贝）。
 # CLANG64 上为 libglog-2.dll（不是 libglog.dll）；libglog 还依赖 libgflags、libunwind。
 copy_librime_dependency_dlls() {
-  local _bin
+  local _bin _runtime_prefix _runtime_bin _opencc_required _system_prefix
   _bin="$(mingw_dll_source_bin)"
   [[ -n "$_bin" ]] || return 0
+  _runtime_prefix="$(prepare_rime_runtime_prefix)"
+  _runtime_bin="$_runtime_prefix/bin"
+  _system_prefix="$(mingw_prefix_dir)"
   mkdir -p "$STAGE/bin"
   local _f
   shopt -s nullglob
-  for _f in "$_bin"/libopencc*.dll "$_bin"/libyaml-cpp.dll \
+  if [[ "$_runtime_prefix" != "$_system_prefix" ]]; then
+    rm -f "$STAGE/bin"/libopencc*.dll
+  fi
+  _opencc_required="$(detect_librime_opencc_import_name_from_dir "$_runtime_bin" || true)"
+  for _f in "$_runtime_bin"/libopencc*.dll; do
+    [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
+  done
+  if [[ -n "$_opencc_required" && ! -f "$STAGE/bin/$_opencc_required" ]]; then
+    echo "error: librime runtime expects $_opencc_required but it is missing under $_runtime_bin" >&2
+    exit 1
+  fi
+  for _f in "$_bin"/libyaml-cpp.dll \
     "$_bin"/libleveldb.dll "$_bin"/libglog*.dll "$_bin"/libmarisa*.dll \
     "$_bin"/libgflags*.dll "$_bin"/libunwind.dll \
     "$_bin"/libwinpthread-1.dll; do
@@ -389,11 +617,20 @@ copy_librime_dependency_dlls() {
     [[ -f "$_f" ]] && cp -f "$_f" "$STAGE/bin/"
   done
   shopt -u nullglob
-  if [[ -f "$_bin/rime_deployer.exe" ]]; then
+  if [[ -f "$_runtime_bin/rime_deployer.exe" ]]; then
+    cp -f "$_runtime_bin/rime_deployer.exe" "$STAGE/bin/"
+  elif [[ -f "$_bin/rime_deployer.exe" ]]; then
     cp -f "$_bin/rime_deployer.exe" "$STAGE/bin/"
   fi
   # OpenCC config/data used by some Rime schemas
-  if [[ -d /clang64/share/opencc ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
+  if [[ -d "$_runtime_prefix/share/opencc" ]] && [[ "$_runtime_prefix" != "$_system_prefix" ]]; then
+    rm -rf "$STAGE/share/opencc"
+    mkdir -p "$STAGE/share"
+    cp -a "$_runtime_prefix/share/opencc" "$STAGE/share/"
+  elif [[ -d "$_runtime_prefix/share/opencc" ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
+    mkdir -p "$STAGE/share"
+    cp -a "$_runtime_prefix/share/opencc" "$STAGE/share/"
+  elif [[ -d /clang64/share/opencc ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
     mkdir -p "$STAGE/share"
     cp -a /clang64/share/opencc "$STAGE/share/"
   elif [[ -d /mingw64/share/opencc ]] && [[ ! -d "$STAGE/share/opencc" ]]; then
@@ -403,9 +640,10 @@ copy_librime_dependency_dlls() {
 }
 
 copy_librime_dlls_from_msys() {
-  local _bin _f
-  _bin="$(mingw_dll_source_bin)"
-  [[ -n "$_bin" ]] || return 0
+  local _runtime_prefix _bin _f
+  _runtime_prefix="$(prepare_rime_runtime_prefix)"
+  _bin="$_runtime_prefix/bin"
+  [[ -d "$_bin" ]] || return 0
   mkdir -p "$STAGE/bin"
   shopt -s nullglob
   for _f in "$_bin"/librime-*.dll; do
@@ -427,6 +665,13 @@ verify_librime_prebuilt_in_stage() {
     echo "error: no librime-*.dll under $STAGE/bin (MSYS2 prebuilt)." >&2
     echo "  CLANG64: pacman -S mingw-w64-clang-x86_64-librime mingw-w64-clang-x86_64-librime-data" >&2
     echo "  MINGW64: pacman -S mingw-w64-x86_64-librime mingw-w64-x86_64-librime-data" >&2
+    exit 1
+  fi
+  local _opencc_required
+  _opencc_required="$(detect_librime_opencc_import_name_from_dir "$STAGE/bin" || true)"
+  if [[ -n "$_opencc_required" ]] && [[ ! -f "$STAGE/bin/$_opencc_required" ]]; then
+    echo "error: staged librime requires $_opencc_required but it is missing under $STAGE/bin." >&2
+    echo "  Provide matching package files via OPENCC_PKG_FILE=... LIBRIME_PKG_FILE=..." >&2
     exit 1
   fi
   echo "==> [5a] librime: MSYS2 prebuilt $(basename "${_lr[0]}") + deps (no merged librime-lua in DLL)"
