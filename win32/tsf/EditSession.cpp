@@ -1322,25 +1322,23 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        if (engine_->preedit().size() < 32) {
-            pendingKeyHandled_ = true;
-            engine_->appendLatinLowercase(ch);
-            if (!ensureCompositionStarted(ec)) {
-                drainCommitsAfterEngine(ec);
-                return S_OK;
-            }
-            updatePreeditText(ec);
-            syncCandidateWindow(ec);
-            if (traceLatinO) {
-                tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
-                         tsfWideToUtf8(engine_->preedit()) +
-                         " candidateCount=" +
-                         std::to_string(engine_->candidates().size()) +
-                         " top0=" +
-                         (engine_->candidates().empty()
-                              ? std::string()
-                              : tsfWideToUtf8(engine_->candidateText(0))));
-            }
+        pendingKeyHandled_ = true;
+        engine_->appendLatinLowercase(ch);
+        if (!ensureCompositionStarted(ec)) {
+            drainCommitsAfterEngine(ec);
+            return S_OK;
+        }
+        updatePreeditText(ec);
+        syncCandidateWindow(ec);
+        if (traceLatinO) {
+            tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
+                     tsfWideToUtf8(engine_->preedit()) +
+                     " candidateCount=" +
+                     std::to_string(engine_->candidates().size()) +
+                     " top0=" +
+                     (engine_->candidates().empty()
+                          ? std::string()
+                          : tsfWideToUtf8(engine_->candidateText(0))));
         }
         drainCommitsAfterEngine(ec);
         return S_OK;

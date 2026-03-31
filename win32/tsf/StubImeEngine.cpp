@@ -78,9 +78,6 @@ class StubImeEngine : public ImeEngine {
     }
 
     void appendLatinLowercase(wchar_t ch) override {
-        if (preedit_.size() >= 32) {
-            return;
-        }
         preedit_.push_back(ch);
         regenerateCandidates();
     }
