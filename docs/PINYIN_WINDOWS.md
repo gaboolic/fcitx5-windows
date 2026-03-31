@@ -106,7 +106,7 @@ cmake --install build-chinese
 ## 5. 配置 profile（默认输入法含 pinyin）
 
 - **`cmake --install`** 后，prefix 下会有：
-  - **`profile.windows.example`** — 图形安装程序默认种子：**拼音 + 五笔（`wbx`）+ 中州韵（`rime`）**（`wbx`/`rime` 需对应 addon 已在 stage），无 `keyboard-us`（与常见未启用 keyboard 引擎的构建一致）。若本地未克隆 **fcitx5-rime**，请删掉 **`Name=rime`** 一段，或改用 **`profile.pinyin-only.example`**。未克隆 **fcitx5-lua** 仅缺少 Lua 相关 addon，不必改 profile。
+- **`profile.windows.example`** — 图形安装程序默认种子：**拼音 + 双拼（`shuangpin`）+ 五笔（`wbx`）+ 中州韵（`rime`）**（`shuangpin`/`wbx`/`rime` 需对应 addon 已在 stage），无 `keyboard-us`（与常见未启用 keyboard 引擎的构建一致）。若本地未克隆 **fcitx5-rime**，请删掉 **`Name=rime`** 一段，或改用 **`profile.pinyin-only.example`**。未克隆 **fcitx5-lua** 仅缺少 Lua 相关 addon，不必改 profile。
   - **`profile.pinyin.example`** — 拼音 + `keyboard-us`（需已安装 keyboard addon）。
   - **`profile.pinyin-only.example`** — 仅 pinyin。
 - 将其中之一复制到用户配置目录下的 **`profile`**（路径由 fcitx5 `StandardPaths` 决定，IME 与便携布局下一般为 **`%AppData%\Fcitx5\config\fcitx5\profile`**）。若格式与当前 fcitx5 版本不兼容，可在 Linux 上添加一次拼音后拷贝生成的 `profile` 再对照修改。

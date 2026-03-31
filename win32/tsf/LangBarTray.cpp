@@ -1007,6 +1007,9 @@ std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
     if (item.uniqueName == "pinyin") {
         return L"拼音";
     }
+    if (item.uniqueName == "shuangpin") {
+        return L"双拼";
+    }
     if (item.uniqueName == "wbx") {
         return L"五笔字型";
     }
@@ -2048,6 +2051,7 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
                 }
             }
             AppendMenuW(statusMenu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(statusMenu, MF_STRING, IDM_SETTINGS_GUI, L"Fcitx5 设置...");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_CONFIG_DIR,
                         L"打开配置文件夹");
             AppendMenuW(statusMenu, MF_STRING, IDM_OPEN_LOG_DIR,
@@ -2110,6 +2114,9 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
             }
             reopenMenu = true;
             break;
+        case IDM_SETTINGS_GUI:
+            launchSettingsGui();
+            return;
         case IDM_OPEN_CONFIG_DIR:
             exploreUserFcitxConfig();
             return;

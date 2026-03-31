@@ -791,6 +791,9 @@ std::wstring trayInputMethodMenuText(const ProfileInputMethodItem &item) {
     if (item.uniqueName == "pinyin") {
         return L"\x62fc\x97f3";
     }
+    if (item.uniqueName == "shuangpin") {
+        return L"\x53cc\x62fc";
+    }
     if (item.uniqueName == "wbx") {
         return L"\x4e94\x7b14\x5b57\x578b";
     }
@@ -1458,6 +1461,8 @@ void showContextMenu() {
         }
 
         AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+        AppendMenuW(menu, MF_STRING, IDM_SETTINGS_GUI,
+                    L"Fcitx5 \x8bbe\x7f6e...");
         AppendMenuW(menu, MF_STRING, IDM_OPEN_CONFIG_DIR,
                     L"\x6253\x5f00\x914d\x7f6e\x6587\x4ef6\x5939");
         AppendMenuW(menu, MF_STRING, IDM_OPEN_LOG_DIR,
@@ -1544,6 +1549,9 @@ void showContextMenu() {
             break;
         case IDM_OPEN_CONFIG_DIR:
             exploreUserFcitxConfig();
+            return;
+        case IDM_SETTINGS_GUI:
+            launchSettingsGui();
             return;
         case IDM_OPEN_LOG_DIR:
             exploreFcitx5LogDir();
