@@ -37,6 +37,7 @@
 #include <iostream>
 #include <memory>
 #include <ostream>
+#include <sstream>
 #include <streambuf>
 #include <string>
 
@@ -944,6 +945,7 @@ void Fcitx5ImeEngine::syncUiFromIc() {
         preU8 = std::move(serverU8);
         cursorBytes = serverTxt.cursor();
     }
+    const bool traceLatinO = (preU8 == "o" || preU8 == "O");
     preeditWide_ = utf8ToWide(preU8);
     if (cursorBytes < 0) {
         preeditCaretWide_ = static_cast<int>(preeditWide_.size());
@@ -956,6 +958,12 @@ void Fcitx5ImeEngine::syncUiFromIc() {
     }
     auto list = ic_->inputPanel().candidateList();
     if (!list || list->empty()) {
+        if (traceLatinO) {
+            tsfTrace("o-syncUiFromIc preedit=" + preU8 +
+                     " clientPreedit=" + clientTxt.toString() +
+                     " serverPreedit=" + serverTxt.toString() +
+                     " candidates=<empty>");
+        }
         return;
     }
     const int n = list->size();
@@ -969,6 +977,21 @@ void Fcitx5ImeEngine::syncUiFromIc() {
         highlightIndex_ >= static_cast<int>(candidatesWide_.size())) {
         highlightIndex_ = 0;
     }
+    if (traceLatinO) {
+        std::ostringstream ss;
+        ss << "o-syncUiFromIc preedit=" << preU8
+           << " clientPreedit=" << clientTxt.toString()
+           << " serverPreedit=" << serverTxt.toString()
+           << " highlight=" << highlightIndex_ << " topCandidates=";
+        const int topN = std::min(5, list->size());
+        for (int i = 0; i < topN; ++i) {
+            if (i) {
+                ss << "|";
+            }
+            ss << list->candidate(i).text().toString();
+        }
+        tsfTrace(ss.str());
+    }
 }
 
 bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
@@ -981,6 +1004,17 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
     KeyEvent ev(ic_.get(), Key(sym), false);
     const bool keyOk = ic_->keyEvent(ev);
     syncUiFromIc();
+    if (sym == FcitxKey_o || sym == FcitxKey_O) {
+        std::ostringstream ss;
+        ss << "o-sendKeySym sym=" << static_cast<unsigned>(sym)
+           << " keyEventRet=" << (keyOk ? "true" : "false")
+           << " preeditWide=" << preeditWide_.size()
+           << " candidatesWide=" << candidatesWide_.size();
+        if (!candidatesWide_.empty()) {
+            ss << " top0=" << ic_->inputPanel().candidateList()->candidate(0).text().toString();
+        }
+        tsfTrace(ss.str());
+    }
     if (loggingAttached_ && instance_) {
         const auto &panel = ic_->inputPanel();
         FCITX_INFO() << "tsf sendKeySym sym=" << static_cast<unsigned>(sym)
