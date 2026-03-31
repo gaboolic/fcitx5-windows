@@ -1527,6 +1527,21 @@ void showContextMenu() {
     }
 }
 
+void deferContextMenuOpen() {
+    if (g_reopenMenuPending) {
+        return;
+    }
+    GetCursorPos(&g_reopenMenuPoint);
+    g_reopenMenuPending = true;
+    trayHelperTrace(
+        "tray context menu deferred via PostMessage for shell foreground");
+    if (!PostMessageW(g_hwnd, kReopenContextMenuMessage, 0, 0)) {
+        trayHelperTrace(
+            "tray context menu defer PostMessage failed; opening inline");
+        showContextMenu();
+    }
+}
+
 bool handleTrayServiceCopyData(const COPYDATASTRUCT *cds) {
     if (!cds || !cds->lpData) {
         return false;
@@ -1621,6 +1636,11 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             s_lastContextMenuTick = now;
+            updateForegroundTrayValidityState();
+            if (g_foregroundTrayValidity.foregroundIsShellOrHelper) {
+                deferContextMenuOpen();
+                return 0;
+            }
             showContextMenu();
         }
         return 0;
@@ -1631,6 +1651,9 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     }
     switch (msg) {
+    case kReopenContextMenuMessage:
+        showContextMenu();
+        return 0;
     case WM_COPYDATA:
         if (handleTrayServiceCopyData(
                 reinterpret_cast<const COPYDATASTRUCT *>(lp))) {
