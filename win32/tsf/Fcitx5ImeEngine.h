@@ -13,6 +13,7 @@ namespace fcitx {
 
 class Instance;
 class TsfInputContext;
+class Fcitx5ImePipeShared;
 
 /// Try to create an engine backed by in-process `fcitx::Instance` + dynamic
 /// addons. Returns nullptr if initialization fails (caller should use stub).
@@ -24,6 +25,13 @@ class Fcitx5ImeEngine : public ImeEngine {
     ~Fcitx5ImeEngine() override;
 
     bool init();
+
+    /// Pipe server: share one `Instance` from \p host; own a dedicated
+    /// `TsfInputContext`. Does not create an `Instance`.
+    bool initAsPipeSession(Fcitx5ImePipeShared *host);
+
+    /// Pump libuv a few times (in-process TSF and pipe server use this).
+    void pumpEventLoopForUi() override;
 
     void enqueueCommitUtf8(std::string text);
 
@@ -76,8 +84,12 @@ class Fcitx5ImeEngine : public ImeEngine {
     void
     activatePreferredInputMethod(const std::string &preferredInputMethod = {});
 
+    Instance *instancePtr() const;
+
     bool loggingAttached_ = false;
 
+    /// When non-null, `instance_` is unused; `Instance` comes from the pipe host.
+    Fcitx5ImePipeShared *pipeSharedHost_ = nullptr;
     std::unique_ptr<Instance> instance_;
     std::unique_ptr<TsfInputContext> ic_;
 

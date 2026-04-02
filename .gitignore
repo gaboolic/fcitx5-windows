@@ -8,6 +8,7 @@ build-smoke
 build-portable
 build-win32-test
 build-ci-test
+build-ipc-test
 stage
 stage-pinyin
 stage-test

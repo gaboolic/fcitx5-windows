@@ -37,8 +37,8 @@ if(NOT MSVC)
     target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
   endif()
 endif()
-# tsf (Fcitx5ImeEngine) calls uv_run; static lib does not propagate -luv to this DLL.
-if(TARGET Fcitx5Core AND NOT MSVC)
+# In-process Fcitx5ImeEngine calls uv_run; pipe mode does not load Core in the DLL.
+if(TARGET Fcitx5Core AND NOT MSVC AND NOT FCITX5_WINDOWS_IME_IPC)
   target_link_libraries(fcitx5-x86_64 PRIVATE uv)
 endif()
 

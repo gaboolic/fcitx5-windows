@@ -1,0 +1,28 @@
+--- a/msys2.toolchain.cmake
++++ b/msys2.toolchain.cmake
+@@ -50,6 +50,25 @@
+ set(CMAKE_C_COMPILER_TARGET "${TARGET_TRIPLET}")
+ set(CMAKE_CXX_COMPILER_TARGET "${TARGET_TRIPLET}")
+ 
++# Resource compiler: COFF must match the link target. Native build: use
++# sysroot windres. Cross ARM64 on x86_64 host: clangarm64 windres.exe is ARM64
++# and cannot run on GitHub runners — use host llvm-windres + target triplet.
++if (ARCH STREQUAL "ARM64"
++    AND CMAKE_HOST_SYSTEM_PROCESSOR STREQUAL "AMD64"
++    AND EXISTS "${HOST_SYSROOT}/bin/llvm-windres.exe")
++ set(CMAKE_RC_COMPILER "${HOST_SYSROOT}/bin/llvm-windres.exe" CACHE FILEPATH
++                                                                "llvm-windres (host)")
++ set(CMAKE_RC_COMPILER_TARGET "aarch64-w64-windows-gnu" CACHE STRING
++                                                               "RC for ARM64 PE")
++ # CMake often still feeds windres-style rules without --target; lld then sees
++ # machine type x64 in the .res/.obj. Force ARM64 for llvm-windres explicitly.
++ set(CMAKE_RC_FLAGS "--target=aarch64-w64-windows-gnu" CACHE STRING
++                                                     "llvm-windres ARM64 COFF")
++elseif (EXISTS "${CMAKE_SYSROOT}/bin/windres.exe")
++ set(CMAKE_RC_COMPILER "${CMAKE_SYSROOT}/bin/windres.exe" CACHE FILEPATH
++                                                                "windres for target triplet")
++endif()
++
+ # Bypass check since it doesn't use the flags we set here.
+ set(CMAKE_C_COMPILER_WORKS TRUE)
+ set(CMAKE_CXX_COMPILER_WORKS TRUE)

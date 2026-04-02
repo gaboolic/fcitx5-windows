@@ -95,6 +95,9 @@ class ImeEngine {
     /// Invoke addon sub-config action for a specific input method engine.
     virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                             const std::string &subPath);
+
+    /// Pump async UI hooks (libuv) used by in-process TSF and the pipe server.
+    virtual void pumpEventLoopForUi() {}
 };
 
 std::unique_ptr<ImeEngine> makeStubImeEngine();

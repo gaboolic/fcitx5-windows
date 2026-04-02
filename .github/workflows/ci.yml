@@ -197,6 +197,12 @@ jobs:
           }
           Add-Content $env:GITHUB_PATH "C:/msys64/clang64/bin"
 
+      - name: Patch windows-cross (ARM64 llvm-windres)
+        shell: bash
+        run: |
+          set -e
+          git -C windows-cross apply "$GITHUB_WORKSPACE/patches/windows-cross-msys2-toolchain-arm64-llvm-windres.patch"
+
       - name: Build
         run: |
           cmake -B build/${{ matrix.arch }} -G Ninja `

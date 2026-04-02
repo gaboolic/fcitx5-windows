@@ -3,7 +3,11 @@
 #include <string_view>
 
 #if FCITX_WIN32_IME_WITH_CORE
+#if FCITX5_WINDOWS_IME_IPC
+#include "PipeImeEngine.h"
+#else
 #include "Fcitx5ImeEngine.h"
+#endif
 #endif
 
 extern void DllAddRef();
@@ -25,11 +29,19 @@ bool currentProcessShouldBypassDefaultEngine() {
 
 std::unique_ptr<ImeEngine> makeDefaultImeEngine() {
 #if FCITX_WIN32_IME_WITH_CORE
+#if FCITX5_WINDOWS_IME_IPC
+    if (!currentProcessShouldBypassDefaultEngine()) {
+        if (auto e = makePipeImeEngineAttempt()) {
+            return e;
+        }
+    }
+#else
     if (!currentProcessShouldBypassDefaultEngine()) {
         if (auto e = makeFcitx5ImeEngineAttempt()) {
             return e;
         }
     }
+#endif
 #endif
     return makeStubImeEngine();
 }

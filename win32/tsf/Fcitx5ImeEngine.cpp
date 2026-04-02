@@ -1,6 +1,7 @@
 #include "Fcitx5ImeEngine.h"
+#include "Fcitx5ImePipeShared.h"
 #include "TsfInputContext.h"
-#include "tsf.h"
+#include "TsfTrace.h"
 
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
@@ -41,12 +42,25 @@
 #include <streambuf>
 #include <string>
 
-namespace {
+namespace fcitx {
+
+Instance *Fcitx5ImeEngine::instancePtr() const {
+    if (pipeSharedHost_) {
+        return pipeSharedHost_->instance();
+    }
+    return instance_.get();
+}
+
+// Fcitx5Utils (standardpaths_p_win.cpp): pin portable layout to the IME DLL,
+// not the host process .exe (Notepad, etc.).
+extern HINSTANCE mainInstanceHandle;
+
+namespace ime_engine_file {
 
 // Fcitx5.exe runs eventLoop().exec(); the TSF DLL never does, so libuv async
 // (used by EventDispatcher for UI/input-panel updates) would never run. Pump a
 // few non-blocking iterations before reading InputPanel in syncUiFromIc().
-void flushLibuvLoopForIme(fcitx::EventLoop &loop) {
+void flushLibuvLoopForIme(EventLoop &loop) {
     if (std::strcmp(loop.implementation(), "libuv") != 0) {
         return;
     }
@@ -59,16 +73,6 @@ void flushLibuvLoopForIme(fcitx::EventLoop &loop) {
         uv_run(uvloop, UV_RUN_NOWAIT);
     }
 }
-
-} // namespace
-
-namespace fcitx {
-
-// Fcitx5Utils (standardpaths_p_win.cpp): pin portable layout to the IME DLL,
-// not the host process .exe (Notepad, etc.).
-extern HINSTANCE mainInstanceHandle;
-
-namespace {
 
 int utf8PrefixToWideLen(const std::string &utf8, int byteCount) {
     if (byteCount <= 0 || utf8.empty()) {
@@ -657,7 +661,9 @@ void tsImeDetachLogging() {
     gTsImeLogBuf.reset();
 }
 
-} // namespace
+} // namespace ime_engine_file
+
+using namespace ime_engine_file;
 
 std::unique_ptr<ImeEngine> makeFcitx5ImeEngineAttempt() {
     auto eng = std::make_unique<Fcitx5ImeEngine>();
@@ -671,7 +677,10 @@ Fcitx5ImeEngine::Fcitx5ImeEngine() = default;
 
 Fcitx5ImeEngine::~Fcitx5ImeEngine() {
     ic_.reset();
-    instance_.reset();
+    if (!pipeSharedHost_) {
+        instance_.reset();
+    }
+    pipeSharedHost_ = nullptr;
     if (loggingAttached_) {
         tsImeDetachLogging();
         loggingAttached_ = false;
@@ -680,8 +689,15 @@ Fcitx5ImeEngine::~Fcitx5ImeEngine() {
 
 bool Fcitx5ImeEngine::init() { return initWithInputMethod({}); }
 
+void Fcitx5ImeEngine::pumpEventLoopForUi() {
+    if (Instance *inst = instancePtr()) {
+        flushLibuvLoopForIme(inst->eventLoop());
+    }
+}
+
 bool Fcitx5ImeEngine::initWithInputMethod(
     const std::string &preferredInputMethod) {
+    pipeSharedHost_ = nullptr;
     loggingAttached_ = false;
     try {
         pinStandardPathsToImeModule();
@@ -713,14 +729,14 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         instance_ = std::make_unique<Instance>(instanceArgv.argc(),
                                                instanceArgv.data());
         tsfTrace("Fcitx5ImeEngine::init Instance constructed");
-        instance_->addonManager().registerDefaultLoader(nullptr);
+        instancePtr()->addonManager().registerDefaultLoader(nullptr);
         tsfTrace("Fcitx5ImeEngine::init before initialize()");
-        instance_->initialize();
+        instancePtr()->initialize();
         tsfTrace("Fcitx5ImeEngine::init after initialize()");
         tsfTrace("Fcitx5ImeEngine::init instance initialized");
 
         ic_ = std::make_unique<TsfInputContext>(
-            this, instance_->inputContextManager());
+            this, instancePtr()->inputContextManager());
         ic_->setEnablePreedit(true);
         ic_->setCapabilityFlags(CapabilityFlags{
             CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
@@ -731,7 +747,7 @@ bool Fcitx5ImeEngine::initWithInputMethod(
         activatePreferredInputMethod(preferredInputMethod);
         syncUiFromIc();
         tsfTrace(std::string("Fcitx5ImeEngine::init success current=") +
-                 instance_->inputMethod(ic_.get()));
+                 instancePtr()->inputMethod(ic_.get()));
         return true;
     } catch (...) {
         tsfTrace("Fcitx5ImeEngine::init exception");
@@ -745,9 +761,66 @@ bool Fcitx5ImeEngine::initWithInputMethod(
     }
 }
 
+bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
+    if (!host || !host->instance()) {
+        return false;
+    }
+    pipeSharedHost_ = host;
+    instance_.reset();
+    loggingAttached_ = false;
+    try {
+        ic_ = std::make_unique<TsfInputContext>(
+            this, host->instance()->inputContextManager());
+        ic_->setEnablePreedit(true);
+        ic_->setCapabilityFlags(CapabilityFlags{
+            CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
+            CapabilityFlag::ClientSideInputPanel});
+        ic_->focusIn();
+        activatePreferredInputMethod({});
+        syncUiFromIc();
+        tsfTrace(std::string("Fcitx5ImeEngine::initAsPipeSession ok current=") +
+                 instancePtr()->inputMethod(ic_.get()));
+        return true;
+    } catch (...) {
+        tsfTrace("Fcitx5ImeEngine::initAsPipeSession exception");
+        ic_.reset();
+        pipeSharedHost_ = nullptr;
+        return false;
+    }
+}
+
 bool Fcitx5ImeEngine::rebuildForInputMethod(
     const std::string &preferredInputMethod) {
     tsfTrace("rebuildForInputMethod begin target=" + preferredInputMethod);
+    if (pipeSharedHost_) {
+        ic_.reset();
+        commitQueueUtf8_.clear();
+        preeditWide_.clear();
+        candidatesWide_.clear();
+        highlightIndex_ = 0;
+        preeditCaretWide_ = 0;
+        if (!pipeSharedHost_->instance()) {
+            return false;
+        }
+        try {
+            ic_ = std::make_unique<TsfInputContext>(
+                this, pipeSharedHost_->instance()->inputContextManager());
+            ic_->setEnablePreedit(true);
+            ic_->setCapabilityFlags(CapabilityFlags{
+                CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
+                CapabilityFlag::ClientSideInputPanel});
+            ic_->focusIn();
+            activatePreferredInputMethod(preferredInputMethod);
+            syncUiFromIc();
+            tsfTrace(std::string("rebuildForInputMethod (pipe session) ok target=") +
+                     preferredInputMethod);
+            return true;
+        } catch (...) {
+            tsfTrace("rebuildForInputMethod pipe session exception");
+            ic_.reset();
+            return false;
+        }
+    }
     ic_.reset();
     instance_.reset();
     commitQueueUtf8_.clear();
@@ -762,10 +835,10 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
 }
 
 void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
-    if (!instance_) {
+    if (!instancePtr()) {
         return;
     }
-    auto &imm = instance_->inputMethodManager();
+    auto &imm = instancePtr()->inputMethodManager();
     InputMethodGroup group = imm.currentGroup();
     auto &items = group.inputMethodList();
     bool changed = false;
@@ -821,48 +894,48 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
 
 void Fcitx5ImeEngine::activatePreferredInputMethod(
     const std::string &preferredInputMethod) {
-    if (!instance_ || !ic_) {
+    if (!instancePtr() || !ic_) {
         return;
     }
     ensurePortableImGroupHasEntries();
-    auto &imm = instance_->inputMethodManager();
+    auto &imm = instancePtr()->inputMethodManager();
     if (!preferredInputMethod.empty() && imm.entry(preferredInputMethod)) {
-        instance_->setCurrentInputMethod(ic_.get(), preferredInputMethod, true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), preferredInputMethod, true);
         syncUiFromIc();
         return;
     }
     if (const char *envIm = std::getenv("FCITX_TS_IM");
         envIm && envIm[0] && imm.entry(std::string(envIm))) {
-        instance_->setCurrentInputMethod(ic_.get(), envIm, true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), envIm, true);
         syncUiFromIc();
         return;
     }
     // Prefer pinyin as the TSF startup default unless the user explicitly
     // overrides it via FCITX_TS_IM.
     if (imm.entry("pinyin")) {
-        instance_->setCurrentInputMethod(ic_.get(), "pinyin", true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), "pinyin", true);
         syncUiFromIc();
         return;
     }
     const auto &group = imm.currentGroup();
     const std::string &def = group.defaultInputMethod();
     if (!def.empty() && imm.entry(def)) {
-        instance_->setCurrentInputMethod(ic_.get(), def, true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), def, true);
         syncUiFromIc();
         return;
     }
     for (const auto &item : group.inputMethodList()) {
         if (imm.entry(item.name())) {
-            instance_->setCurrentInputMethod(ic_.get(), item.name(), true);
+            instancePtr()->setCurrentInputMethod(ic_.get(), item.name(), true);
             syncUiFromIc();
             return;
         }
     }
     if (imm.entry("keyboard-us")) {
-        instance_->setCurrentInputMethod(ic_.get(), "keyboard-us", true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), "keyboard-us", true);
     } else {
         imm.foreachEntries([this](const InputMethodEntry &e) {
-            instance_->setCurrentInputMethod(ic_.get(), e.uniqueName(), true);
+            instancePtr()->setCurrentInputMethod(ic_.get(), e.uniqueName(), true);
             return false;
         });
     }
@@ -898,13 +971,10 @@ void Fcitx5ImeEngine::setHighlightIndex(int /*index*/) {
 void Fcitx5ImeEngine::syncInputPanelFromIme() { syncUiFromIc(); }
 
 void Fcitx5ImeEngine::syncUiFromIc() {
-    if (instance_) {
-        // InputPanel updates are queued on Instance::eventDispatcher(); TSF has
-        // no exec() so drain that queue before reading the panel. (A second
-        // EventDispatcher attached in this class was never used — core uses
-        // Instance's dispatcher only.)
-        instance_->eventDispatcher().dispatchPending();
-        flushLibuvLoopForIme(instance_->eventLoop());
+    if (Instance *inst = instancePtr()) {
+        // InputPanel updates are posted via Instance::eventDispatcher() → libuv
+        // async; TSF has no exec(), so pump the loop before reading the panel.
+        flushLibuvLoopForIme(inst->eventLoop());
     }
     preeditWide_.clear();
     preeditCaretWide_ = 0;
@@ -1023,12 +1093,12 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
         }
         tsfTrace(ss.str());
     }
-    if (loggingAttached_ && instance_) {
+    if (loggingAttached_ && instancePtr()) {
         const auto &panel = ic_->inputPanel();
         FCITX_INFO() << "tsf sendKeySym sym=" << static_cast<unsigned>(sym)
                      << " keyEventRet=" << keyOk
                      << " icFocus=" << ic_->hasFocus()
-                     << " im=" << instance_->inputMethod(ic_.get())
+                     << " im=" << instancePtr()->inputMethod(ic_.get())
                      << " clientPreU8="
                      << panel.clientPreedit().toString().size()
                      << " preeditU8=" << panel.preedit().toString().size()
@@ -1086,9 +1156,8 @@ bool Fcitx5ImeEngine::feedCandidatePick(size_t index) {
     if (!ic_->hasFocus()) {
         ic_->focusIn();
     }
-    if (instance_) {
-        instance_->eventDispatcher().dispatchPending();
-        flushLibuvLoopForIme(instance_->eventLoop());
+    if (Instance *inst = instancePtr()) {
+        flushLibuvLoopForIme(inst->eventLoop());
     }
     auto list = ic_->inputPanel().candidateList();
     if (!list || list->empty() || static_cast<int>(index) >= list->size()) {
@@ -1135,14 +1204,14 @@ bool Fcitx5ImeEngine::tryForwardPreeditCommit() {
 
 bool Fcitx5ImeEngine::imManagerHotkeyWouldEat(unsigned vk,
                                               std::uintptr_t lParam) const {
-    if (!instance_ || isChineseToggleVk(vk)) {
+    if (!instancePtr() || isChineseToggleVk(vk)) {
         return false;
     }
     const Key k = keyFromWindowsVk(vk, lParam);
-    const auto &gc = instance_->globalConfig();
+    const auto &gc = instancePtr()->globalConfig();
     if (keyListContains(gc.enumerateGroupForwardKeys(), k) ||
         keyListContains(gc.enumerateGroupBackwardKeys(), k)) {
-        return instance_->inputMethodManager().groupCount() >= 2;
+        return instancePtr()->inputMethodManager().groupCount() >= 2;
     }
     return keyListContains(gc.enumerateForwardKeys(), k) ||
            keyListContains(gc.enumerateBackwardKeys(), k);
@@ -1150,21 +1219,21 @@ bool Fcitx5ImeEngine::imManagerHotkeyWouldEat(unsigned vk,
 
 bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
                                                 std::uintptr_t lParam) {
-    if (!instance_ || !ic_ || isChineseToggleVk(vk)) {
+    if (!instancePtr() || !ic_ || isChineseToggleVk(vk)) {
         return false;
     }
     const Key k = keyFromWindowsVk(vk, lParam);
-    auto &gc = instance_->globalConfig();
+    auto &gc = instancePtr()->globalConfig();
 
     for (const auto &rule : gc.enumerateForwardKeys()) {
         if (!rule.check(k)) {
             continue;
         }
         ic_->focusIn();
-        const std::string before = instance_->inputMethod(ic_.get());
-        instance_->enumerate(true);
-        if (instance_->inputMethod(ic_.get()) != before) {
-            instance_->save();
+        const std::string before = instancePtr()->inputMethod(ic_.get());
+        instancePtr()->enumerate(true);
+        if (instancePtr()->inputMethod(ic_.get()) != before) {
+            instancePtr()->save();
             syncUiFromIc();
             return true;
         }
@@ -1175,16 +1244,16 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
             continue;
         }
         ic_->focusIn();
-        const std::string before = instance_->inputMethod(ic_.get());
-        instance_->enumerate(false);
-        if (instance_->inputMethod(ic_.get()) != before) {
-            instance_->save();
+        const std::string before = instancePtr()->inputMethod(ic_.get());
+        instancePtr()->enumerate(false);
+        if (instancePtr()->inputMethod(ic_.get()) != before) {
+            instancePtr()->save();
             syncUiFromIc();
             return true;
         }
         return false;
     }
-    auto &imm = instance_->inputMethodManager();
+    auto &imm = instancePtr()->inputMethodManager();
     for (const auto &rule : gc.enumerateGroupForwardKeys()) {
         if (!rule.check(k)) {
             continue;
@@ -1193,7 +1262,7 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
             return false;
         }
         imm.enumerateGroup(true);
-        instance_->save();
+        instancePtr()->save();
         syncUiFromIc();
         return true;
     }
@@ -1205,7 +1274,7 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
             return false;
         }
         imm.enumerateGroup(false);
-        instance_->save();
+        instancePtr()->save();
         syncUiFromIc();
         return true;
     }
@@ -1213,7 +1282,7 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
 }
 
 bool Fcitx5ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
-    if (!instance_) {
+    if (!instancePtr()) {
         return false;
     }
     // Rime uses Ctrl+` to open its schema / option menu. This must be delivered
@@ -1256,11 +1325,11 @@ bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
 std::vector<ProfileInputMethodItem>
 Fcitx5ImeEngine::profileInputMethods() const {
     std::vector<ProfileInputMethodItem> items;
-    if (!instance_ || !ic_) {
+    if (!instancePtr() || !ic_) {
         return items;
     }
-    auto &imm = instance_->inputMethodManager();
-    const std::string current = instance_->inputMethod(ic_.get());
+    auto &imm = instancePtr()->inputMethodManager();
+    const std::string current = instancePtr()->inputMethod(ic_.get());
     const auto &group = imm.currentGroup();
     items.reserve(group.inputMethodList().size());
     for (const auto &item : group.inputMethodList()) {
@@ -1281,7 +1350,7 @@ Fcitx5ImeEngine::profileInputMethods() const {
 
 bool Fcitx5ImeEngine::activateProfileInputMethod(
     const std::string &uniqueName) {
-    if (!instance_ || !ic_) {
+    if (!instancePtr() || !ic_) {
         tsfTrace(
             "activateProfileInputMethod aborted missing instance/ic target=" +
             uniqueName);
@@ -1290,7 +1359,7 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
             << uniqueName << " pid=" << GetCurrentProcessId();
         return false;
     }
-    auto &imm = instance_->inputMethodManager();
+    auto &imm = instancePtr()->inputMethodManager();
     const auto *entry = imm.entry(uniqueName);
     if (!entry) {
         tsfTrace("activateProfileInputMethod target not found=" + uniqueName);
@@ -1304,7 +1373,7 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
     const std::string addon = entry->addon();
     auto loadedAddonSummary = [this]() {
         std::string loaded;
-        const auto &names = instance_->addonManager().loadedAddonNames();
+        const auto &names = instancePtr()->addonManager().loadedAddonNames();
         for (size_t i = 0; i < names.size(); ++i) {
             if (i != 0) {
                 loaded += ",";
@@ -1314,7 +1383,7 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
         return loaded;
     };
     if (!addon.empty()) {
-        auto *addonInstance = instance_->addonManager().addon(addon, true);
+        auto *addonInstance = instancePtr()->addonManager().addon(addon, true);
         tsfTrace("activateProfileInputMethod addon request target=" +
                  uniqueName + " addon=" + addon +
                  " loaded=" + std::string(addonInstance ? "true" : "false") +
@@ -1327,7 +1396,7 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
     // Explicitly load the target addon in the current host process first.
     // This is required for on-demand engines like Rime; otherwise the IM name
     // may switch while addonManager never loads `rime` in the focused app.
-    auto *targetEngine = instance_->inputMethodEngine(uniqueName);
+    auto *targetEngine = instancePtr()->inputMethodEngine(uniqueName);
     if (!targetEngine) {
         tsfTrace("activateProfileInputMethod inputMethodEngine returned null "
                  "target=" +
@@ -1340,58 +1409,58 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
     }
     tsfTrace("activateProfileInputMethod begin target=" + uniqueName +
              " addon=" + addon +
-             " current=" + instance_->inputMethod(ic_.get()));
+             " current=" + instancePtr()->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod begin target=" << uniqueName
                  << " addon=" << addon
-                 << " current=" << instance_->inputMethod(ic_.get())
+                 << " current=" << instancePtr()->inputMethod(ic_.get())
                  << " focused=" << ic_->hasFocus()
                  << " pid=" << GetCurrentProcessId();
     ic_->focusIn();
     // Tray actions run inside the shell host process. Use global switching so
     // the target input method also applies to the currently focused app
     // (e.g. Notepad), instead of only changing explorer.exe's local IC state.
-    instance_->setCurrentInputMethod(ic_.get(), uniqueName, false);
-    auto *engine = instance_->inputMethodEngine(uniqueName);
-    if (!engine || instance_->inputMethod(ic_.get()) != uniqueName) {
+    instancePtr()->setCurrentInputMethod(ic_.get(), uniqueName, false);
+    auto *engine = instancePtr()->inputMethodEngine(uniqueName);
+    if (!engine || instancePtr()->inputMethod(ic_.get()) != uniqueName) {
         tsfTrace("activateProfileInputMethod switch failed target=" +
                  uniqueName + " addon=" + addon +
-                 " current=" + instance_->inputMethod(ic_.get()));
+                 " current=" + instancePtr()->inputMethod(ic_.get()));
         FCITX_ERROR() << "activateProfileInputMethod switch failed target="
                       << uniqueName << " addon=" << addon
-                      << " current=" << instance_->inputMethod(ic_.get())
+                      << " current=" << instancePtr()->inputMethod(ic_.get())
                       << " engineLoaded=" << (engine != nullptr)
                       << " pid=" << GetCurrentProcessId();
         return false;
     }
-    instance_->save();
+    instancePtr()->save();
     syncUiFromIc();
     tsfTrace("activateProfileInputMethod success target=" + uniqueName +
              " addon=" + addon +
-             " current=" + instance_->inputMethod(ic_.get()));
+             " current=" + instancePtr()->inputMethod(ic_.get()));
     FCITX_INFO() << "activateProfileInputMethod success target=" << uniqueName
                  << " addon=" << addon
-                 << " current=" << instance_->inputMethod(ic_.get())
+                 << " current=" << instancePtr()->inputMethod(ic_.get())
                  << " pid=" << GetCurrentProcessId();
     return true;
 }
 
 std::string Fcitx5ImeEngine::currentInputMethod() const {
-    if (!instance_ || !ic_) {
+    if (!instancePtr() || !ic_) {
         return {};
     }
-    return instance_->inputMethod(ic_.get());
+    return instancePtr()->inputMethod(ic_.get());
 }
 
 std::vector<TrayStatusActionItem> Fcitx5ImeEngine::trayStatusActions() const {
     std::vector<TrayStatusActionItem> items;
-    if (!instance_ || !ic_) {
+    if (!instancePtr() || !ic_) {
         return items;
     }
     static constexpr const char *kActionNames[] = {"punctuation", "fullwidth",
                                                    "chttrans"};
     items.reserve(std::size(kActionNames));
     for (const char *name : kActionNames) {
-        auto *action = lookupTrayStatusAction(instance_.get(), ic_.get(), name);
+        auto *action = lookupTrayStatusAction(instancePtr(), ic_.get(), name);
         if (!action) {
             continue;
         }
@@ -1407,31 +1476,29 @@ std::vector<TrayStatusActionItem> Fcitx5ImeEngine::trayStatusActions() const {
 }
 
 bool Fcitx5ImeEngine::activateTrayStatusAction(const std::string &uniqueName) {
-    if (!instance_ || !ic_ || uniqueName.empty()) {
+    if (!instancePtr() || !ic_ || uniqueName.empty()) {
         return false;
     }
     auto *action =
-        lookupTrayStatusAction(instance_.get(), ic_.get(), uniqueName.c_str());
+        lookupTrayStatusAction(instancePtr(), ic_.get(), uniqueName.c_str());
     if (!action) {
         return false;
     }
     ic_->focusIn();
     action->activate(ic_.get());
-    instance_->eventDispatcher().dispatchPending();
-    flushLibuvLoopForIme(instance_->eventLoop());
-    instance_->save();
+    flushLibuvLoopForIme(instancePtr()->eventLoop());
+    instancePtr()->save();
     syncUiFromIc();
     return true;
 }
 
 bool Fcitx5ImeEngine::reloadPinyinConfig() {
-    if (!instance_) {
+    if (!instancePtr()) {
         return false;
     }
     ScopedDllDirectory scopedDllDirectory(imeBinDir());
-    instance_->reloadAddonConfig("pinyin");
-    instance_->eventDispatcher().dispatchPending();
-    flushLibuvLoopForIme(instance_->eventLoop());
+    instancePtr()->reloadAddonConfig("pinyin");
+    flushLibuvLoopForIme(instancePtr()->eventLoop());
     if (ic_) {
         syncUiFromIc();
     }
@@ -1440,17 +1507,49 @@ bool Fcitx5ImeEngine::reloadPinyinConfig() {
 
 bool Fcitx5ImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,
                                                  const std::string &subPath) {
-    if (!instance_ || uniqueName.empty() || subPath.empty()) {
+    if (!instancePtr() || uniqueName.empty() || subPath.empty()) {
         return false;
     }
     ScopedDllDirectory scopedDllDirectory(imeBinDir());
-    auto *engine = instance_->inputMethodEngine(uniqueName);
+    auto *engine = instancePtr()->inputMethodEngine(uniqueName);
     if (!engine) {
         return false;
     }
     RawConfig config;
     engine->setSubConfig(subPath, config);
     return true;
+}
+
+bool Fcitx5ImePipeShared::init() {
+    try {
+        pinStandardPathsToImeModule();
+        setupImeFcitxEnvironment();
+        const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
+        if (disableRimeForHost) {
+            if (disableRimeDueToUserEnvOrRegistry()) {
+                tsfTrace(
+                    "Fcitx5ImePipeShared::init disabling rime (FCITX_TS_DISABLE_"
+                    "RIME env or HKCU\\\\Environment)");
+            } else {
+                tsfTrace("Fcitx5ImePipeShared::init disabling rime addon for "
+                         "risky host");
+            }
+        }
+        InstanceArgv instanceArgv(disableRimeForHost);
+        ScopedDllDirectory scopedDllDirectory(imeBinDir());
+        instance_ = std::make_unique<Instance>(instanceArgv.argc(),
+                                               instanceArgv.data());
+        tsfTrace("Fcitx5ImePipeShared::init Instance constructed");
+        instance_->addonManager().registerDefaultLoader(nullptr);
+        tsfTrace("Fcitx5ImePipeShared::init before initialize()");
+        instance_->initialize();
+        tsfTrace("Fcitx5ImePipeShared::init after initialize()");
+        return true;
+    } catch (...) {
+        tsfTrace("Fcitx5ImePipeShared::init exception");
+        instance_.reset();
+        return false;
+    }
 }
 
 } // namespace fcitx

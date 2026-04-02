@@ -211,12 +211,32 @@ apply_fcitx5_lua_patch
 echo "==> Stage prefix: $STAGE"
 mkdir -p "$STAGE"
 
+# windows-cross submodule tracks fcitx-contrib/windows-cross; ARM64 cross RC
+# fix lives in patches/ (see patches/_wc_*.cmake + gen-windows-cross-patch.py).
+apply_windows_cross_patch() {
+  local pf="$ROOT/patches/windows-cross-msys2-toolchain-arm64-llvm-windres.patch"
+  [[ "${WINDOWS_CROSS_SKIP_PATCH:-0}" == "1" ]] && return 0
+  [[ -f "$pf" ]] || return 0
+  [[ -f "$ROOT/windows-cross/msys2.toolchain.cmake" ]] || return 0
+  if git -C "$ROOT/windows-cross" apply --check "$pf" 2>/dev/null; then
+    echo "==> applying $(basename "$pf") to windows-cross (set WINDOWS_CROSS_SKIP_PATCH=1 to skip)"
+    git -C "$ROOT/windows-cross" apply "$pf"
+  elif git -C "$ROOT/windows-cross" apply --check --reverse "$pf" 2>/dev/null; then
+    :
+  else
+    echo "warning: $(basename "$pf") does not apply to windows-cross; expected submodule at fcitx-contrib/windows-cross 10ede7424f94d9246b7d6551d6d7845ca7a5cc2a (unpatched)." >&2
+  fi
+}
+
+apply_windows_cross_patch
+
 if [[ "${SKIP_FCITX_WINDOWS:-0}" != "1" ]]; then
   echo "==> [1/3] fcitx5-windows configure + build + install"
   cmake -S "$ROOT" -B "$FCITX_BUILD" -G Ninja \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DCMAKE_INSTALL_PREFIX="$STAGE" \
     -DFCITX5_WINDOWS_BUILD_WIN32_IME=ON \
+    -DFCITX5_WINDOWS_IME_IPC=ON \
     "$@"
   cmake --build "$FCITX_BUILD" -j"$JOBS"
   cmake --install "$FCITX_BUILD" --prefix "$STAGE"

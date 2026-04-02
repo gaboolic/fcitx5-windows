@@ -75,7 +75,8 @@ $configureArgs = @(
     "-DCMAKE_INSTALL_PREFIX=$installPrefix",
     "-DCMAKE_C_COMPILER=$cCompiler",
     "-DCMAKE_CXX_COMPILER=$cxxCompiler",
-    '-DFCITX5_WINDOWS_BUILD_WIN32_IME=ON'
+    '-DFCITX5_WINDOWS_BUILD_WIN32_IME=ON',
+    '-DFCITX5_WINDOWS_IME_IPC=ON'
 )
 & $cmakeExe @configureArgs
 

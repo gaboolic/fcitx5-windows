@@ -1,6 +1,6 @@
 [submodule "fcitx5"]
 	path = fcitx5
-	url = https://github.com/gaboolic/fcitx5.git
+	url = https://github.com/fcitx/fcitx5.git
 [submodule "windows-cross"]
 	path = windows-cross
-	url = https://github.com/gaboolic/windows-cross.git
+	url = https://github.com/fcitx-contrib/windows-cross.git
