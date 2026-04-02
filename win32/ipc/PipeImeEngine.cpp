@@ -390,6 +390,10 @@ bool PipeImeEngine::reloadPinyinConfig() {
     return transact(ImeIpcOpcode::ReloadPinyinConfig, {});
 }
 
+bool PipeImeEngine::reloadRimeAddonConfig() {
+    return transact(ImeIpcOpcode::ReloadRimeConfig, {});
+}
+
 bool PipeImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,
                                                const std::string &subPath) {
     std::vector<std::uint8_t> b;

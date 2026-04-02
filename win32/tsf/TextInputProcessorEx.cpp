@@ -148,7 +148,6 @@ STDAPI Tsf::Deactivate() {
     flushSharedTrayScheduleFromFocusIfPending();
     sharedTrayFocusScheduleTick_ = 0;
     sharedTrayFocusSchedulePending_ = false;
-    pushTrayServiceTipSessionEvent(false);
     candidateWin_.hide();
     resetCompositionState();
     resetShiftToggleGesture();
@@ -173,11 +172,10 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
         return S_OK;
     }
     if (currentProcessIsExplorerForMinimalTray()) {
-        // MSCTF + explorer.exe: ActivateEx bursts; tray ensure is shared with
-        // initShellTrayIcon / langBarNotifyIconUpdate via
-        // explorerTrayHelperPrimedOnce().
+        // MSCTF + explorer.exe: ActivateEx bursts; in-process shell tray host
+        // (hidden HWND + Shell_NotifyIcon) — no standalone tray helper.
         initShellTrayIcon();
-        tsfTrace("ActivateEx explorer minimal ensure-helper-only no threadMgr");
+        tsfTrace("ActivateEx explorer minimal tray-host-only no threadMgr");
         return S_OK;
     }
     threadMgr_ = pThreadMgr;
@@ -197,7 +195,6 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
 
     initLangBarTrayItem();
     langBarNotifyIconUpdate();
-    pushTrayServiceTipSessionEvent(true);
 
     return S_OK;
 

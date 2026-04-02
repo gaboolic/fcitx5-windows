@@ -108,6 +108,8 @@ class ImeEngine {
     virtual bool activateTrayStatusAction(const std::string &uniqueName);
     /// Reload pinyin addon config from disk so shuangpin changes apply now.
     virtual bool reloadPinyinConfig();
+    /// Reload Rime addon config after deploy / user data changes.
+    virtual bool reloadRimeAddonConfig();
     /// Invoke addon sub-config action for a specific input method engine.
     virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                             const std::string &subPath);

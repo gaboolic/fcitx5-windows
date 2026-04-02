@@ -169,32 +169,6 @@ std::wstring trayStatusActionLabel(std::string_view actionName, bool checked) {
 
 bool envTruthy(const char *v) { return v && v[0] && std::strcmp(v, "0") != 0; }
 
-/** User env from "System Properties" is in HKCU\\Environment; child processes
- * only see it after explorer restarts. Read registry here so
- * set-fcitx-ts-disable-rime.ps1 works immediately. */
-bool userPersistentEnvWideTruthy(const wchar_t *valueName) {
-    wchar_t buf[64];
-    DWORD size = sizeof(buf);
-    DWORD typ = 0;
-    const LSTATUS st =
-        RegGetValueW(HKEY_CURRENT_USER, L"Environment", valueName,
-                     RRF_RT_REG_SZ | RRF_RT_REG_EXPAND_SZ, &typ, buf, &size);
-    if (st != ERROR_SUCCESS) {
-        return false;
-    }
-    if (buf[0] == L'\0' || wcscmp(buf, L"0") == 0) {
-        return false;
-    }
-    return true;
-}
-
-bool disableRimeDueToUserEnvOrRegistry() {
-    if (envTruthy(std::getenv("FCITX_TS_DISABLE_RIME"))) {
-        return true;
-    }
-    return userPersistentEnvWideTruthy(L"FCITX_TS_DISABLE_RIME");
-}
-
 std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     HMODULE mod = nullptr;
     if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
@@ -214,48 +188,18 @@ std::filesystem::path dllInstallRootFromAddress(const void *addr) {
     return p.parent_path().parent_path();
 }
 
-bool currentProcessIsExplorerForTsf() {
-    return currentProcessExeBaseNameEquals(L"explorer.exe");
-}
-
-bool currentProcessIsQQForTsf() {
-    return currentProcessExeBaseNameEquals(L"QQ.exe");
-}
-
-bool currentProcessIsCursorForTsf() {
-    return currentProcessExeBaseNameEquals(L"Cursor.exe") ||
-           currentProcessExeBaseNameEquals(L"Code.exe");
-}
-
 struct InstanceArgv {
     std::vector<std::string> storage;
     std::vector<char *> argv;
 
-    explicit InstanceArgv(bool disableRimeForHost) {
+    InstanceArgv() {
         storage.emplace_back("fcitx5");
-        if (disableRimeForHost) {
-            storage.emplace_back("--disable=rime");
-        }
-        argv.reserve(storage.size());
-        for (auto &arg : storage) {
-            argv.push_back(arg.data());
-        }
+        argv.push_back(storage[0].data());
     }
 
     int argc() const { return static_cast<int>(argv.size()); }
     char **data() { return argv.empty() ? nullptr : argv.data(); }
 };
-
-bool shouldDisableRimeForCurrentHost() {
-    // Rime loads native librime / deps; mis-matched DLLs or broken deploy can
-    // AV the host. FCITX_TS_DISABLE_RIME=1 (process env or HKCU\Environment)
-    // adds
-    // --disable=rime for diagnosis (pinyin/table still work).
-    if (disableRimeDueToUserEnvOrRegistry()) {
-        return true;
-    }
-    return currentProcessIsQQForTsf() || currentProcessIsCursorForTsf();
-}
 
 std::filesystem::path imeBinDir() {
     auto root =
@@ -701,18 +645,7 @@ bool Fcitx5ImeEngine::initWithInputMethod(
     try {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
-        const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
-        if (disableRimeForHost) {
-            if (disableRimeDueToUserEnvOrRegistry()) {
-                tsfTrace(
-                    "Fcitx5ImeEngine::init disabling rime (FCITX_TS_DISABLE_"
-                    "RIME env or HKCU\\\\Environment)");
-            } else {
-                tsfTrace("Fcitx5ImeEngine::init disabling rime addon for risky "
-                         "host");
-            }
-        }
-        InstanceArgv instanceArgv(disableRimeForHost);
+        InstanceArgv instanceArgv;
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
         tsfTrace(
             std::string("Fcitx5ImeEngine::init begin FCITX_TS_LOG=") +
@@ -769,7 +702,8 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
     loggingAttached_ = false;
     try {
         // Same as in-proc init: addon DLLs resolve from the IME bin directory.
-        // Fcitx5ImePipeShared::init()'s ScopedDllDirectory is gone after return.
+        // Fcitx5ImePipeShared::init()'s ScopedDllDirectory is gone after
+        // return.
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
         ic_ = std::make_unique<TsfInputContext>(
             this, host->instance()->inputContextManager());
@@ -787,8 +721,9 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
         tsfTrace(std::string("Fcitx5ImeEngine::initAsPipeSession ok current=") +
                  curIm);
         if (curIm.empty()) {
-            tsfTrace("Fcitx5ImeEngine::initAsPipeSession WARNING: empty current "
-                     "IM after activate (group/addon load?)");
+            tsfTrace(
+                "Fcitx5ImeEngine::initAsPipeSession WARNING: empty current "
+                "IM after activate (group/addon load?)");
         }
         return true;
     } catch (...) {
@@ -826,8 +761,9 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
             flushLibuvLoopForIme(pipeSharedHost_->instance()->eventLoop());
             activatePreferredInputMethod(preferredInputMethod, false);
             syncUiFromIc();
-            tsfTrace(std::string("rebuildForInputMethod (pipe session) ok target=") +
-                     preferredInputMethod);
+            tsfTrace(
+                std::string("rebuildForInputMethod (pipe session) ok target=") +
+                preferredInputMethod);
             return true;
         } catch (...) {
             tsfTrace("rebuildForInputMethod pipe session exception");
@@ -878,11 +814,12 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
             changed = true;
         }
         if (items.empty()) {
-            imm.foreachEntries([&items, &changed](const InputMethodEntry &entry) {
-                items.emplace_back(entry.uniqueName());
-                changed = true;
-                return items.size() < 2;
-            });
+            imm.foreachEntries(
+                [&items, &changed](const InputMethodEntry &entry) {
+                    items.emplace_back(entry.uniqueName());
+                    changed = true;
+                    return items.size() < 2;
+                });
         }
         if (!items.empty()) {
             if (imm.entry("pinyin") && hasName("pinyin")) {
@@ -913,10 +850,10 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
 
     if (!items.empty() && items[0].name() == "pinyin" &&
         imm.entry("keyboard-us") && hasName("keyboard-us")) {
-        auto it = std::find_if(
-            items.begin(), items.end(), [](const InputMethodGroupItem &x) {
-                return x.name() == "keyboard-us";
-            });
+        auto it = std::find_if(items.begin(), items.end(),
+                               [](const InputMethodGroupItem &x) {
+                                   return x.name() == "keyboard-us";
+                               });
         if (it != items.end() && it != items.begin()) {
             const InputMethodGroupItem kb = *it;
             items.erase(it);
@@ -966,7 +903,8 @@ void Fcitx5ImeEngine::activatePreferredInputMethod(
     }
     for (const auto &item : group.inputMethodList()) {
         if (imm.entry(item.name())) {
-            instancePtr()->setCurrentInputMethod(ic_.get(), item.name(), localIm);
+            instancePtr()->setCurrentInputMethod(ic_.get(), item.name(),
+                                                 localIm);
             syncUiFromIc();
             return;
         }
@@ -1352,10 +1290,9 @@ bool Fcitx5ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
     }
 }
 
-bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
-                                              std::uintptr_t lParam,
-                                              bool isRelease,
-                                              std::uint32_t hostKeyboardStateMask) {
+bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(
+    unsigned vk, std::uintptr_t lParam, bool isRelease,
+    std::uint32_t hostKeyboardStateMask) {
     if (!ic_) {
         return false;
     }
@@ -1363,7 +1300,8 @@ bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
         ic_->focusIn();
     }
     KeyStates stForKey;
-    if (hostKeyboardStateMask == ImeEngine::kFcitxRawKeyUseProcessKeyboardState) {
+    if (hostKeyboardStateMask ==
+        ImeEngine::kFcitxRawKeyUseProcessKeyboardState) {
         stForKey = winModifierStates();
     } else {
         const std::uint32_t m = hostKeyboardStateMask;
@@ -1487,6 +1425,7 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
                  << " focused=" << ic_->hasFocus()
                  << " pid=" << GetCurrentProcessId();
     ic_->focusIn();
+    const std::string inputMethodBefore = instancePtr()->inputMethod(ic_.get());
     // Tray actions run inside the shell host process. Use global switching so
     // the target input method also applies to the currently focused app
     // (e.g. Notepad), instead of only changing explorer.exe's local IC state.
@@ -1504,6 +1443,21 @@ bool Fcitx5ImeEngine::activateProfileInputMethod(
         return false;
     }
     instancePtr()->save();
+    // reloadAddonConfig is heavy (disk + full addon re-init). Only run when the
+    // target IM actually changes across the pinyin/shuangpin boundary or when
+    // entering rime from another IM — not on every redundant switch.
+    const bool wasPinyinFamily =
+        (inputMethodBefore == "pinyin" || inputMethodBefore == "shuangpin");
+    const bool nowPinyinFamily =
+        (uniqueName == "pinyin" || uniqueName == "shuangpin");
+    if (nowPinyinFamily &&
+        (!wasPinyinFamily || inputMethodBefore != uniqueName)) {
+        instancePtr()->reloadAddonConfig("pinyin");
+        flushLibuvLoopForIme(instancePtr()->eventLoop());
+    } else if (uniqueName == "rime" && inputMethodBefore != uniqueName) {
+        instancePtr()->reloadAddonConfig("rime");
+        flushLibuvLoopForIme(instancePtr()->eventLoop());
+    }
     syncUiFromIc();
     tsfTrace("activateProfileInputMethod success target=" + uniqueName +
              " addon=" + addon +
@@ -1576,6 +1530,19 @@ bool Fcitx5ImeEngine::reloadPinyinConfig() {
     return true;
 }
 
+bool Fcitx5ImeEngine::reloadRimeAddonConfig() {
+    if (!instancePtr()) {
+        return false;
+    }
+    ScopedDllDirectory scopedDllDirectory(imeBinDir());
+    instancePtr()->reloadAddonConfig("rime");
+    flushLibuvLoopForIme(instancePtr()->eventLoop());
+    if (ic_) {
+        syncUiFromIc();
+    }
+    return true;
+}
+
 bool Fcitx5ImeEngine::invokeInputMethodSubConfig(const std::string &uniqueName,
                                                  const std::string &subPath) {
     if (!instancePtr() || uniqueName.empty() || subPath.empty()) {
@@ -1595,18 +1562,7 @@ bool Fcitx5ImePipeShared::init() {
     try {
         pinStandardPathsToImeModule();
         setupImeFcitxEnvironment();
-        const bool disableRimeForHost = shouldDisableRimeForCurrentHost();
-        if (disableRimeForHost) {
-            if (disableRimeDueToUserEnvOrRegistry()) {
-                tsfTrace(
-                    "Fcitx5ImePipeShared::init disabling rime (FCITX_TS_DISABLE_"
-                    "RIME env or HKCU\\\\Environment)");
-            } else {
-                tsfTrace("Fcitx5ImePipeShared::init disabling rime addon for "
-                         "risky host");
-            }
-        }
-        InstanceArgv instanceArgv(disableRimeForHost);
+        InstanceArgv instanceArgv;
         ScopedDllDirectory scopedDllDirectory(imeBinDir());
         instance_ = std::make_unique<Instance>(instanceArgv.argc(),
                                                instanceArgv.data());

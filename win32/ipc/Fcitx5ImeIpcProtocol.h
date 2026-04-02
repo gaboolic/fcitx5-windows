@@ -29,6 +29,7 @@ enum class ImeIpcOpcode : std::uint32_t {
     ReloadPinyinConfig = 16,
     InvokeInputMethodSubConfig = 17,
     ServerPopCommit = 18,
+    ReloadRimeConfig = 19,
 };
 
 constexpr std::uint32_t kImeIpcFrameMagic = 0x31435446u; // "FCT1" little-endian on LE machine

@@ -70,6 +70,7 @@ class Fcitx5ImeEngine : public ImeEngine {
     std::vector<TrayStatusActionItem> trayStatusActions() const override;
     bool activateTrayStatusAction(const std::string &uniqueName) override;
     bool reloadPinyinConfig() override;
+    bool reloadRimeAddonConfig() override;
     bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                     const std::string &subPath) override;
 

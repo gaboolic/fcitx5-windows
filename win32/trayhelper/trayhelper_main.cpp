@@ -1,3 +1,6 @@
+// Tray notify icon: context-menu placement and debounce aligned with PIME
+// (PIMELauncher/PipeServer.cpp) — TPM_BOTTOMALIGN, WM_RBUTTONDOWN + debounce.
+
 #include <windows.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -1385,6 +1388,14 @@ void bringTrayHelperWindowForContextMenu() {
 }
 
 bool launchRimeDeployWithNotification() {
+    if (!g_rimeDeployMonitors.empty()) {
+        showTrayBalloon(
+            L"\x4e2d\x5dde\x97f5\x90e8\x7f72",
+            L"\x5df2\x6709\x90e8\x7f72\x4efb\x52a1\x5728\x8fd0\x884c\xff0c\x8bf7"
+            L"\x7a0d\x5019\x5b8c\x6210\x540e\x518d\x8bd5\x3002",
+            NIIF_INFO);
+        return true;
+    }
     const auto deployer = locateRimeDeployer();
     const auto root = portableRoot();
     const auto userDir = fcitx5RimeUserDir();
@@ -1459,7 +1470,9 @@ void showContextMenu() {
             " profileItems=" +
             std::to_string(static_cast<unsigned long>(profileItems.size())));
         bool currentIsRime = false;
-        bool currentIsShuangpin = g_trayState.currentInputMethod == "shuangpin";
+        bool currentIsShuangpin =
+            g_trayState.currentInputMethod == "shuangpin" ||
+            g_trayState.currentInputMethod == "pinyin";
         for (const auto &item : profileItems) {
             if (item.isCurrent && item.uniqueName == "rime") {
                 currentIsRime = true;
@@ -1623,8 +1636,11 @@ void showContextMenu() {
 
         g_contextMenuShowing = true;
         bringTrayHelperWindowForContextMenu();
+        // PIME PipeServer::showPopupMenu uses TPM_BOTTOMALIGN so the menu grows
+        // upward from the taskbar cursor position.
         const UINT cmd = TrackPopupMenu(
-            menu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
+            menu,
+            TPM_LEFTALIGN | TPM_BOTTOMALIGN | TPM_RETURNCMD | TPM_NONOTIFY,
             pt.x, pt.y, 0, g_hwnd, nullptr);
         g_contextMenuShowing = false;
         trayHelperTrace("showContextMenu selected cmd=" +
@@ -1837,10 +1853,10 @@ LRESULT CALLBACK trayHelperWndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             persistSharedTrayChineseModeRequest(!chineseMode);
             persistSharedTrayChineseModeState(!chineseMode);
             refreshTrayState();
-        } else if (code == WM_RBUTTONUP || code == WM_CONTEXTMENU) {
-            // Shell often delivers both WM_RBUTTONUP and WM_CONTEXTMENU for one
-            // click; running showContextMenu twice can steal foreground twice
-            // and destabilize Explorer (fcitx + MSCTF in explorer.exe).
+        } else if (code == WM_RBUTTONDOWN || code == WM_RBUTTONUP ||
+                   code == WM_CONTEXTMENU) {
+            // PIME reacts to WM_RBUTTONDOWN; the shell may also send WM_RBUTTONUP
+            // and WM_CONTEXTMENU for one click — debounce (Explorer + MSCTF).
             static ULONGLONG s_lastContextMenuTick = 0;
             const ULONGLONG now = GetTickCount64();
             if (now - s_lastContextMenuTick < 400ULL) {

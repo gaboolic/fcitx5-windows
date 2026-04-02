@@ -1,2 +1,5 @@
 /* Tray/LangBar icon; id 100 == kFcitxPenguinIconResId in LangBarTray.cpp */
 100 ICON @PENGUIN_ICO_FOR_RC@
+/* Shell tray 中/英 (PIME rime icons); ids == kFcitxTray*IconResId in LangBarTray.cpp */
+101 ICON @TRAY_CHI_ICO_FOR_RC@
+102 ICON @TRAY_ENG_ICO_FOR_RC@

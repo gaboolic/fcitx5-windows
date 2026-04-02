@@ -18,11 +18,6 @@
 
 namespace fcitx {
 
-/// Start fcitx5-tray-helper at most once per explorer.exe load. Avoids repeated
-/// FindWindow/CreateProcess during MSCTF focus/ActivateEx bursts (faults in
-/// MSCTF.dll).
-bool explorerTrayHelperPrimedOnce();
-
 template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
 class FcitxLangBarButton;
 class Tsf : public ITfTextInputProcessorEx,
@@ -132,11 +127,9 @@ class Tsf : public ITfTextInputProcessorEx,
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
+    /// Shared hidden window + ref-count across Tsf instances in this process.
+    bool acquireSharedShellTrayHost();
     void uninitShellTrayIcon();
-    void pushTrayServiceStateSnapshot() const;
-    void pushTrayServiceUiEvent() const;
-    void pushTrayServiceStatusEvent() const;
-    void pushTrayServiceTipSessionEvent(bool active) const;
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
     void scheduleShellTrayRetry(UINT delayMs = 1000);
@@ -194,13 +187,6 @@ class Tsf : public ITfTextInputProcessorEx,
     bool chineseActive_ = true;
     FcitxLangBarButton *langBarItem_ = nullptr;
     HWND shellTrayHostHwnd_ = nullptr;
-    bool shellTrayHostDllPinned_ = false;
-    bool shellTrayHostClosing_ = false;
-    HICON shellTrayIcon_ = nullptr;
-    bool shellTrayIconOwned_ = false;
-    bool shellTrayAdded_ = false;
-    bool shellTrayUseGuidIdentity_ = true;
-    bool shellTrayRetryPending_ = false;
     static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
     bool pendingTraySetChineseMode_ = false;

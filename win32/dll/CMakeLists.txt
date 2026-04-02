@@ -13,6 +13,19 @@ if(WIN32)
   file(TO_CMAKE_PATH "${FCITX_WIN32_PENGUIN_ICO}" _fcitx_penguin_ico)
   string(REPLACE "\\" "/" _fcitx_penguin_ico_slash "${_fcitx_penguin_ico}")
   set(PENGUIN_ICO_FOR_RC "\"${_fcitx_penguin_ico_slash}\"")
+  set(_fcitx_tray_chi "${CMAKE_SOURCE_DIR}/win32/assets/tray_chi_full_capsoff.ico")
+  set(_fcitx_tray_eng "${CMAKE_SOURCE_DIR}/win32/assets/tray_eng_full_capsoff.ico")
+  if(NOT EXISTS "${_fcitx_tray_chi}" OR NOT EXISTS "${_fcitx_tray_eng}")
+    message(
+      FATAL_ERROR
+        "Tray ICOs missing: ${_fcitx_tray_chi} and/or ${_fcitx_tray_eng}")
+  endif()
+  file(TO_CMAKE_PATH "${_fcitx_tray_chi}" _fcitx_tray_chi_path)
+  file(TO_CMAKE_PATH "${_fcitx_tray_eng}" _fcitx_tray_eng_path)
+  string(REPLACE "\\" "/" _fcitx_tray_chi_slash "${_fcitx_tray_chi_path}")
+  string(REPLACE "\\" "/" _fcitx_tray_eng_slash "${_fcitx_tray_eng_path}")
+  set(TRAY_CHI_ICO_FOR_RC "\"${_fcitx_tray_chi_slash}\"")
+  set(TRAY_ENG_ICO_FOR_RC "\"${_fcitx_tray_eng_slash}\"")
   configure_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/fcitx5-ime.rc.in"
     "${CMAKE_CURRENT_BINARY_DIR}/fcitx5-ime.rc"
@@ -24,7 +37,13 @@ if(WIN32)
     POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${FCITX_WIN32_PENGUIN_ICO}"
             $<TARGET_FILE_DIR:fcitx5-x86_64>
-    COMMENT "Copy penguin.ico next to IME DLL (TSF IconFile + file fallback)")
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fcitx_tray_chi}"
+            $<TARGET_FILE_DIR:fcitx5-x86_64>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different "${_fcitx_tray_eng}"
+            $<TARGET_FILE_DIR:fcitx5-x86_64>
+    COMMENT
+      "Copy penguin + tray chi/eng .ico next to IME DLL (RegisterProfiles + file fallback)"
+  )
 endif()
 
 if(NOT MSVC)
@@ -59,7 +78,8 @@ if(TARGET Fcitx5Core AND TARGET Fcitx5Utils)
     FILES $<TARGET_FILE:Fcitx5Core> $<TARGET_FILE:Fcitx5Utils>
     DESTINATION "${CMAKE_INSTALL_BINDIR}")
   # TSF RegisterProfiles looks for penguin.ico next to the IME DLL (optional if not built).
-  install(FILES "${FCITX_WIN32_PENGUIN_ICO}"
+  install(FILES "${FCITX_WIN32_PENGUIN_ICO}" "${_fcitx_tray_chi}"
+                "${_fcitx_tray_eng}"
           DESTINATION "${CMAKE_INSTALL_BINDIR}" OPTIONAL)
 
   # MinGW/Clang (e.g. MSYS2 CLANG64): libc++ and libFcitx5Utils deps are separate DLLs.

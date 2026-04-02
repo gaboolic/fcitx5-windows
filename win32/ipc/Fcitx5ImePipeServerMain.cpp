@@ -200,6 +200,12 @@ std::vector<std::uint8_t> handleRequest(ImeEngine *eng, ImeIpcOpcode op,
         }
         eng->reloadPinyinConfig();
         break;
+    case ImeIpcOpcode::ReloadRimeConfig:
+        if (p != end) {
+            return fcitx::imeIpcEncodeErrorResponse(1);
+        }
+        eng->reloadRimeAddonConfig();
+        break;
     case ImeIpcOpcode::InvokeInputMethodSubConfig: {
         std::string a, b;
         if (!eatUtf8(p, end, &a) || !eatUtf8(p, end, &b) || p != end) {
