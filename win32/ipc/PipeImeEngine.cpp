@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <string>
 #include <vector>
 
 namespace fcitx {
@@ -145,6 +146,8 @@ bool PipeImeEngine::transact(ImeIpcOpcode op,
                              const std::vector<std::uint8_t> &body) const {
     std::lock_guard<std::mutex> lock(mutex_);
     if (!ensurePipeConnectedUnlocked()) {
+        tsfTrace("PipeImeEngine: transact no pipe opcode=" +
+                 std::to_string(static_cast<unsigned>(op)));
         return false;
     }
     const std::vector<std::uint8_t> packet = imeIpcEncodeRequest(op, body);
@@ -175,6 +178,8 @@ bool PipeImeEngine::transact(ImeIpcOpcode op,
     }
     ImeIpcDecoded dec = {};
     if (!imeIpcDecodeResponsePacket(resp, &dec)) {
+        tsfTrace("PipeImeEngine: decode response failed opcode=" +
+                 std::to_string(static_cast<unsigned>(op)));
         closePipeUnlocked();
         return false;
     }
@@ -236,14 +241,14 @@ void PipeImeEngine::setHighlightIndex(int index) {
     transact(ImeIpcOpcode::SetHighlight, b);
 }
 
-void PipeImeEngine::appendLatinLowercase(wchar_t ch) {
+bool PipeImeEngine::appendLatinLowercase(wchar_t ch) {
     std::vector<std::uint8_t> b;
     appendU32(b, static_cast<std::uint32_t>(ch));
-    transact(ImeIpcOpcode::AppendLatin, b);
+    return transact(ImeIpcOpcode::AppendLatin, b);
 }
 
-void PipeImeEngine::backspace() {
-    transact(ImeIpcOpcode::Backspace, {});
+bool PipeImeEngine::backspace() {
+    return transact(ImeIpcOpcode::Backspace, {});
 }
 
 void PipeImeEngine::moveHighlight(int delta) {
@@ -336,15 +341,21 @@ bool PipeImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
 }
 
 bool PipeImeEngine::deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                            bool isRelease) {
+                                            bool isRelease,
+                                            std::uint32_t hostKeyboardStateMask) {
     std::vector<std::uint8_t> b;
     appendU32(b, vk);
     appendU64(b, static_cast<std::uint64_t>(lParam));
     appendU32(b, isRelease ? 1u : 0u);
+    appendU32(b, hostKeyboardStateMask);
     if (!transact(ImeIpcOpcode::DeliverFcitxRawKeyEvent, b)) {
         return false;
     }
     return (lastFlags_ & 1u) != 0;
+}
+
+bool PipeImeEngine::usesHostKeyboardStateForRawKeyDelivery() const {
+    return true;
 }
 
 std::vector<ProfileInputMethodItem>

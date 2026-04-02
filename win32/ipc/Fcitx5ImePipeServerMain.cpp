@@ -2,6 +2,7 @@
 #include "Fcitx5ImePipeShared.h"
 #include "Fcitx5ImeIpcCodec.h"
 #include "Fcitx5ImeIpcProtocol.h"
+#include "ImeEngine.h"
 #include "TsfTrace.h"
 
 #include <Windows.h>
@@ -160,12 +161,19 @@ std::vector<std::uint8_t> handleRequest(ImeEngine *eng, ImeIpcOpcode op,
     case ImeIpcOpcode::DeliverFcitxRawKeyEvent: {
         std::uint32_t vk = 0, rel = 0;
         std::uint64_t lp = 0;
+        std::uint32_t hostMods = fcitx::ImeEngine::kFcitxRawKeyUseProcessKeyboardState;
         if (!eatU32(p, end, &vk) || !eatU64(p, end, &lp) ||
-            !eatU32(p, end, &rel) || p != end) {
+            !eatU32(p, end, &rel)) {
             return fcitx::imeIpcEncodeErrorResponse(1);
         }
+        if (p != end) {
+            if (static_cast<std::size_t>(end - p) < 4 ||
+                !eatU32(p, end, &hostMods) || p != end) {
+                return fcitx::imeIpcEncodeErrorResponse(1);
+            }
+        }
         if (eng->deliverFcitxRawKeyEvent(vk, static_cast<std::uintptr_t>(lp),
-                                         rel != 0)) {
+                                         rel != 0, hostMods)) {
             flags |= 1u;
         }
         break;

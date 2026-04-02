@@ -372,10 +372,9 @@ KeyStates winModifierStates() {
     return s;
 }
 
-Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
+Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam, KeyStates st) {
     const LPARAM lp = static_cast<LPARAM>(lParam);
     const bool ext = (lp & (1 << 24)) != 0;
-    const KeyStates st = winModifierStates();
     switch (vk) {
     case VK_LEFT:
         return Key(FcitxKey_Left, st);
@@ -427,7 +426,7 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
         break;
     }
     if (vk >= static_cast<unsigned>('0') && vk <= static_cast<unsigned>('9')) {
-        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool shiftDown = (st & KeyState::Shift);
         if (shiftDown) {
             KeyStates stOut = st;
             if (stOut & KeyState::Shift) {
@@ -462,8 +461,8 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
     }
     if (vk >= static_cast<unsigned>('A') && vk <= static_cast<unsigned>('Z')) {
         wchar_t c = static_cast<wchar_t>(vk);
-        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        const bool caps = (GetKeyState(VK_CAPITAL) & 1) != 0;
+        const bool shift = (st & KeyState::Shift);
+        const bool caps = (st & KeyState::CapsLock);
         if (!(caps ^ shift)) {
             c = static_cast<wchar_t>(c - L'A' + L'a');
         }
@@ -472,7 +471,7 @@ Key keyFromWindowsVk(unsigned vk, std::uintptr_t lParam) {
     // US QWERTY OEM keys → keysyms so punctuation / libime see real symbols
     // (not raw VK with FcitxKey_None).
     {
-        const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool shiftDown = (st & KeyState::Shift);
         KeyStates stOut = st;
         if (shiftDown && (stOut & KeyState::Shift)) {
             stOut ^= KeyState::Shift;
@@ -769,6 +768,9 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
     instance_.reset();
     loggingAttached_ = false;
     try {
+        // Same as in-proc init: addon DLLs resolve from the IME bin directory.
+        // Fcitx5ImePipeShared::init()'s ScopedDllDirectory is gone after return.
+        ScopedDllDirectory scopedDllDirectory(imeBinDir());
         ic_ = std::make_unique<TsfInputContext>(
             this, host->instance()->inputContextManager());
         ic_->setEnablePreedit(true);
@@ -776,10 +778,18 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
             CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
             CapabilityFlag::ClientSideInputPanel});
         ic_->focusIn();
-        activatePreferredInputMethod({});
+        flushLibuvLoopForIme(host->instance()->eventLoop());
+        host->instance()->inputMethodManager().refresh();
+        flushLibuvLoopForIme(host->instance()->eventLoop());
+        activatePreferredInputMethod({}, false);
         syncUiFromIc();
+        const std::string curIm = instancePtr()->inputMethod(ic_.get());
         tsfTrace(std::string("Fcitx5ImeEngine::initAsPipeSession ok current=") +
-                 instancePtr()->inputMethod(ic_.get()));
+                 curIm);
+        if (curIm.empty()) {
+            tsfTrace("Fcitx5ImeEngine::initAsPipeSession WARNING: empty current "
+                     "IM after activate (group/addon load?)");
+        }
         return true;
     } catch (...) {
         tsfTrace("Fcitx5ImeEngine::initAsPipeSession exception");
@@ -803,6 +813,7 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
             return false;
         }
         try {
+            ScopedDllDirectory scopedDllDirectory(imeBinDir());
             ic_ = std::make_unique<TsfInputContext>(
                 this, pipeSharedHost_->instance()->inputContextManager());
             ic_->setEnablePreedit(true);
@@ -810,7 +821,10 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
                 CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
                 CapabilityFlag::ClientSideInputPanel});
             ic_->focusIn();
-            activatePreferredInputMethod(preferredInputMethod);
+            flushLibuvLoopForIme(pipeSharedHost_->instance()->eventLoop());
+            pipeSharedHost_->instance()->inputMethodManager().refresh();
+            flushLibuvLoopForIme(pipeSharedHost_->instance()->eventLoop());
+            activatePreferredInputMethod(preferredInputMethod, false);
             syncUiFromIc();
             tsfTrace(std::string("rebuildForInputMethod (pipe session) ok target=") +
                      preferredInputMethod);
@@ -850,29 +864,41 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
     };
 
     if (items.empty()) {
+        // fcitx: index 0 is the inactive keyboard slot. If "pinyin" is the only
+        // list entry, canTrigger() is false and setCurrentInputMethod("pinyin")
+        // returns immediately; if pinyin is at index 0 with keyboard-us also
+        // present, setCurrentInputMethod sets isActive false. Put keyboard-us
+        // first when we bootstrap the group.
+        if (imm.entry("keyboard-us")) {
+            items.emplace_back("keyboard-us");
+            changed = true;
+        }
         if (imm.entry("pinyin")) {
             items.emplace_back("pinyin");
             changed = true;
         }
-        if (imm.entry("keyboard-us")) {
-            items.emplace_back("keyboard-us");
-            changed = true;
+        if (items.empty()) {
+            imm.foreachEntries([&items, &changed](const InputMethodEntry &entry) {
+                items.emplace_back(entry.uniqueName());
+                changed = true;
+                return items.size() < 2;
+            });
         }
         if (!items.empty()) {
             if (imm.entry("pinyin") && hasName("pinyin")) {
                 group.setDefaultInputMethod("pinyin");
             } else {
-                group.setDefaultInputMethod(items[0].name());
+                group.setDefaultInputMethod(items.back().name());
             }
             changed = true;
         }
     } else {
-        if (imm.entry("pinyin") && !hasName("pinyin")) {
-            items.insert(items.begin(), InputMethodGroupItem("pinyin"));
+        if (imm.entry("keyboard-us") && !hasName("keyboard-us")) {
+            items.insert(items.begin(), InputMethodGroupItem("keyboard-us"));
             changed = true;
         }
-        if (imm.entry("keyboard-us") && !hasName("keyboard-us")) {
-            items.emplace_back("keyboard-us");
+        if (imm.entry("pinyin") && !hasName("pinyin")) {
+            items.emplace_back(InputMethodGroupItem("pinyin"));
             changed = true;
         }
         if (group.defaultInputMethod().empty() && !items.empty()) {
@@ -885,6 +911,20 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
         }
     }
 
+    if (!items.empty() && items[0].name() == "pinyin" &&
+        imm.entry("keyboard-us") && hasName("keyboard-us")) {
+        auto it = std::find_if(
+            items.begin(), items.end(), [](const InputMethodGroupItem &x) {
+                return x.name() == "keyboard-us";
+            });
+        if (it != items.end() && it != items.begin()) {
+            const InputMethodGroupItem kb = *it;
+            items.erase(it);
+            items.insert(items.begin(), kb);
+            changed = true;
+        }
+    }
+
     if (changed) {
         tsfTrace("ensurePortableImGroupHasEntries: fixed empty IM group");
         imm.setGroup(std::move(group));
@@ -893,49 +933,50 @@ void Fcitx5ImeEngine::ensurePortableImGroupHasEntries() {
 }
 
 void Fcitx5ImeEngine::activatePreferredInputMethod(
-    const std::string &preferredInputMethod) {
+    const std::string &preferredInputMethod, bool localIm) {
     if (!instancePtr() || !ic_) {
         return;
     }
     ensurePortableImGroupHasEntries();
     auto &imm = instancePtr()->inputMethodManager();
     if (!preferredInputMethod.empty() && imm.entry(preferredInputMethod)) {
-        instancePtr()->setCurrentInputMethod(ic_.get(), preferredInputMethod, true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), preferredInputMethod,
+                                             localIm);
         syncUiFromIc();
         return;
     }
     if (const char *envIm = std::getenv("FCITX_TS_IM");
         envIm && envIm[0] && imm.entry(std::string(envIm))) {
-        instancePtr()->setCurrentInputMethod(ic_.get(), envIm, true);
-        syncUiFromIc();
-        return;
-    }
-    // Prefer pinyin as the TSF startup default unless the user explicitly
-    // overrides it via FCITX_TS_IM.
-    if (imm.entry("pinyin")) {
-        instancePtr()->setCurrentInputMethod(ic_.get(), "pinyin", true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), envIm, localIm);
         syncUiFromIc();
         return;
     }
     const auto &group = imm.currentGroup();
     const std::string &def = group.defaultInputMethod();
     if (!def.empty() && imm.entry(def)) {
-        instancePtr()->setCurrentInputMethod(ic_.get(), def, true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), def, localIm);
+        syncUiFromIc();
+        return;
+    }
+    // Prefer pinyin as the TSF startup default when the profile has no default.
+    if (imm.entry("pinyin")) {
+        instancePtr()->setCurrentInputMethod(ic_.get(), "pinyin", localIm);
         syncUiFromIc();
         return;
     }
     for (const auto &item : group.inputMethodList()) {
         if (imm.entry(item.name())) {
-            instancePtr()->setCurrentInputMethod(ic_.get(), item.name(), true);
+            instancePtr()->setCurrentInputMethod(ic_.get(), item.name(), localIm);
             syncUiFromIc();
             return;
         }
     }
     if (imm.entry("keyboard-us")) {
-        instancePtr()->setCurrentInputMethod(ic_.get(), "keyboard-us", true);
+        instancePtr()->setCurrentInputMethod(ic_.get(), "keyboard-us", localIm);
     } else {
-        imm.foreachEntries([this](const InputMethodEntry &e) {
-            instancePtr()->setCurrentInputMethod(ic_.get(), e.uniqueName(), true);
+        imm.foreachEntries([this, localIm](const InputMethodEntry &e) {
+            instancePtr()->setCurrentInputMethod(ic_.get(), e.uniqueName(),
+                                                 localIm);
             return false;
         });
     }
@@ -1108,17 +1149,22 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
     return true;
 }
 
-void Fcitx5ImeEngine::appendLatinLowercase(wchar_t ch) {
+bool Fcitx5ImeEngine::appendLatinLowercase(wchar_t ch) {
     if (ch >= L'a' && ch <= L'z') {
         sendKeySym(static_cast<KeySym>(FcitxKey_a + (ch - L'a')));
-        return;
+        return true;
     }
     if (ch >= L'A' && ch <= L'Z') {
         sendKeySym(static_cast<KeySym>(FcitxKey_A + (ch - L'A')));
+        return true;
     }
+    return false;
 }
 
-void Fcitx5ImeEngine::backspace() { sendKeySym(FcitxKey_BackSpace); }
+bool Fcitx5ImeEngine::backspace() {
+    sendKeySym(FcitxKey_BackSpace);
+    return true;
+}
 
 void Fcitx5ImeEngine::moveHighlight(int delta) {
     if (delta < 0) {
@@ -1207,7 +1253,7 @@ bool Fcitx5ImeEngine::imManagerHotkeyWouldEat(unsigned vk,
     if (!instancePtr() || isChineseToggleVk(vk)) {
         return false;
     }
-    const Key k = keyFromWindowsVk(vk, lParam);
+    const Key k = keyFromWindowsVk(vk, lParam, winModifierStates());
     const auto &gc = instancePtr()->globalConfig();
     if (keyListContains(gc.enumerateGroupForwardKeys(), k) ||
         keyListContains(gc.enumerateGroupBackwardKeys(), k)) {
@@ -1222,7 +1268,7 @@ bool Fcitx5ImeEngine::tryConsumeImManagerHotkey(unsigned vk,
     if (!instancePtr() || !ic_ || isChineseToggleVk(vk)) {
         return false;
     }
-    const Key k = keyFromWindowsVk(vk, lParam);
+    const Key k = keyFromWindowsVk(vk, lParam, winModifierStates());
     auto &gc = instancePtr()->globalConfig();
 
     for (const auto &rule : gc.enumerateForwardKeys()) {
@@ -1308,14 +1354,39 @@ bool Fcitx5ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
 
 bool Fcitx5ImeEngine::deliverFcitxRawKeyEvent(unsigned vk,
                                               std::uintptr_t lParam,
-                                              bool isRelease) {
+                                              bool isRelease,
+                                              std::uint32_t hostKeyboardStateMask) {
     if (!ic_) {
         return false;
     }
     if (!ic_->hasFocus()) {
         ic_->focusIn();
     }
-    const Key k = keyFromWindowsVk(vk, lParam);
+    KeyStates stForKey;
+    if (hostKeyboardStateMask == ImeEngine::kFcitxRawKeyUseProcessKeyboardState) {
+        stForKey = winModifierStates();
+    } else {
+        const std::uint32_t m = hostKeyboardStateMask;
+        if (m & static_cast<std::uint32_t>(KeyState::Shift)) {
+            stForKey |= KeyState::Shift;
+        }
+        if (m & static_cast<std::uint32_t>(KeyState::CapsLock)) {
+            stForKey |= KeyState::CapsLock;
+        }
+        if (m & static_cast<std::uint32_t>(KeyState::Ctrl)) {
+            stForKey |= KeyState::Ctrl;
+        }
+        if (m & static_cast<std::uint32_t>(KeyState::Alt)) {
+            stForKey |= KeyState::Alt;
+        }
+        if (m & static_cast<std::uint32_t>(KeyState::Super)) {
+            stForKey |= KeyState::Super;
+        }
+        if (m & static_cast<std::uint32_t>(KeyState::NumLock)) {
+            stForKey |= KeyState::NumLock;
+        }
+    }
+    const Key k = keyFromWindowsVk(vk, lParam, stForKey);
     KeyEvent ev(ic_.get(), k, isRelease);
     ic_->keyEvent(ev);
     syncUiFromIc();
@@ -1544,6 +1615,7 @@ bool Fcitx5ImePipeShared::init() {
         tsfTrace("Fcitx5ImePipeShared::init before initialize()");
         instance_->initialize();
         tsfTrace("Fcitx5ImePipeShared::init after initialize()");
+        flushLibuvLoopForIme(instance_->eventLoop());
         return true;
     } catch (...) {
         tsfTrace("Fcitx5ImePipeShared::init exception");

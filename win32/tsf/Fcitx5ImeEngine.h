@@ -43,8 +43,8 @@ class Fcitx5ImeEngine : public ImeEngine {
     int highlightIndex() const override;
     void setHighlightIndex(int index) override;
 
-    void appendLatinLowercase(wchar_t ch) override;
-    void backspace() override;
+    bool appendLatinLowercase(wchar_t ch) override;
+    bool backspace() override;
     void moveHighlight(int delta) override;
 
     bool hasCandidate(size_t index) const override;
@@ -62,7 +62,8 @@ class Fcitx5ImeEngine : public ImeEngine {
 
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                 bool isRelease) override;
+                                 bool isRelease,
+                                 std::uint32_t hostKeyboardStateMask) override;
     std::vector<ProfileInputMethodItem> profileInputMethods() const override;
     bool activateProfileInputMethod(const std::string &uniqueName) override;
     std::string currentInputMethod() const override;
@@ -81,8 +82,11 @@ class Fcitx5ImeEngine : public ImeEngine {
     /// cannot call setCurrentInputMethod for pinyin — repair in-memory and
     /// persist so new installs work without manually copying profile.example.
     void ensurePortableImGroupHasEntries();
-    void
-    activatePreferredInputMethod(const std::string &preferredInputMethod = {});
+    /// @param localIm If true (in-proc TSF), apply as per-IC local IM. If false
+    /// (pipe server session), follow global profile so every app’s context
+    /// tracks tray / defaultInputMethod instead of sticking on pinyin.
+    void activatePreferredInputMethod(const std::string &preferredInputMethod = {},
+                                      bool localIm = true);
 
     Instance *instancePtr() const;
 

@@ -33,8 +33,8 @@ class PipeImeEngine final : public ImeEngine {
     int highlightIndex() const override;
     void setHighlightIndex(int index) override;
 
-    void appendLatinLowercase(wchar_t ch) override;
-    void backspace() override;
+    bool appendLatinLowercase(wchar_t ch) override;
+    bool backspace() override;
     void moveHighlight(int delta) override;
 
     bool hasCandidate(size_t index) const override;
@@ -53,7 +53,10 @@ class PipeImeEngine final : public ImeEngine {
 
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                 bool isRelease) override;
+                                 bool isRelease,
+                                 std::uint32_t hostKeyboardStateMask) override;
+
+    bool usesHostKeyboardStateForRawKeyDelivery() const override;
 
     std::vector<ProfileInputMethodItem> profileInputMethods() const override;
     bool activateProfileInputMethod(const std::string &uniqueName) override;

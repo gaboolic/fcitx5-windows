@@ -26,7 +26,8 @@ bool ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned /*vk*/) const {
 
 bool ImeEngine::deliverFcitxRawKeyEvent(unsigned /*vk*/,
                                         std::uintptr_t /*lParam*/,
-                                        bool /*isRelease*/) {
+                                        bool /*isRelease*/,
+                                        std::uint32_t /*hostKeyboardStateMask*/) {
     return false;
 }
 
@@ -77,16 +78,18 @@ class StubImeEngine : public ImeEngine {
         }
     }
 
-    void appendLatinLowercase(wchar_t ch) override {
+    bool appendLatinLowercase(wchar_t ch) override {
         preedit_.push_back(ch);
         regenerateCandidates();
+        return true;
     }
 
-    void backspace() override {
+    bool backspace() override {
         if (!preedit_.empty()) {
             preedit_.pop_back();
             regenerateCandidates();
         }
+        return true;
     }
 
     void moveHighlight(int delta) override {
