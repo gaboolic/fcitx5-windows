@@ -712,11 +712,7 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
             CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
             CapabilityFlag::ClientSideInputPanel});
         ic_->focusIn();
-        flushLibuvLoopForIme(host->instance()->eventLoop());
-        host->instance()->inputMethodManager().refresh();
-        flushLibuvLoopForIme(host->instance()->eventLoop());
-        activatePreferredInputMethod({}, false);
-        syncUiFromIc();
+        activatePreferredInputMethodPipeSync(host->instance(), {});
         const std::string curIm = instancePtr()->inputMethod(ic_.get());
         tsfTrace(std::string("Fcitx5ImeEngine::initAsPipeSession ok current=") +
                  curIm);
@@ -724,6 +720,9 @@ bool Fcitx5ImeEngine::initAsPipeSession(Fcitx5ImePipeShared *host) {
             tsfTrace(
                 "Fcitx5ImeEngine::initAsPipeSession WARNING: empty current "
                 "IM after activate (group/addon load?)");
+            FCITX_WARN() << "Fcitx5ImeEngine::initAsPipeSession: current IM "
+                            "still empty after pipe sync retries; typing may "
+                            "produce no output in Chinese mode.";
         }
         return true;
     } catch (...) {
@@ -756,11 +755,8 @@ bool Fcitx5ImeEngine::rebuildForInputMethod(
                 CapabilityFlag::Preedit, CapabilityFlag::FormattedPreedit,
                 CapabilityFlag::ClientSideInputPanel});
             ic_->focusIn();
-            flushLibuvLoopForIme(pipeSharedHost_->instance()->eventLoop());
-            pipeSharedHost_->instance()->inputMethodManager().refresh();
-            flushLibuvLoopForIme(pipeSharedHost_->instance()->eventLoop());
-            activatePreferredInputMethod(preferredInputMethod, false);
-            syncUiFromIc();
+            activatePreferredInputMethodPipeSync(pipeSharedHost_->instance(),
+                                                 preferredInputMethod);
             tsfTrace(
                 std::string("rebuildForInputMethod (pipe session) ok target=") +
                 preferredInputMethod);
@@ -918,6 +914,18 @@ void Fcitx5ImeEngine::activatePreferredInputMethod(
             return false;
         });
     }
+    syncUiFromIc();
+}
+
+void Fcitx5ImeEngine::activatePreferredInputMethodPipeSync(
+    Instance *inst, const std::string &preferredInputMethod) {
+    if (!inst || !ic_) {
+        return;
+    }
+    flushLibuvLoopForIme(inst->eventLoop());
+    inst->inputMethodManager().refresh();
+    flushLibuvLoopForIme(inst->eventLoop());
+    activatePreferredInputMethod(preferredInputMethod, false);
     syncUiFromIc();
 }
 

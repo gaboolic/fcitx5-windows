@@ -88,6 +88,10 @@ class Fcitx5ImeEngine : public ImeEngine {
     /// tracks tray / defaultInputMethod instead of sticking on pinyin.
     void activatePreferredInputMethod(const std::string &preferredInputMethod = {},
                                       bool localIm = true);
+    /// Pipe session: same refresh/activate sequence as the original in-proc
+    /// init (single pass; avoid repeated activate/save confusing fcitx state).
+    void activatePreferredInputMethodPipeSync(
+        Instance *inst, const std::string &preferredInputMethod);
 
     Instance *instancePtr() const;
 

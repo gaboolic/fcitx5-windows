@@ -140,6 +140,7 @@ STDAPI Tsf::Deactivate() {
     if (currentProcessIsExplorerForMinimalTray()) {
         initTextEditSink(nullptr);
         trayEditContextFallback_.Reset();
+        uninitLangBarTrayItem();
         threadMgr_.Reset();
         clientId_ = TF_CLIENTID_NULL;
         tsfTrace("Deactivate explorer minimal bootstrap-only");
@@ -172,8 +173,10 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
         return S_OK;
     }
     if (currentProcessIsExplorerForMinimalTray()) {
-        // MSCTF + explorer.exe: ActivateEx bursts; in-process shell tray host
-        // (hidden HWND + Shell_NotifyIcon) — no standalone tray helper.
+        // MSCTF + explorer.exe: ActivateEx bursts without a usable threadMgr
+        // for ITfLangBarItemMgr::AddItem. Use Shell_NotifyIcon only; the
+        // taskbar 中/英 indicator appears in apps where ActivateEx binds
+        // threadMgr (see initLangBarTrayItem + TF_LBI_STYLE_SHOWNINTRAY).
         initShellTrayIcon();
         tsfTrace("ActivateEx explorer minimal tray-host-only no threadMgr");
         return S_OK;

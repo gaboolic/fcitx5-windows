@@ -290,10 +290,23 @@ void serveLoop(fcitx::Fcitx5ImePipeShared *shared) {
 } // namespace
 
 int main() {
+    const std::wstring mutexName = fcitx::imeIpcPipeServerSingletonMutexName();
+    SetLastError(0);
+    HANDLE hSingleton =
+        CreateMutexW(nullptr, FALSE, mutexName.c_str());
+    if (!hSingleton) {
+        return 1;
+    }
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        CloseHandle(hSingleton);
+        return 0;
+    }
     fcitx::Fcitx5ImePipeShared shared;
     if (!shared.init()) {
+        CloseHandle(hSingleton);
         return 1;
     }
     serveLoop(&shared);
+    CloseHandle(hSingleton);
     return 0;
 }

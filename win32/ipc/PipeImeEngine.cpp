@@ -7,11 +7,21 @@
 #include <cstdint>
 #include <cstring>
 #include <filesystem>
+#include <mutex>
 #include <string>
 #include <vector>
 
 namespace fcitx {
 namespace {
+
+HANDLE pipeServerLaunchMutexHandle() {
+    static HANDLE h = nullptr;
+    if (h) {
+        return h;
+    }
+    h = CreateMutexW(nullptr, FALSE, imeIpcPipeServerLaunchMutexName().c_str());
+    return h;
+}
 
 std::wstring utf8ToWide(std::string_view u8) {
     if (u8.empty()) {
@@ -93,9 +103,26 @@ void PipeImeEngine::closePipeUnlocked() const {
 }
 
 bool PipeImeEngine::tryLaunchPipeServerProcess() const {
+    HANDLE mx = pipeServerLaunchMutexHandle();
+    if (!mx) {
+        return false;
+    }
+    const DWORD w = WaitForSingleObject(mx, 60000);
+    if (w != WAIT_OBJECT_0 && w != WAIT_ABANDONED) {
+        return false;
+    }
+    const std::wstring path = imeIpcNamedPipePath();
+    HANDLE probe = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                               nullptr, OPEN_EXISTING, 0, nullptr);
+    if (probe != INVALID_HANDLE_VALUE) {
+        CloseHandle(probe);
+        ReleaseMutex(mx);
+        return true;
+    }
     const auto exe = imePipeServerExePath();
     if (exe.empty()) {
         tsfTrace("PipeImeEngine: cannot resolve Fcitx5ImePipeServer.exe path");
+        ReleaseMutex(mx);
         return false;
     }
     std::wstring quoted = L"\"";
@@ -112,10 +139,21 @@ bool PipeImeEngine::tryLaunchPipeServerProcess() const {
                        nullptr, nullptr, &si, &pi);
     if (!ok) {
         tsfTrace("PipeImeEngine: CreateProcessW Fcitx5ImePipeServer failed");
+        ReleaseMutex(mx);
         return false;
     }
     CloseHandle(pi.hThread);
     CloseHandle(pi.hProcess);
+    for (int i = 0; i < 100; ++i) {
+        Sleep(50);
+        probe = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE, 0,
+                            nullptr, OPEN_EXISTING, 0, nullptr);
+        if (probe != INVALID_HANDLE_VALUE) {
+            CloseHandle(probe);
+            break;
+        }
+    }
+    ReleaseMutex(mx);
     return true;
 }
 
@@ -134,7 +172,7 @@ bool PipeImeEngine::ensurePipeConnectedUnlocked() const {
             pipe_ = h;
             return true;
         }
-        if (attempt == 0 || attempt == 2 || attempt == 5) {
+        if (attempt == 0) {
             tryLaunchPipeServerProcess();
         }
     }

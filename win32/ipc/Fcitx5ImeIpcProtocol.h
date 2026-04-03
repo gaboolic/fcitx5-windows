@@ -46,6 +46,11 @@ struct ImeIpcFrameHeader {
 
 std::wstring imeIpcNamedPipePath();
 
+/// Only Fcitx5ImePipeServer.exe uses this; second instance exits immediately.
+std::wstring imeIpcPipeServerSingletonMutexName();
+/// PipeImeEngine uses this to serialize CreateProcess across host processes.
+std::wstring imeIpcPipeServerLaunchMutexName();
+
 bool imeIpcReadAll(HANDLE h, void *buf, size_t size);
 
 bool imeIpcWriteAll(HANDLE h, const void *buf, size_t size);

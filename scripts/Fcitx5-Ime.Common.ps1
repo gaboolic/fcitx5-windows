@@ -128,7 +128,8 @@ function Copy-FcitxImeStage {
             throw (
                 "robocopy IME DLL '$imeName' exit $($rcDll.ExitCode). " +
                 'ERROR 32 = file in use: uninstall IME (regsvr32 /u), close apps that used Fcitx5, ' +
-                'or sign out/reboot, then run install again.'
+                'or sign out/reboot, then run install again. ' +
+                "To list PIDs: .\scripts\find-fcitx5-bin-lock.ps1 -DeployDir '$DeployDir'"
             )
         }
     }
@@ -215,4 +216,72 @@ function Invoke-FcitxImeUnregister {
     }
     # regsvr32 may return non-zero if partially unregistered; still try registry purge
     return $proc.ExitCode
+}
+
+function Get-FcitxImeProcessesLockingBin {
+    <#
+    .SYNOPSIS
+      Lists processes whose main image or loaded modules live under DeployDir\bin (typical DLL lock when robocopy fails with ERROR 32).
+    #>
+    param(
+        [string] $DeployDir = 'C:\Fcitx5Portable'
+    )
+    $DeployDir = $DeployDir.TrimEnd('\', '/')
+    $bin = Join-Path $DeployDir 'bin'
+    if (-not (Test-Path -LiteralPath $bin)) {
+        Write-Warning "Bin directory not found: $bin (listing fcitx5*x86_64*.dll modules anywhere)."
+    }
+    $binFull = if (Test-Path -LiteralPath $bin) {
+        [System.IO.Path]::GetFullPath((Get-Item -LiteralPath $bin).FullName)
+    } else {
+        $null
+    }
+    $rows = New-Object System.Collections.Generic.List[object]
+    foreach ($proc in Get-Process -ErrorAction SilentlyContinue) {
+        if ($binFull -and $proc.Path) {
+            try {
+                $mp = [System.IO.Path]::GetFullPath($proc.Path)
+                if ($mp.StartsWith($binFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $rows.Add([PSCustomObject]@{
+                            ProcessId   = $proc.Id
+                            ProcessName = $proc.ProcessName
+                            Kind        = 'MainExe'
+                            Path        = $proc.Path
+                        })
+                }
+            }
+            catch {}
+        }
+        try {
+            foreach ($mod in $proc.Modules) {
+                $fp = $mod.FileName
+                if (-not $fp) { continue }
+                $matchBin = $false
+                if ($binFull) {
+                    try {
+                        $fpFull = [System.IO.Path]::GetFullPath($fp)
+                        if ($fpFull.StartsWith($binFull, [System.StringComparison]::OrdinalIgnoreCase)) {
+                            $matchBin = $true
+                        }
+                    }
+                    catch {}
+                }
+                if (-not $matchBin -and ($fp -match 'fcitx5.*x86_64\.dll' -or $fp -match '[\\/]Fcitx5ImePipeServer\.exe')) {
+                    $matchBin = $true
+                }
+                if ($matchBin) {
+                    $rows.Add([PSCustomObject]@{
+                            ProcessId   = $proc.Id
+                            ProcessName = $proc.ProcessName
+                            Kind        = 'Module'
+                            Path        = $fp
+                        })
+                }
+            }
+        }
+        catch {
+            # Access denied for some protected processes (e.g. System, csrss)
+        }
+    }
+    return $rows | Sort-Object ProcessId, Kind, Path -Unique
 }

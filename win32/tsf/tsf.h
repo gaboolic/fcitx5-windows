@@ -127,6 +127,10 @@ class Tsf : public ITfTextInputProcessorEx,
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
+    /// Hidden tray host window only (no Shell_NotifyIcon). Used when
+    /// ITfLangBarItemMgr::AddItem + TF_LBI_STYLE_SHOWNINTRAY provides the
+    /// taskbar indicator so Rime balloons / menu ownership still work.
+    bool initShellTrayHostForMessages();
     /// Shared hidden window + ref-count across Tsf instances in this process.
     bool acquireSharedShellTrayHost();
     void uninitShellTrayIcon();

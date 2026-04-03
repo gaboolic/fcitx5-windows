@@ -4,17 +4,33 @@
 
 namespace fcitx {
 
-std::wstring imeIpcNamedPipePath() {
+std::wstring imeIpcPipeServerUserName() {
     wchar_t user[UNLEN + 1] = {};
     DWORD n = UNLEN + 1;
     if (!GetUserNameW(user, &n)) {
         user[0] = L'\0';
     }
+    return user;
+}
+
+std::wstring imeIpcNamedPipePath() {
     std::wstring path = L"\\\\.\\pipe\\";
-    path += user;
+    path += imeIpcPipeServerUserName();
     path += L"\\";
     path += kImeIpcPipeBaseName;
     return path;
+}
+
+std::wstring imeIpcPipeServerSingletonMutexName() {
+    std::wstring name = L"Local\\Fcitx5ImePipeServerSingleton_";
+    name += imeIpcPipeServerUserName();
+    return name;
+}
+
+std::wstring imeIpcPipeServerLaunchMutexName() {
+    std::wstring name = L"Local\\Fcitx5ImePipeServerLaunch_";
+    name += imeIpcPipeServerUserName();
+    return name;
 }
 
 bool imeIpcReadAll(HANDLE h, void *buf, size_t size) {
