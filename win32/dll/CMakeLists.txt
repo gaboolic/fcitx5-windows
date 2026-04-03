@@ -13,8 +13,9 @@ if(WIN32)
   file(TO_CMAKE_PATH "${FCITX_WIN32_PENGUIN_ICO}" _fcitx_penguin_ico)
   string(REPLACE "\\" "/" _fcitx_penguin_ico_slash "${_fcitx_penguin_ico}")
   set(PENGUIN_ICO_FOR_RC "\"${_fcitx_penguin_ico_slash}\"")
-  set(_fcitx_tray_chi "${CMAKE_SOURCE_DIR}/win32/assets/tray_chi_full_capsoff.ico")
-  set(_fcitx_tray_eng "${CMAKE_SOURCE_DIR}/win32/assets/tray_eng_full_capsoff.ico")
+  get_filename_component(_fcitx_win32_dir "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+  set(_fcitx_tray_chi "${_fcitx_win32_dir}/assets/tray_chi_full_capsoff.ico")
+  set(_fcitx_tray_eng "${_fcitx_win32_dir}/assets/tray_eng_full_capsoff.ico")
   if(NOT EXISTS "${_fcitx_tray_chi}" OR NOT EXISTS "${_fcitx_tray_eng}")
     message(
       FATAL_ERROR
