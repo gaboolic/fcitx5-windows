@@ -21,12 +21,18 @@
 .PARAMETER AppendText
   Latin text to send one codepoint at a time via AppendLatin. Default: ni
 
+.PARAMETER UseRawKeyEvent
+  Send \`DeliverFcitxRawKeyEvent\` requests for each Latin character in \`AppendText\` instead of \`AppendLatin\`.
+  This better matches the TSF path for real key presses.
+
 .EXAMPLE
   .\scripts\test-ime-pipe.ps1 -DeployDir C:\Fcitx5Portable -StartServer
 .EXAMPLE
   .\scripts\test-ime-pipe.ps1 -TryPinyin
 .EXAMPLE
   .\scripts\test-ime-pipe.ps1 -TryInputMethod wbx -AppendText wg
+.EXAMPLE
+  .\scripts\test-ime-pipe.ps1 -TryInputMethod wbx -AppendText wg -UseRawKeyEvent
 .EXAMPLE
   .\scripts\test-ime-pipe.ps1 -MultiConnection
 #>
@@ -36,6 +42,7 @@ param(
     [switch] $TryPinyin,
     [string] $TryInputMethod,
     [string] $AppendText = 'ni',
+    [switch] $UseRawKeyEvent,
     [switch] $MultiConnection
 )
 
@@ -208,14 +215,30 @@ function Write-Host-Decoded {
 }
 
 function Get-AppendLatinRequests {
-    param([string] $Text)
+    param([string] $Text, [switch] $UseRawKeyEvent)
     $reqs = New-Object System.Collections.Generic.List[object]
     foreach ($ch in $Text.ToCharArray()) {
-        $u32 = [uint32][char]$ch
-        $reqs.Add([PSCustomObject]@{
-            Label   = "AppendLatin $ch"
-            Request = (New-IpcRequest -Opcode 3 -Body ([BitConverter]::GetBytes($u32)))
-        })
+        if ($UseRawKeyEvent) {
+            $vk = [uint32][char]([char]::ToUpperInvariant($ch))
+            $ms = New-Object System.IO.MemoryStream
+            $w = [System.IO.BinaryWriter]::new($ms)
+            $w.Write($vk)
+            $w.Write([uint64]0)
+            $w.Write([uint32]0)
+            $w.Write([uint32]0)
+            $w.Flush()
+            $reqs.Add([PSCustomObject]@{
+                Label   = "DeliverFcitxRawKeyEvent $ch"
+                Request = (New-IpcRequest -Opcode 13 -Body $ms.ToArray())
+            })
+        }
+        else {
+            $u32 = [uint32][char]$ch
+            $reqs.Add([PSCustomObject]@{
+                Label   = "AppendLatin $ch"
+                Request = (New-IpcRequest -Opcode 3 -Body ([BitConverter]::GetBytes($u32)))
+            })
+        }
     }
     return $reqs
 }
@@ -261,7 +284,7 @@ if ($MultiConnection) {
         [void](Write-Host-Decoded -Label "ActivateProfileInputMethod $activationIm" -Resp (Invoke-IpcPipeOneShot -PipePath $pipeFull -Request (New-IpcRequest -Opcode 14 -Body $actBody)))
     }
     [void](Write-Host-Decoded -Label 'Clear' -Resp (Invoke-IpcPipeOneShot -PipePath $pipeFull -Request (New-IpcRequest -Opcode 2)))
-    foreach ($step in (Get-AppendLatinRequests -Text $AppendText)) {
+    foreach ($step in (Get-AppendLatinRequests -Text $AppendText -UseRawKeyEvent:$UseRawKeyEvent)) {
         [void](Write-Host-Decoded -Label $step.Label -Resp (Invoke-IpcPipeOneShot -PipePath $pipeFull -Request $step.Request))
     }
     [void](Write-Host-Decoded -Label 'Clear (cleanup)' -Resp (Invoke-IpcPipeOneShot -PipePath $pipeFull -Request (New-IpcRequest -Opcode 2)))
@@ -287,7 +310,7 @@ else {
             [void](Write-Host-Decoded -Label "ActivateProfileInputMethod $activationIm" -Resp (Send (New-IpcRequest -Opcode 14 -Body $actBody)))
         }
         [void](Write-Host-Decoded -Label 'Clear' -Resp (Send (New-IpcRequest -Opcode 2)))
-        foreach ($step in (Get-AppendLatinRequests -Text $AppendText)) {
+        foreach ($step in (Get-AppendLatinRequests -Text $AppendText -UseRawKeyEvent:$UseRawKeyEvent)) {
             [void](Write-Host-Decoded -Label $step.Label -Resp (Send $step.Request))
         }
         [void](Write-Host-Decoded -Label 'Clear (cleanup)' -Resp (Send (New-IpcRequest -Opcode 2)))
@@ -304,3 +327,4 @@ Write-Host "  currentIm empty and preedit stays empty after AppendLatin: IME not
 Write-Host "  Compare -MultiConnection vs default if behaviour differs (normally use single connection)."
 Write-Host "  -TryInputMethod <name> activates a specific IM on the pipe session (for example: wbx, pinyin)."
 Write-Host "  -AppendText controls which Latin sequence is sent through AppendLatin."
+Write-Host "  -UseRawKeyEvent sends vk/lParam-style requests, closer to the TSF key path."

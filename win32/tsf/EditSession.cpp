@@ -44,19 +44,6 @@ bool tsfLatinKeyShouldPassToApp() {
     return ctrlDown || altDown;
 }
 
-/// VK_A..VK_Z → Latin character; matches Windows (Shift XOR Caps Lock), same
-/// idea as Weasel's KeyEvent with SHIFT_MASK + letter.
-wchar_t tsfLatinLetterFromVk(unsigned vk) {
-    if (vk < static_cast<unsigned>('A') || vk > static_cast<unsigned>('Z')) {
-        return L'\0';
-    }
-    const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    const bool capsLock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-    const bool upper = shiftDown ^ capsLock;
-    return upper ? static_cast<wchar_t>(vk)
-                 : static_cast<wchar_t>(vk - L'A' + L'a');
-}
-
 std::string tsfWideToUtf8(const std::wstring &text) {
     if (text.empty()) {
         return {};
@@ -1357,12 +1344,11 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        const wchar_t ch = tsfLatinLetterFromVk(vk);
-        if (ch == L'\0') {
-            drainCommitsAfterEngine(ec);
-            return S_OK;
-        }
-        pendingKeyHandled_ = engine_->appendLatinLowercase(ch);
+        // Table engines like Wubi need the real vk/lParam/modifier context;
+        // the simplified appendLatin path can be accepted by pinyin but ignored
+        // by fcitx-table.
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), false, rawKeyStateMask);
         if (pendingKeyHandled_) {
             afterFcitxEngineKey(ec);
         }

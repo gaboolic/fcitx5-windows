@@ -487,9 +487,9 @@ normalize_windows_libime_table_paths() {
   # These configs point at libime-installed dictionaries under share/libime.
   # On Windows, the generated File= entry may contain the absolute build-stage
   # path, which breaks installed packages on other machines. Re-anchor them
-  # relative to share/fcitx5/inputmethod/. The runtime now mirrors share/ to
-  # data/, so inputmethod/*.conf may be loaded from data/fcitx5/inputmethod;
-  # use ../../libime/*.main.dict so both share/ and data/ resolve to */libime.
+  # relative to the PkgData root (share/fcitx5 or data/fcitx5), not the
+  # directory of the inputmethod/*.conf file itself. Therefore File=../libime/*
+  # resolves to share/libime or data/libime as intended.
   shopt -s nullglob
   for _conf in \
     "$_inputmethod_dir"/cangjie.conf \
@@ -501,7 +501,7 @@ normalize_windows_libime_table_paths() {
     "$_inputmethod_dir"/wbx.conf \
     "$_inputmethod_dir"/zrm.conf; do
     [[ -f "$_conf" ]] || continue
-    sed -E -i 's#^File=.*/([^/]+\.main\.dict)$#File=../../libime/\1#' "$_conf"
+    sed -E -i 's#^File=.*/([^/]+\.main\.dict)$#File=../libime/\1#' "$_conf"
   done
   shopt -u nullglob
 }

@@ -1092,17 +1092,15 @@ bool Fcitx5ImeEngine::sendKeySym(KeySym sym) {
                      << " syncWidePre=" << preeditWide_.size()
                      << " syncCands=" << candidatesWide_.size();
     }
-    return true;
+    return keyOk;
 }
 
 bool Fcitx5ImeEngine::appendLatinLowercase(wchar_t ch) {
     if (ch >= L'a' && ch <= L'z') {
-        sendKeySym(static_cast<KeySym>(FcitxKey_a + (ch - L'a')));
-        return true;
+        return sendKeySym(static_cast<KeySym>(FcitxKey_a + (ch - L'a')));
     }
     if (ch >= L'A' && ch <= L'Z') {
-        sendKeySym(static_cast<KeySym>(FcitxKey_A + (ch - L'A')));
-        return true;
+        return sendKeySym(static_cast<KeySym>(FcitxKey_A + (ch - L'A')));
     }
     return false;
 }
