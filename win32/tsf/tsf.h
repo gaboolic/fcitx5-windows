@@ -24,6 +24,7 @@ class Tsf : public ITfTextInputProcessorEx,
             public ITfActiveLanguageProfileNotifySink,
             public ITfInputProcessorProfileActivationSink,
             public ITfThreadMgrEventSink,
+            public ITfCompartmentEventSink,
             public ITfTextEditSink,
             public ITfKeyEventSink,
             public ITfCompositionSink,
@@ -64,6 +65,9 @@ class Tsf : public ITfTextInputProcessorEx,
                             ITfDocumentMgr *pDocMgrPrevFocus) override;
     STDMETHODIMP OnPushContext(ITfContext *pContext) override;
     STDMETHODIMP OnPopContext(ITfContext *pContext) override;
+
+    // ITfCompartmentEventSink
+    STDMETHODIMP OnChange(REFGUID rguid) override;
 
     // ITfTextEditSink
     STDMETHODIMP OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly,
@@ -123,6 +127,13 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initActiveLanguageProfileNotifySink();
     void uninitProfileActivationSink();
     void uninitActiveLanguageProfileNotifySink();
+    bool initCompartmentEventSinks();
+    void uninitCompartmentEventSinks();
+    bool readThreadCompartmentDword(REFGUID guid, DWORD *value) const;
+    bool writeThreadCompartmentDword(REFGUID guid, DWORD value) const;
+    void syncKeyboardOpenCompartment(bool forceOpen);
+    void syncInputModeConversionCompartment(bool forceWrite = false);
+    void handleProfileActivated(bool active);
     void traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese);
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
@@ -160,6 +171,13 @@ class Tsf : public ITfTextInputProcessorEx,
     DWORD activeLanguageProfileNotifySinkCookie_ = TF_INVALID_COOKIE;
     DWORD profileActivationSinkCookie_ = TF_INVALID_COOKIE;
     DWORD threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
+    DWORD keyboardOpenCompartmentSinkCookie_ = TF_INVALID_COOKIE;
+    DWORD inputModeConversionCompartmentSinkCookie_ = TF_INVALID_COOKIE;
+    ComPtr<ITfCompartment> keyboardOpenCompartment_;
+    ComPtr<ITfCompartment> inputModeConversionCompartment_;
+    bool suppressKeyboardOpenCompartmentChange_ = false;
+    bool suppressInputModeConversionCompartmentChange_ = false;
+    bool destroying_ = false;
 
     // ITfTextEditSink
     bool initTextEditSink(ITfDocumentMgr *documentMgr);

@@ -1,4 +1,5 @@
 add_library(tsf STATIC
+    Compartment.cpp
     LangBarTray.cpp
     tsf.cpp
     CandidateListUiElement.cpp

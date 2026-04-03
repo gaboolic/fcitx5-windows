@@ -69,7 +69,6 @@
   - [x] **`Shift + 字母` 交给 IME**：像 **`Shift + A`** 这类组合也先交给 IME 处理，避免宿主过早吞掉按键（**`EditSession`** 按 Shift/Caps 映射大写；**`appendLatinLowercase`** 发送 **`FcitxKey_A`–`Z`** keysym，与 Weasel 的 SHIFT+字母一致）
   - [x] **候选框跟随光标**：**`EditSession.cpp`** — 与 **Weasel** `Composition.cpp` 一致：**`GetTextExt`** 使用**折叠到预编辑光标**的 range（非整段 composition）；**EnumViews** 结果将**与前台 HWND 关联**的 view 优先（等价于 `GetActiveView`）；**`tsf-trace.log`** 中检索 **`candidatePos`** 可看到各步 **GetTextExt** 矩形、**rangeMode**、兜底路径
 - [x]另外输入法换到非fcitx5的时候 托盘图标也一直在；切换输入法资源管理器重启
-- [x] **fcitx5-tray-helper.exe 为唯一托盘 owner**：TSF 经 WM_COPYDATA 发送 **Focus**（ActivateEx 会话）、**Ui**（引擎可见）、**Status**（中/英、IM、菜单动作）；**legacy Snapshot** 仍由 helper 兼容。Explorer 不再做托盘显示/隐藏裁决（`langBarNotifyIconUpdate` 仅 `explorerTrayHelperPrimedOnce`）。helper 合并 **GetForegroundWindow** PID、tip 会话 PID 与 **Ui/Status**，并记录前台有效性（`g_foregroundTrayValidity`）；是否用前台收紧托盘策略留待后续
 - [x] 中英文的状态显示在托盘（`TF_LBI_STYLE_SHOWNINTRAY` + 普通进程 `initShellTrayHostForMessages` 避免与 `Shell_NotifyIcon` 重复）
 
 ### P3 - 优化功能

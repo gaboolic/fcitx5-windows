@@ -1,13 +1,11 @@
 #include "tsf.h"
+#include "LangBarTray.h"
+#include "../dll/util.h"
 
 namespace fcitx {
 namespace {
 bool currentProcessIsExplorerForMinimalTray() {
-    return currentProcessExeBaseNameEquals(L"explorer.exe");
-}
-
-bool currentProcessIsStandaloneTrayHelperForMinimalTsf() {
-    return currentProcessIsStandaloneTrayHelper();
+    return currentProcessIsShellInputHost();
 }
 } // namespace
 
@@ -104,46 +102,43 @@ void Tsf::uninitActiveLanguageProfileNotifySink() {
 
 STDAPI Tsf::OnActivated(DWORD dwProfileType, LANGID, REFCLSID clsid, REFGUID,
                         REFGUID, HKL, DWORD dwFlags) {
-    if (!currentProcessIsExplorerForMinimalTray()) {
+    if (dwProfileType != TF_PROFILETYPE_INPUTPROCESSOR ||
+        !IsEqualGUID(clsid, FCITX_CLSID)) {
         return S_OK;
     }
-    (void)dwProfileType;
-    (void)clsid;
-    tsfTrace(std::string("OnActivated explorer minimal ignored flags=0x") +
+    const bool active = (dwFlags & TF_IPSINK_FLAG_ACTIVE) != 0;
+    tsfTrace(std::string("OnActivated(profile) active=") +
+             (active ? "true" : "false") + " flags=0x" +
              std::to_string(static_cast<unsigned long>(dwFlags)));
+    handleProfileActivated(active);
     return S_OK;
 }
 
 STDAPI Tsf::OnActivated(REFCLSID clsid, REFGUID, BOOL fActivated) {
-    if (!currentProcessIsExplorerForMinimalTray()) {
+    if (!IsEqualGUID(clsid, FCITX_CLSID)) {
         return S_OK;
     }
-    (void)clsid;
-    (void)fActivated;
-    tsfTrace("OnActivated(active-profile) explorer minimal ignored");
+    tsfTrace(std::string("OnActivated(active-profile) active=") +
+             (fActivated ? "true" : "false"));
+    handleProfileActivated(fActivated != FALSE);
     return S_OK;
 }
 
 STDAPI Tsf::Deactivate() {
-    if (currentProcessIsStandaloneTrayHelperForMinimalTsf()) {
-        initTextEditSink(nullptr);
-        trayEditContextFallback_.Reset();
-        profileMgr_.Reset();
-        activeLanguageProfileNotifySinkCookie_ = TF_INVALID_COOKIE;
-        profileActivationSinkCookie_ = TF_INVALID_COOKIE;
-        threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
-        threadMgr_.Reset();
-        clientId_ = TF_CLIENTID_NULL;
-        tsfTrace("Deactivate helper minimal isolated");
-        return S_OK;
-    }
     if (currentProcessIsExplorerForMinimalTray()) {
         initTextEditSink(nullptr);
         trayEditContextFallback_.Reset();
+        if (!destroying_) {
+            tsfTrace("Deactivate explorer minimal keepalive");
+            return S_OK;
+        }
         uninitLangBarTrayItem();
+        uninitCompartmentEventSinks();
+        uninitActiveLanguageProfileNotifySink();
+        uninitProfileActivationSink();
         threadMgr_.Reset();
         clientId_ = TF_CLIENTID_NULL;
-        tsfTrace("Deactivate explorer minimal bootstrap-only");
+        tsfTrace("Deactivate explorer minimal final cleanup");
         return S_OK;
     }
     flushSharedTrayScheduleFromFocusIfPending();
@@ -156,9 +151,12 @@ STDAPI Tsf::Deactivate() {
     initTextEditSink(nullptr);
     trayEditContextFallback_.Reset();
     if (threadMgr_) {
+        uninitCompartmentEventSinks();
+        uninitActiveLanguageProfileNotifySink();
         uninitThreadMgrEventSink();
         uninitKeyEventSink();
     }
+    uninitProfileActivationSink();
     threadMgr_.Reset();
     clientId_ = TF_CLIENTID_NULL;
     return S_OK;
@@ -168,21 +166,31 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
                        DWORD dwFlags) {
     ComPtr<ITfDocumentMgr> documentMgr;
     (void)dwFlags;
-    if (currentProcessIsStandaloneTrayHelperForMinimalTsf()) {
-        tsfTrace("ActivateEx helper minimal isolated (no threadMgr bind)");
-        return S_OK;
-    }
-    if (currentProcessIsExplorerForMinimalTray()) {
-        // MSCTF + explorer.exe: ActivateEx bursts without a usable threadMgr
-        // for ITfLangBarItemMgr::AddItem. Use Shell_NotifyIcon only; the
-        // taskbar 中/英 indicator appears in apps where ActivateEx binds
-        // threadMgr (see initLangBarTrayItem + TF_LBI_STYLE_SHOWNINTRAY).
-        initShellTrayIcon();
-        tsfTrace("ActivateEx explorer minimal tray-host-only no threadMgr");
-        return S_OK;
-    }
     threadMgr_ = pThreadMgr;
     clientId_ = tfClientId;
+    if (currentProcessIsExplorerForMinimalTray()) {
+        if (!initProfileActivationSink()) {
+            tsfTrace("ActivateEx explorer minimal initProfileActivationSink "
+                     "failed");
+        }
+        if (!initActiveLanguageProfileNotifySink()) {
+            tsfTrace("ActivateEx explorer minimal "
+                     "initActiveLanguageProfileNotifySink failed");
+        }
+        if (!initCompartmentEventSinks()) {
+            tsfTrace("ActivateEx explorer minimal initCompartmentEventSinks "
+                     "failed");
+        }
+        initLangBarTrayItem();
+        if (langBarItem_) {
+            langBarItem_->Show(TRUE);
+        }
+        syncKeyboardOpenCompartment(true);
+        langBarNotifyIconUpdate();
+        tsfTrace("ActivateEx explorer minimal attempted TSF lang-bar "
+                 "registration");
+        return S_OK;
+    }
     if (!initThreadMgrEventSink()) {
         goto ActivateExError;
     }
@@ -196,7 +204,20 @@ STDAPI Tsf::ActivateEx(ITfThreadMgr *pThreadMgr, TfClientId tfClientId,
         goto ActivateExError;
     }
 
+    if (!initProfileActivationSink()) {
+        tsfTrace("ActivateEx initProfileActivationSink failed");
+    }
+    if (!initActiveLanguageProfileNotifySink()) {
+        tsfTrace("ActivateEx initActiveLanguageProfileNotifySink failed");
+    }
+    if (!initCompartmentEventSinks()) {
+        tsfTrace("ActivateEx initCompartmentEventSinks failed");
+    }
     initLangBarTrayItem();
+    if (langBarItem_) {
+        langBarItem_->Show(TRUE);
+    }
+    syncKeyboardOpenCompartment(true);
     langBarNotifyIconUpdate();
 
     return S_OK;

@@ -14,15 +14,17 @@
 .PARAMETER BashArgs
   Extra arguments forwarded to 02-build-deps.sh (they are appended to the first fcitx5-windows cmake when SKIP_FCITX_WINDOWS is unset).
 
+
+  
 .EXAMPLE
   .\scripts\02-build-deps.ps1
 .EXAMPLE
   $env:SKIP_FCITX_WINDOWS = '1'; .\scripts\02-build-deps.ps1
 #>
 param(
-    [string] $MsysRoot = 'C:\msys64',
-    [Parameter(ValueFromRemainingArguments = $true)]
-    [string[]] $BashArgs = @()
+  [string] $MsysRoot = 'C:\msys64',
+  [Parameter(ValueFromRemainingArguments = $true)]
+  [string[]] $BashArgs = @()
 )
 
 $ErrorActionPreference = 'Stop'
@@ -31,21 +33,21 @@ $RepoRoot = (Resolve-Path -LiteralPath (Split-Path $PSScriptRoot -Parent)).Path
 $bash = Join-Path $MsysRoot 'usr\bin\bash.exe'
 $cygpath = Join-Path $MsysRoot 'usr\bin\cygpath.exe'
 foreach ($p in @($bash, $cygpath)) {
-    if (-not (Test-Path -LiteralPath $p)) {
-        Write-Error "Missing: $p — install MSYS2 CLANG64 toolchain or set -MsysRoot."
-    }
+  if (-not (Test-Path -LiteralPath $p)) {
+    Write-Error "Missing: $p — install MSYS2 CLANG64 toolchain or set -MsysRoot."
+  }
 }
 
 $repoUnix = (& $cygpath -u $RepoRoot).Trim()
 
 function Escape-BashSingleQuoted {
-    param([string] $Value)
-    $Value -replace "'", "'\''"
+  param([string] $Value)
+  $Value -replace "'", "'\''"
 }
 $qRepo = Escape-BashSingleQuoted $repoUnix
 $argTail = ''
 if ($BashArgs.Count -gt 0) {
-    $argTail = ' ' + (($BashArgs | ForEach-Object { "'" + (Escape-BashSingleQuoted $_) + "'" }) -join ' ')
+  $argTail = ' ' + (($BashArgs | ForEach-Object { "'" + (Escape-BashSingleQuoted $_) + "'" }) -join ' ')
 }
 
 $cmd = @"

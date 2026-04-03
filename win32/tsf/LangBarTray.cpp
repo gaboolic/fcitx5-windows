@@ -63,8 +63,8 @@ class ScopedDllPin {
 
 constexpr ULONGLONG kTrayContextMenuDebounceMs = 400;
 
-/// Bring \p menuOwner to the foreground before TrackPopupMenu (PIME PipeServer;
-/// trayhelper uses the same AttachThreadInput pattern for Explorer + MSCTF).
+/// Bring \p menuOwner to the foreground before TrackPopupMenu (same
+/// AttachThreadInput pattern used by PIME / Explorer-hosted TSF popups).
 void setForegroundForTrayPopupMenu(HWND menuOwner) {
     if (!menuOwner || menuOwner == GetDesktopWindow()) {
         return;
@@ -81,11 +81,14 @@ void setForegroundForTrayPopupMenu(HWND menuOwner) {
     }
 }
 
-const GUID kFcitxTrayLangBarItemId = {
-    0xf7e8d9c0,
-    0xb1a2,
-    0x4e3f,
-    {0x9d, 0x8c, 0x7e, 0x6f, 0x5a, 0x4b, 0x3c, 0x2d}};
+/** Standard Windows input-mode lang bar slot used by PIME / Weasel. Windows 8+
+ * may ignore third-party tray/lang-bar items that do not identify themselves
+ * as GUID_LBI_INPUTMODE. */
+const GUID kGuidLangBarInputMode = {
+    0x2c77a81e,
+    0x41cc,
+    0x4178,
+    {0xa3, 0xa7, 0x5f, 0x8a, 0x98, 0x75, 0x68, 0xe6}};
 
 /** Stable id for Shell_NotifyIcon so Windows can persist tray visibility per
  * user. */
@@ -1381,9 +1384,11 @@ HICON shellTrayIconForMode(bool chineseMode) {
 FcitxLangBarButton::FcitxLangBarButton(Tsf *tsf)
     : tsf_(tsf), ref_(1), status_(0), sink_(nullptr) {
     DllAddRef();
+    tsfTrace("FcitxLangBarButton ctor");
 }
 
 FcitxLangBarButton::~FcitxLangBarButton() {
+    tsfTrace("FcitxLangBarButton dtor");
     if (sink_) {
         sink_->Release();
         sink_ = nullptr;
@@ -1392,6 +1397,9 @@ FcitxLangBarButton::~FcitxLangBarButton() {
 }
 
 void FcitxLangBarButton::notifyModeChanged() {
+    tsfTrace(std::string("FcitxLangBarButton notifyModeChanged sink=") +
+             (sink_ ? "true" : "false") + " status=0x" +
+             std::to_string(static_cast<unsigned long>(status_)));
     if (sink_) {
         sink_->OnUpdate(TF_LBI_STATUS | TF_LBI_ICON | TF_LBI_TOOLTIP |
                         TF_LBI_TEXT);
@@ -1407,6 +1415,8 @@ STDMETHODIMP FcitxLangBarButton::QueryInterface(REFIID riid, void **ppvObject) {
         IsEqualIID(riid, IID_ITfLangBarItem) ||
         IsEqualIID(riid, IID_ITfLangBarItemButton)) {
         *ppvObject = static_cast<ITfLangBarItemButton *>(this);
+    } else if (IsEqualIID(riid, IID_ITfSource)) {
+        *ppvObject = static_cast<ITfSource *>(this);
     }
     if (*ppvObject) {
         AddRef();
@@ -1429,15 +1439,16 @@ STDMETHODIMP FcitxLangBarButton::GetInfo(TF_LANGBARITEMINFO *pInfo) {
     if (!pInfo) {
         return E_INVALIDARG;
     }
+    tsfTrace("FcitxLangBarButton GetInfo");
     pInfo->clsidService = FCITX_CLSID;
-    pInfo->guidItem = kFcitxTrayLangBarItemId;
-    // Match Weasel: SHOWNINTRAY registers the taskbar input indicator (中/英).
-    // In initLangBarTrayItem, successful AddItem uses initShellTrayHostForMessages
-    // (no Shell_NotifyIcon) to avoid a duplicate tray icon; explorer-only path
-    // still uses initShellTrayIcon when AddItem is not used.
+    pInfo->guidItem = kGuidLangBarInputMode;
+    // Match PIME / Weasel: use the reserved input-mode slot and let TSF own the
+    // taskbar indicator. The hidden host HWND is still used for menu ownership
+    // and notifications, but we no longer fall back to Shell_NotifyIcon for the
+    // input-mode icon in normal TIP hosts.
     pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_MENU |
                      TF_LBI_STYLE_SHOWNINTRAY;
-    pInfo->ulSort = 0;
+    pInfo->ulSort = 1;
     fcitx::wideStringCopyTruncate(pInfo->szDescription, TF_LBI_DESC_MAXLEN,
                                   L"Fcitx5");
     return S_OK;
@@ -1448,10 +1459,14 @@ STDMETHODIMP FcitxLangBarButton::GetStatus(DWORD *pdwStatus) {
         return E_INVALIDARG;
     }
     *pdwStatus = status_;
+    tsfTrace("FcitxLangBarButton GetStatus status=0x" +
+             std::to_string(static_cast<unsigned long>(status_)));
     return S_OK;
 }
 
 STDMETHODIMP FcitxLangBarButton::Show(BOOL fShow) {
+    tsfTrace(std::string("FcitxLangBarButton Show ") +
+             (fShow ? "true" : "false"));
     const BOOL hide = fShow ? FALSE : TRUE;
     if (hide) {
         status_ |= TF_LBI_STATUS_HIDDEN;
@@ -1466,6 +1481,7 @@ STDMETHODIMP FcitxLangBarButton::GetTooltipString(BSTR *pbstrToolTip) {
     if (!pbstrToolTip) {
         return E_INVALIDARG;
     }
+    tsfTrace("FcitxLangBarButton GetTooltipString");
     const wchar_t *s =
         tsf_ && tsf_->langBarChineseMode()
             ? L"Fcitx5 — 中文输入\nShift：中/英  Ctrl+Space：中/英\n右键：菜单"
@@ -1515,9 +1531,16 @@ STDMETHODIMP FcitxLangBarButton::GetIcon(HICON *phIcon) {
     if (!phIcon) {
         return E_INVALIDARG;
     }
+    tsfTrace(std::string("FcitxLangBarButton GetIcon chinese=") +
+             ((tsf_ && tsf_->langBarChineseMode()) ? "true" : "false"));
     const int cx = GetSystemMetrics(SM_CXSMICON);
     const int cy = GetSystemMetrics(SM_CYSMICON);
-    *phIcon = shellTrayIconForMode(tsf_ && tsf_->langBarChineseMode());
+    HICON cachedIcon = shellTrayIconForMode(tsf_ && tsf_->langBarChineseMode());
+    if (cachedIcon) {
+        *phIcon = CopyIcon(cachedIcon);
+    } else {
+        *phIcon = nullptr;
+    }
     if (!*phIcon) {
         *phIcon = loadPenguinIconNearDll(static_cast<unsigned>(cx),
                                           static_cast<unsigned>(cy));
@@ -1534,6 +1557,8 @@ STDMETHODIMP FcitxLangBarButton::GetText(BSTR *pbstrText) {
     if (!pbstrText) {
         return E_INVALIDARG;
     }
+    tsfTrace(std::string("FcitxLangBarButton GetText chinese=") +
+             ((tsf_ && tsf_->langBarChineseMode()) ? "true" : "false"));
     const wchar_t *s =
         tsf_ && tsf_->langBarChineseMode() ? L"中" : L"英";
     *pbstrText = SysAllocString(s);
@@ -1548,6 +1573,7 @@ STDMETHODIMP FcitxLangBarButton::AdviseSink(REFIID riid, IUnknown *punk,
     if (sink_ || !punk) {
         return CONNECT_E_ADVISELIMIT;
     }
+    tsfTrace("FcitxLangBarButton AdviseSink");
     if (FAILED(punk->QueryInterface(IID_ITfLangBarItemSink,
                                     reinterpret_cast<void **>(&sink_)))) {
         sink_ = nullptr;
@@ -1561,71 +1587,77 @@ STDMETHODIMP FcitxLangBarButton::UnadviseSink(DWORD dwCookie) {
     if (dwCookie != kSinkCookie || !sink_) {
         return CONNECT_E_NOCONNECTION;
     }
+    tsfTrace("FcitxLangBarButton UnadviseSink");
     sink_->Release();
     sink_ = nullptr;
     return S_OK;
 }
 
 bool Tsf::initLangBarTrayItem() {
-    if (currentProcessIsExplorer()) {
-        const bool trayReady = initShellTrayIcon();
-        tsfTrace(
-            std::string("initLangBarTrayItem explorer trayOnly trayReady=") +
-            (trayReady ? "true" : "false"));
-        return trayReady;
-    }
-    // Already have TSF lang bar (SHOWNINTRAY): do not call initShellTrayIcon
-    // here — that would add a second Shell_NotifyIcon next to the taskbar
-    // indicator (e.g. on repeated ActivateEx without a matching Deactivate).
+    // Already have a TSF lang bar item: do not create any Shell_NotifyIcon
+    // fallback here, otherwise one extra tray icon can be added per host.
     if (langBarItem_) {
         tsfTrace("initLangBarTrayItem already has langBarItem");
         return true;
     }
     if (!threadMgr_) {
-        const bool trayReady = initShellTrayIcon();
-        tsfTrace(std::string("initLangBarTrayItem no threadMgr trayReady=") +
-                 (trayReady ? "true" : "false"));
-        return trayReady;
+        tsfTrace("initLangBarTrayItem missing threadMgr; skip non-TSF tray "
+                 "fallback");
+        return false;
     }
     ComPtr<ITfLangBarItemMgr> mgr;
     if (FAILED(threadMgr_->QueryInterface(
             IID_ITfLangBarItemMgr,
             reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
         tsfTrace("initLangBarTrayItem missing ITfLangBarItemMgr");
-        return initShellTrayIcon();
+        return false;
     }
     auto *btn = new FcitxLangBarButton(this);
-    if (FAILED(mgr->AddItem(btn))) {
+    const HRESULT hr = mgr->AddItem(btn);
+    if (FAILED(hr)) {
         btn->Release();
-        tsfTrace("initLangBarTrayItem AddItem failed");
-        return initShellTrayIcon();
+        tsfTrace("initLangBarTrayItem AddItem failed hr=0x" +
+                 std::to_string(static_cast<unsigned long>(hr)) +
+                 "; skip Shell_NotifyIcon fallback");
+        return false;
     }
     langBarItem_ = btn;
+    langBarItem_->Show(TRUE);
     if (!initShellTrayHostForMessages()) {
         tsfTrace(
             "initLangBarTrayItem initShellTrayHostForMessages failed "
             "(lang bar item still active)");
     }
-    tsfTrace("initLangBarTrayItem success (SHOWNINTRAY + host HWND, no "
-             "Shell_NotifyIcon duplicate)");
+    // Some Windows setups never query ITfLangBarItemButton::GetIcon for the
+    // SHOWNINTRAY item. Keep a Shell_NotifyIcon fallback, but only from
+    // explorer.exe so one process owns one tray icon globally.
+    if (currentProcessIsExplorer()) {
+        if (!initShellTrayIcon()) {
+            tsfTrace("initLangBarTrayItem initShellTrayIcon fallback failed");
+        }
+    } else {
+        tsfTrace("initLangBarTrayItem skip Shell_NotifyIcon fallback in non-"
+                 "explorer process");
+    }
+    tsfTrace("initLangBarTrayItem success (SHOWNINTRAY + Shell_NotifyIcon "
+             "fallback)");
     return true;
 }
 
 void Tsf::uninitLangBarTrayItem() {
-    uninitShellTrayIcon();
-    if (!langBarItem_) {
-        return;
-    }
-    if (threadMgr_) {
-        ComPtr<ITfLangBarItemMgr> mgr;
-        if (SUCCEEDED(threadMgr_->QueryInterface(
-                IID_ITfLangBarItemMgr,
-                reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
-            mgr->RemoveItem(langBarItem_);
+    if (langBarItem_) {
+        if (threadMgr_) {
+            ComPtr<ITfLangBarItemMgr> mgr;
+            if (SUCCEEDED(threadMgr_->QueryInterface(
+                    IID_ITfLangBarItemMgr,
+                    reinterpret_cast<void **>(mgr.ReleaseAndGetAddressOf())))) {
+                mgr->RemoveItem(langBarItem_);
+            }
         }
+        langBarItem_->Release();
+        langBarItem_ = nullptr;
     }
-    langBarItem_->Release();
-    langBarItem_ = nullptr;
+    uninitShellTrayIcon();
 }
 
 void Tsf::langBarScheduleToggleChinese() {
@@ -2020,6 +2052,7 @@ bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
 }
 
 void Tsf::langBarNotifyIconUpdate() {
+    syncInputModeConversionCompartment(true);
     persistSharedTrayChineseModeState(chineseActive_);
     if (engine_) {
         const auto current = engine_->currentInputMethod();
@@ -2198,6 +2231,10 @@ bool Tsf::initShellTrayHostForMessages() {
 }
 
 bool Tsf::initShellTrayIcon() {
+    if (!currentProcessIsExplorer()) {
+        tsfTrace("initShellTrayIcon skip non-explorer process");
+        return false;
+    }
     if (!acquireSharedShellTrayHost()) {
         tsfTrace("initShellTrayIcon acquireSharedShellTrayHost failed");
         return false;
@@ -2292,6 +2329,9 @@ void Tsf::cancelShellTrayRetry() {
 }
 
 void Tsf::updateShellTrayTooltip() {
+    if (!currentProcessIsExplorer()) {
+        return;
+    }
     if (!shellTrayHostHwnd_ || !gShellTrayNotifyAdded) {
         return;
     }
@@ -2314,6 +2354,9 @@ void Tsf::updateShellTrayTooltip() {
 }
 
 void Tsf::recreateShellTrayIcon() {
+    if (!currentProcessIsExplorer()) {
+        return;
+    }
     if (!shellTrayHostHwnd_) {
         return;
     }

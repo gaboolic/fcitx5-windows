@@ -28,7 +28,6 @@ add_subdirectory(assets)
 add_subdirectory(tsf)
 add_subdirectory(dll)
 add_subdirectory(configui)
-add_subdirectory(trayhelper)
 
 enable_testing()
 add_subdirectory(tests)

@@ -15,7 +15,8 @@ namespace fcitx {
 
 class Tsf;
 
-class FcitxLangBarButton final : public ITfLangBarItemButton {
+class FcitxLangBarButton final : public ITfLangBarItemButton,
+                                 public ITfSource {
   public:
     explicit FcitxLangBarButton(Tsf *tsf);
     ~FcitxLangBarButton();

@@ -68,13 +68,11 @@ inline bool currentProcessExeBaseNameEquals(const wchar_t *expected) {
            wideStringCompareI(baseName.c_str(), expected) == 0;
 }
 
-inline bool currentProcessIsStandaloneTrayHelper() {
-    return currentProcessExeBaseNameEquals(L"fcitx5-tray-helper.exe");
-}
-
-inline bool currentProcessUsesMinimalTsfMode() {
+inline bool currentProcessIsShellInputHost() {
     return currentProcessExeBaseNameEquals(L"explorer.exe") ||
-           currentProcessIsStandaloneTrayHelper();
+           currentProcessExeBaseNameEquals(L"ctfmon.exe") ||
+           currentProcessExeBaseNameEquals(L"TextInputHost.exe") ||
+           currentProcessExeBaseNameEquals(L"ShellExperienceHost.exe");
 }
 
 } // namespace fcitx
