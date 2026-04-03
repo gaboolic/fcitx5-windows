@@ -130,8 +130,7 @@ std::vector<std::uint8_t> handleRequest(ImeEngine *eng, ImeIpcOpcode op,
         if (!eatU32(p, end, &vk) || !eatU64(p, end, &lp) || p != end) {
             return fcitx::imeIpcEncodeErrorResponse(1);
         }
-        if (eng->imManagerHotkeyWouldEat(
-                vk, static_cast<std::uintptr_t>(lp))) {
+        if (eng->imManagerHotkeyWouldEat(vk, static_cast<std::uintptr_t>(lp))) {
             flags |= 2u;
         }
         break;
@@ -142,8 +141,8 @@ std::vector<std::uint8_t> handleRequest(ImeEngine *eng, ImeIpcOpcode op,
         if (!eatU32(p, end, &vk) || !eatU64(p, end, &lp) || p != end) {
             return fcitx::imeIpcEncodeErrorResponse(1);
         }
-        if (eng->tryConsumeImManagerHotkey(
-                vk, static_cast<std::uintptr_t>(lp))) {
+        if (eng->tryConsumeImManagerHotkey(vk,
+                                           static_cast<std::uintptr_t>(lp))) {
             flags |= 1u;
         }
         break;
@@ -161,7 +160,8 @@ std::vector<std::uint8_t> handleRequest(ImeEngine *eng, ImeIpcOpcode op,
     case ImeIpcOpcode::DeliverFcitxRawKeyEvent: {
         std::uint32_t vk = 0, rel = 0;
         std::uint64_t lp = 0;
-        std::uint32_t hostMods = fcitx::ImeEngine::kFcitxRawKeyUseProcessKeyboardState;
+        std::uint32_t hostMods =
+            fcitx::ImeEngine::kFcitxRawKeyUseProcessKeyboardState;
         if (!eatU32(p, end, &vk) || !eatU64(p, end, &lp) ||
             !eatU32(p, end, &rel)) {
             return fcitx::imeIpcEncodeErrorResponse(1);
@@ -292,8 +292,7 @@ void serveLoop(fcitx::Fcitx5ImePipeShared *shared) {
 int main() {
     const std::wstring mutexName = fcitx::imeIpcPipeServerSingletonMutexName();
     SetLastError(0);
-    HANDLE hSingleton =
-        CreateMutexW(nullptr, FALSE, mutexName.c_str());
+    HANDLE hSingleton = CreateMutexW(nullptr, FALSE, mutexName.c_str());
     if (!hSingleton) {
         return 1;
     }

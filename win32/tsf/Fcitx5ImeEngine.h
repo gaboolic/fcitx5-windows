@@ -86,8 +86,9 @@ class Fcitx5ImeEngine : public ImeEngine {
     /// @param localIm If true (in-proc TSF), apply as per-IC local IM. If false
     /// (pipe server session), follow global profile so every app’s context
     /// tracks tray / defaultInputMethod instead of sticking on pinyin.
-    void activatePreferredInputMethod(const std::string &preferredInputMethod = {},
-                                      bool localIm = true);
+    void
+    activatePreferredInputMethod(const std::string &preferredInputMethod = {},
+                                 bool localIm = true);
     /// Pipe session: same refresh/activate sequence as the original in-proc
     /// init (single pass; avoid repeated activate/save confusing fcitx state).
     void activatePreferredInputMethodPipeSync(
@@ -97,7 +98,8 @@ class Fcitx5ImeEngine : public ImeEngine {
 
     bool loggingAttached_ = false;
 
-    /// When non-null, `instance_` is unused; `Instance` comes from the pipe host.
+    /// When non-null, `instance_` is unused; `Instance` comes from the pipe
+    /// host.
     Fcitx5ImePipeShared *pipeSharedHost_ = nullptr;
     std::unique_ptr<Instance> instance_;
     std::unique_ptr<TsfInputContext> ic_;

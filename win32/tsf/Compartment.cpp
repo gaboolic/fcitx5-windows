@@ -4,8 +4,8 @@
 namespace fcitx {
 namespace {
 
-bool adviseCompartmentSink(ITfThreadMgr *threadMgr, REFGUID guid, IUnknown *sink,
-                           ComPtr<ITfCompartment> *compartment,
+bool adviseCompartmentSink(ITfThreadMgr *threadMgr, REFGUID guid,
+                           IUnknown *sink, ComPtr<ITfCompartment> *compartment,
                            DWORD *cookie) {
     if (!threadMgr || !sink || !compartment || !cookie) {
         return false;
@@ -13,11 +13,13 @@ bool adviseCompartmentSink(ITfThreadMgr *threadMgr, REFGUID guid, IUnknown *sink
     ComPtr<ITfCompartmentMgr> compartmentMgr;
     if (FAILED(threadMgr->QueryInterface(
             IID_ITfCompartmentMgr,
-            reinterpret_cast<void **>(compartmentMgr.ReleaseAndGetAddressOf()))) ||
+            reinterpret_cast<void **>(
+                compartmentMgr.ReleaseAndGetAddressOf()))) ||
         !compartmentMgr) {
         return false;
     }
-    if (FAILED(compartmentMgr->GetCompartment(guid, compartment->GetAddressOf())) ||
+    if (FAILED(compartmentMgr->GetCompartment(guid,
+                                              compartment->GetAddressOf())) ||
         !*compartment) {
         compartment->Reset();
         return false;
@@ -101,12 +103,14 @@ bool Tsf::readThreadCompartmentDword(REFGUID guid, DWORD *value) const {
     ComPtr<ITfCompartmentMgr> compartmentMgr;
     if (FAILED(threadMgr_->QueryInterface(
             IID_ITfCompartmentMgr,
-            reinterpret_cast<void **>(compartmentMgr.ReleaseAndGetAddressOf()))) ||
+            reinterpret_cast<void **>(
+                compartmentMgr.ReleaseAndGetAddressOf()))) ||
         !compartmentMgr) {
         return false;
     }
     ComPtr<ITfCompartment> compartment;
-    if (FAILED(compartmentMgr->GetCompartment(guid, compartment.GetAddressOf())) ||
+    if (FAILED(
+            compartmentMgr->GetCompartment(guid, compartment.GetAddressOf())) ||
         !compartment) {
         return false;
     }
@@ -124,18 +128,21 @@ bool Tsf::readThreadCompartmentDword(REFGUID guid, DWORD *value) const {
 
 bool Tsf::writeThreadCompartmentDword(REFGUID guid, DWORD value) const {
     if (!threadMgr_ || clientId_ == TF_CLIENTID_NULL) {
-        tsfTrace("writeThreadCompartmentDword skipped missing threadMgr/clientId");
+        tsfTrace(
+            "writeThreadCompartmentDword skipped missing threadMgr/clientId");
         return false;
     }
     ComPtr<ITfCompartmentMgr> compartmentMgr;
     if (FAILED(threadMgr_->QueryInterface(
             IID_ITfCompartmentMgr,
-            reinterpret_cast<void **>(compartmentMgr.ReleaseAndGetAddressOf()))) ||
+            reinterpret_cast<void **>(
+                compartmentMgr.ReleaseAndGetAddressOf()))) ||
         !compartmentMgr) {
         return false;
     }
     ComPtr<ITfCompartment> compartment;
-    if (FAILED(compartmentMgr->GetCompartment(guid, compartment.GetAddressOf())) ||
+    if (FAILED(
+            compartmentMgr->GetCompartment(guid, compartment.GetAddressOf())) ||
         !compartment) {
         return false;
     }
@@ -154,7 +161,7 @@ bool Tsf::writeThreadCompartmentDword(REFGUID guid, DWORD value) const {
 void Tsf::syncKeyboardOpenCompartment(bool forceOpen) {
     DWORD current = 0;
     if (!forceOpen && !readThreadCompartmentDword(
-                           GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &current)) {
+                          GUID_COMPARTMENT_KEYBOARD_OPENCLOSE, &current)) {
         return;
     }
     const DWORD desired = 1;
@@ -177,8 +184,9 @@ void Tsf::syncInputModeConversionCompartment(bool forceWrite) {
     const bool haveCurrent = readThreadCompartmentDword(
         GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &current);
     DWORD desired =
-        haveCurrent ? (current & static_cast<DWORD>(TF_CONVERSIONMODE_FULLSHAPE))
-                    : 0;
+        haveCurrent
+            ? (current & static_cast<DWORD>(TF_CONVERSIONMODE_FULLSHAPE))
+            : 0;
     if (chineseActive_) {
         desired |= TF_CONVERSIONMODE_NATIVE;
     }
@@ -187,12 +195,12 @@ void Tsf::syncInputModeConversionCompartment(bool forceWrite) {
                  std::to_string(static_cast<unsigned long>(current)));
         return;
     }
-    tsfTrace("syncInputModeConversionCompartment forceWrite=" +
-             std::string(forceWrite ? "true" : "false") + " chinese=" +
-             std::string(chineseActive_ ? "true" : "false") + " current=0x" +
-             std::to_string(static_cast<unsigned long>(current)) +
-             " desired=0x" +
-             std::to_string(static_cast<unsigned long>(desired)));
+    tsfTrace(
+        "syncInputModeConversionCompartment forceWrite=" +
+        std::string(forceWrite ? "true" : "false") +
+        " chinese=" + std::string(chineseActive_ ? "true" : "false") +
+        " current=0x" + std::to_string(static_cast<unsigned long>(current)) +
+        " desired=0x" + std::to_string(static_cast<unsigned long>(desired)));
     suppressInputModeConversionCompartmentChange_ = true;
     writeThreadCompartmentDword(GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION,
                                 desired);
@@ -240,8 +248,7 @@ STDMETHODIMP Tsf::OnChange(REFGUID rguid) {
         DWORD flags = 0;
         if (readThreadCompartmentDword(
                 GUID_COMPARTMENT_KEYBOARD_INPUTMODE_CONVERSION, &flags)) {
-            const bool wantChinese =
-                (flags & TF_CONVERSIONMODE_NATIVE) != 0;
+            const bool wantChinese = (flags & TF_CONVERSIONMODE_NATIVE) != 0;
             if (wantChinese != chineseActive_) {
                 langBarScheduleSetChineseMode(wantChinese);
             } else {

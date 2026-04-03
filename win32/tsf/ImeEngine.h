@@ -24,8 +24,9 @@ struct TrayStatusActionItem {
 class ImeEngine {
   public:
     /// Sent as `hostKeyboardStateMask` to mean: build modifiers from
-    /// `GetKeyState` in the process that runs `deliverFcitxRawKeyEvent` (in-proc
-    /// IME). Pipe client must send real `KeyState` bits from the TSF process.
+    /// `GetKeyState` in the process that runs `deliverFcitxRawKeyEvent`
+    /// (in-proc IME). Pipe client must send real `KeyState` bits from the TSF
+    /// process.
     static constexpr std::uint32_t kFcitxRawKeyUseProcessKeyboardState =
         0xffffffffu;
 
@@ -87,14 +88,16 @@ class ImeEngine {
     /// KeyEvent::accepted(). \p hostKeyboardStateMask is OR of `KeyState`
     /// bits from the TSF host when `usesHostKeyboardStateForRawKeyDelivery()`
     /// is true; otherwise pass `kFcitxRawKeyUseProcessKeyboardState`.
-    virtual bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                         bool isRelease,
-                                         std::uint32_t hostKeyboardStateMask =
-                                             kFcitxRawKeyUseProcessKeyboardState);
+    virtual bool
+    deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam, bool isRelease,
+                            std::uint32_t hostKeyboardStateMask =
+                                kFcitxRawKeyUseProcessKeyboardState);
 
     /// Pipe client: send real modifier/caps state — the pipe server process has
     /// no meaningful `GetKeyState` for the focused app.
-    virtual bool usesHostKeyboardStateForRawKeyDelivery() const { return false; }
+    virtual bool usesHostKeyboardStateForRawKeyDelivery() const {
+        return false;
+    }
 
     /// List input methods in the current profile group for tray menus.
     virtual std::vector<ProfileInputMethodItem> profileInputMethods() const;

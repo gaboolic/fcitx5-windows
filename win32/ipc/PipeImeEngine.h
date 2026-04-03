@@ -48,8 +48,7 @@ class PipeImeEngine final : public ImeEngine {
 
     bool imManagerHotkeyWouldEat(unsigned vk,
                                  std::uintptr_t lParam) const override;
-    bool tryConsumeImManagerHotkey(unsigned vk,
-                                   std::uintptr_t lParam) override;
+    bool tryConsumeImManagerHotkey(unsigned vk, std::uintptr_t lParam) override;
 
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
@@ -71,14 +70,12 @@ class PipeImeEngine final : public ImeEngine {
   private:
     static void appendU32(std::vector<std::uint8_t> &b, std::uint32_t v);
     static void appendU64(std::vector<std::uint8_t> &b, std::uint64_t v);
-    static void appendUtf8(std::vector<std::uint8_t> &b,
-                           const std::string &s);
+    static void appendUtf8(std::vector<std::uint8_t> &b, const std::string &s);
 
     bool ensurePipeConnectedUnlocked() const;
     bool tryLaunchPipeServerProcess() const;
     void closePipeUnlocked() const;
-    bool transact(ImeIpcOpcode op,
-                  const std::vector<std::uint8_t> &body) const;
+    bool transact(ImeIpcOpcode op, const std::vector<std::uint8_t> &body) const;
     void applySnapshot(const ImeIpcDecoded &d) const;
 
     mutable std::mutex mutex_;

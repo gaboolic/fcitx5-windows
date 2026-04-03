@@ -32,9 +32,9 @@ std::string wideToUtf8(std::wstring_view w) {
     if (w.empty()) {
         return {};
     }
-    const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(),
-                                      static_cast<int>(w.size()), nullptr, 0,
-                                      nullptr, nullptr);
+    const int n =
+        WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()),
+                            nullptr, 0, nullptr, nullptr);
     if (n <= 0) {
         return {};
     }
@@ -52,15 +52,14 @@ std::wstring utf8ToWide(std::string_view u8) {
         MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, u8.data(),
                             static_cast<int>(u8.size()), nullptr, 0);
     if (wlen <= 0) {
-        const int wlen2 =
-            MultiByteToWideChar(CP_UTF8, 0, u8.data(),
-                                static_cast<int>(u8.size()), nullptr, 0);
+        const int wlen2 = MultiByteToWideChar(
+            CP_UTF8, 0, u8.data(), static_cast<int>(u8.size()), nullptr, 0);
         if (wlen2 <= 0) {
             return {};
         }
         std::wstring w(static_cast<std::size_t>(wlen2), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, u8.data(),
-                            static_cast<int>(u8.size()), w.data(), wlen2);
+        MultiByteToWideChar(CP_UTF8, 0, u8.data(), static_cast<int>(u8.size()),
+                            w.data(), wlen2);
         return w;
     }
     std::wstring w(static_cast<std::size_t>(wlen), L'\0');
@@ -84,8 +83,8 @@ bool readUtf8Blob(const std::uint8_t *&p, const std::uint8_t *end,
 
 } // namespace
 
-std::vector<std::uint8_t> imeIpcEncodeRequest(
-    ImeIpcOpcode op, const std::vector<std::uint8_t> &body) {
+std::vector<std::uint8_t>
+imeIpcEncodeRequest(ImeIpcOpcode op, const std::vector<std::uint8_t> &body) {
     ImeIpcFrameHeader h{};
     h.magic = kImeIpcFrameMagic;
     h.version = kImeIpcVersion;
@@ -101,9 +100,9 @@ std::vector<std::uint8_t> imeIpcEncodeRequest(
     return out;
 }
 
-std::vector<std::uint8_t>
-imeIpcEncodeSuccessResponse(ImeEngine *engine, bool drainOneCommit,
-                            std::uint32_t flags) {
+std::vector<std::uint8_t> imeIpcEncodeSuccessResponse(ImeEngine *engine,
+                                                      bool drainOneCommit,
+                                                      std::uint32_t flags) {
     if (!engine) {
         return {};
     }

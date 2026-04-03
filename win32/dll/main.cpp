@@ -101,9 +101,9 @@ __declspec(dllexport) STDAPI DllRegisterServer() {
         registerServerOk ? fcitx::RegisterProfiles() : FALSE;
     fcitx::RegisterTrace(std::string("DllRegisterServer RegisterProfiles=") +
                          (registerProfilesOk ? "true" : "false"));
-    const BOOL registerCategoriesOk =
-        (registerServerOk && registerProfilesOk) ? fcitx::RegisterCategories()
-                                                 : FALSE;
+    const BOOL registerCategoriesOk = (registerServerOk && registerProfilesOk)
+                                          ? fcitx::RegisterCategories()
+                                          : FALSE;
     fcitx::RegisterTrace(std::string("DllRegisterServer RegisterCategories=") +
                          (registerCategoriesOk ? "true" : "false"));
     if (registerServerOk && registerProfilesOk && registerCategoriesOk) {

@@ -32,7 +32,8 @@ enum class ImeIpcOpcode : std::uint32_t {
     ReloadRimeConfig = 19,
 };
 
-constexpr std::uint32_t kImeIpcFrameMagic = 0x31435446u; // "FCT1" little-endian on LE machine
+constexpr std::uint32_t kImeIpcFrameMagic =
+    0x31435446u; // "FCT1" little-endian on LE machine
 constexpr std::uint32_t kImeIpcVersion = 1;
 constexpr std::size_t kImeIpcMaxPacket = 512 * 1024;
 constexpr wchar_t kImeIpcPipeBaseName[] = L"Fcitx5ImePipe_v1";

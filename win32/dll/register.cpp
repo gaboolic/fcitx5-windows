@@ -27,7 +27,8 @@ void RegisterTrace(const std::string &message) {
     };
 
     WCHAR value[MAX_PATH];
-    const DWORD appDataLen = GetEnvironmentVariableW(L"APPDATA", value, MAX_PATH);
+    const DWORD appDataLen =
+        GetEnvironmentVariableW(L"APPDATA", value, MAX_PATH);
     if (appDataLen != 0 && appDataLen < MAX_PATH) {
         const std::wstring dir = std::wstring(value) + L"\\Fcitx5";
         CreateDirectoryW(dir.c_str(), nullptr);
@@ -58,16 +59,16 @@ namespace {
 HKL findImeKeyboardLayoutForLang(LANGID langid) {
     HKEY hKey = nullptr;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
-                      L"SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts", 0,
-                      KEY_READ, &hKey) != ERROR_SUCCESS) {
+                      L"SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts",
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS) {
         return nullptr;
     }
     WCHAR keyName[KL_NAMELENGTH] = {};
     // Align with Weasel: only treat IME-style E0xx HKLs as substitute layouts.
     // Binding to the generic 0000xxxx keyboard layout causes TSF to emit a
     // SubstituteLayout entry that does not correspond to a dedicated TIP/IME.
-    for (DWORD value = (0xE0200000u | langid);
-         value <= (0xE0FF0000u | langid); value += 0x10000u) {
+    for (DWORD value = (0xE0200000u | langid); value <= (0xE0FF0000u | langid);
+         value += 0x10000u) {
         if (swprintf(keyName, ARRAYSIZE(keyName), L"%08X", value) < 0) {
             continue;
         }
@@ -86,7 +87,8 @@ HKL findImeKeyboardLayoutForLang(LANGID langid) {
 } // namespace
 
 /*
-HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{FC3869BA-51E3-4078-8EE2-5FE49493A1F4}: Fcitx5
+HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{FC3869BA-51E3-4078-8EE2-5FE49493A1F4}:
+Fcitx5
   - InprocServer32: C:\Windows\system32
     ThreadingModel: Apartment
 */
@@ -96,17 +98,17 @@ BOOL RegisterServer() {
     HKEY hSubKey = nullptr;
     WCHAR dllPath[MAX_PATH];
     auto achIMEKey = "SOFTWARE\\Classes\\CLSID\\" + guidToString(FCITX_CLSID);
-    const LSTATUS status = RegCreateKeyExA(HKEY_LOCAL_MACHINE, achIMEKey.c_str(),
-                                           0, nullptr, REG_OPTION_NON_VOLATILE,
-                                           KEY_WRITE, nullptr, &hKey, &dw);
+    const LSTATUS status = RegCreateKeyExA(
+        HKEY_LOCAL_MACHINE, achIMEKey.c_str(), 0, nullptr,
+        REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, &dw);
     RegisterTrace(std::format("RegisterServer RegCreateKeyExA status={}",
                               static_cast<long>(status)));
     if (status != ERROR_SUCCESS) {
         return FALSE;
     }
-    LSTATUS ret = RegSetValueExA(hKey, nullptr, 0, REG_SZ,
-                                 reinterpret_cast<const BYTE *>(FCITX5),
-                                 sizeof FCITX5);
+    LSTATUS ret =
+        RegSetValueExA(hKey, nullptr, 0, REG_SZ,
+                       reinterpret_cast<const BYTE *>(FCITX5), sizeof FCITX5);
     RegisterTrace(std::format("RegisterServer RegSetValueExA(name) status={}",
                               static_cast<long>(ret)));
     if (ret != ERROR_SUCCESS) {
@@ -116,9 +118,9 @@ BOOL RegisterServer() {
     ret = RegCreateKeyExA(hKey, "InprocServer32", 0, nullptr,
                           REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hSubKey,
                           &dw);
-    RegisterTrace(std::format(
-        "RegisterServer RegCreateKeyExA(InprocServer32) status={}",
-        static_cast<long>(ret)));
+    RegisterTrace(
+        std::format("RegisterServer RegCreateKeyExA(InprocServer32) status={}",
+                    static_cast<long>(ret)));
     if (ret != ERROR_SUCCESS) {
         RegCloseKey(hKey);
         return FALSE;
@@ -139,9 +141,9 @@ BOOL RegisterServer() {
     ret = RegSetValueExA(hSubKey, THREADING_MODEL, 0, REG_SZ,
                          reinterpret_cast<const BYTE *>(APARTMENT),
                          sizeof APARTMENT);
-    RegisterTrace(std::format(
-        "RegisterServer RegSetValueExA(ThreadingModel) status={}",
-        static_cast<long>(ret)));
+    RegisterTrace(
+        std::format("RegisterServer RegSetValueExA(ThreadingModel) status={}",
+                    static_cast<long>(ret)));
     RegCloseKey(hSubKey);
     RegCloseKey(hKey);
     return ret == ERROR_SUCCESS;
@@ -180,8 +182,8 @@ BOOL RegisterProfiles() {
     const auto registerProfile = [&](LANGID langid, HKL hkl, BOOL enable) {
         const HRESULT hr = mgr->RegisterProfile(
             FCITX_CLSID, langid, PROFILE_GUID, pchDesc.c_str(),
-            pchDesc.size() * sizeof(WCHAR), dllPath, dllPathLen,
-            0, hkl, 0, enable, 0);
+            pchDesc.size() * sizeof(WCHAR), dllPath, dllPathLen, 0, hkl, 0,
+            enable, 0);
         RegisterTrace(std::format(
             "RegisterProfiles lang=0x{:04X} hkl=0x{:08X} enable={} hr=0x{:08X}",
             static_cast<unsigned>(langid),
@@ -341,7 +343,8 @@ BOOL RegisterCategories() {
 #else
     for (const auto &guid : Categories) {
 #endif
-        const HRESULT catHr = mgr->RegisterCategory(FCITX_CLSID, guid, FCITX_CLSID);
+        const HRESULT catHr =
+            mgr->RegisterCategory(FCITX_CLSID, guid, FCITX_CLSID);
         RegisterTrace(std::format("RegisterCategories guid={} hr=0x{:08X}",
                                   guidToString(guid),
                                   static_cast<unsigned long>(catHr)));

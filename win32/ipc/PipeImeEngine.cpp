@@ -31,15 +31,14 @@ std::wstring utf8ToWide(std::string_view u8) {
         MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, u8.data(),
                             static_cast<int>(u8.size()), nullptr, 0);
     if (wlen <= 0) {
-        const int wlen2 =
-            MultiByteToWideChar(CP_UTF8, 0, u8.data(),
-                                static_cast<int>(u8.size()), nullptr, 0);
+        const int wlen2 = MultiByteToWideChar(
+            CP_UTF8, 0, u8.data(), static_cast<int>(u8.size()), nullptr, 0);
         if (wlen2 <= 0) {
             return {};
         }
         std::wstring w(static_cast<size_t>(wlen2), L'\0');
-        MultiByteToWideChar(CP_UTF8, 0, u8.data(),
-                            static_cast<int>(u8.size()), w.data(), wlen2);
+        MultiByteToWideChar(CP_UTF8, 0, u8.data(), static_cast<int>(u8.size()),
+                            w.data(), wlen2);
         return w;
     }
     std::wstring w(static_cast<size_t>(wlen), L'\0');
@@ -237,9 +236,7 @@ void PipeImeEngine::applySnapshot(const ImeIpcDecoded &d) const {
     trayActions_ = d.trayActions;
 }
 
-bool PipeImeEngine::pingConnect() {
-    return transact(ImeIpcOpcode::Ping, {});
-}
+bool PipeImeEngine::pingConnect() { return transact(ImeIpcOpcode::Ping, {}); }
 
 std::unique_ptr<ImeEngine> makePipeImeEngineAttempt() {
     auto p = std::make_unique<PipeImeEngine>();
@@ -249,29 +246,21 @@ std::unique_ptr<ImeEngine> makePipeImeEngineAttempt() {
     return p;
 }
 
-void PipeImeEngine::clear() {
-    transact(ImeIpcOpcode::Clear, {});
-}
+void PipeImeEngine::clear() { transact(ImeIpcOpcode::Clear, {}); }
 
 void PipeImeEngine::syncInputPanelFromIme() {
     transact(ImeIpcOpcode::SyncInputPanel, {});
 }
 
-const std::wstring &PipeImeEngine::preedit() const {
-    return preedit_;
-}
+const std::wstring &PipeImeEngine::preedit() const { return preedit_; }
 
-int PipeImeEngine::preeditCaretUtf16() const {
-    return caretUtf16_;
-}
+int PipeImeEngine::preeditCaretUtf16() const { return caretUtf16_; }
 
 const std::vector<std::wstring> &PipeImeEngine::candidates() const {
     return candidates_;
 }
 
-int PipeImeEngine::highlightIndex() const {
-    return highlight_;
-}
+int PipeImeEngine::highlightIndex() const { return highlight_; }
 
 void PipeImeEngine::setHighlightIndex(int index) {
     std::vector<std::uint8_t> b;
@@ -304,8 +293,7 @@ std::wstring PipeImeEngine::candidateText(size_t index) const {
 }
 
 std::wstring PipeImeEngine::highlightedCandidateText() const {
-    if (highlight_ >= 0 &&
-        highlight_ < static_cast<int>(candidates_.size())) {
+    if (highlight_ >= 0 && highlight_ < static_cast<int>(candidates_.size())) {
         return candidates_[static_cast<size_t>(highlight_)];
     }
     return {};
@@ -378,9 +366,9 @@ bool PipeImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const {
     return (lastFlags_ & 4u) != 0;
 }
 
-bool PipeImeEngine::deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                            bool isRelease,
-                                            std::uint32_t hostKeyboardStateMask) {
+bool PipeImeEngine::deliverFcitxRawKeyEvent(
+    unsigned vk, std::uintptr_t lParam, bool isRelease,
+    std::uint32_t hostKeyboardStateMask) {
     std::vector<std::uint8_t> b;
     appendU32(b, vk);
     appendU64(b, static_cast<std::uint64_t>(lParam));
@@ -396,8 +384,7 @@ bool PipeImeEngine::usesHostKeyboardStateForRawKeyDelivery() const {
     return true;
 }
 
-std::vector<ProfileInputMethodItem>
-PipeImeEngine::profileInputMethods() const {
+std::vector<ProfileInputMethodItem> PipeImeEngine::profileInputMethods() const {
     transact(ImeIpcOpcode::Ping, {});
     return profileIms_;
 }

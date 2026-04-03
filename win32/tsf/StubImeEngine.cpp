@@ -24,10 +24,9 @@ bool ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned /*vk*/) const {
     return false;
 }
 
-bool ImeEngine::deliverFcitxRawKeyEvent(unsigned /*vk*/,
-                                        std::uintptr_t /*lParam*/,
-                                        bool /*isRelease*/,
-                                        std::uint32_t /*hostKeyboardStateMask*/) {
+bool ImeEngine::deliverFcitxRawKeyEvent(
+    unsigned /*vk*/, std::uintptr_t /*lParam*/, bool /*isRelease*/,
+    std::uint32_t /*hostKeyboardStateMask*/) {
     return false;
 }
 

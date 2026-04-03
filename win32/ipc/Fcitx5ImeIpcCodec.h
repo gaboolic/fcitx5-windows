@@ -21,13 +21,14 @@ struct ImeIpcDecoded {
     std::vector<TrayStatusActionItem> trayActions;
 };
 
-std::vector<std::uint8_t> imeIpcEncodeRequest(ImeIpcOpcode op,
-                                              const std::vector<std::uint8_t> &body);
-
-/// @param drainOneCommit if true, pops one commit on the engine before snapshot.
 std::vector<std::uint8_t>
-imeIpcEncodeSuccessResponse(ImeEngine *engine, bool drainOneCommit,
-                            std::uint32_t flags);
+imeIpcEncodeRequest(ImeIpcOpcode op, const std::vector<std::uint8_t> &body);
+
+/// @param drainOneCommit if true, pops one commit on the engine before
+/// snapshot.
+std::vector<std::uint8_t> imeIpcEncodeSuccessResponse(ImeEngine *engine,
+                                                      bool drainOneCommit,
+                                                      std::uint32_t flags);
 
 std::vector<std::uint8_t> imeIpcEncodeErrorResponse(std::uint32_t status);
 
