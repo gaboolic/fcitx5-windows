@@ -1,8 +1,6 @@
 #include "CandidateListUiElement.h"
 #include "tsf.h"
 
-#include <fcitx-utils/keysym.h>
-
 #include <algorithm>
 #include <cstdint>
 #include "TsfStubLog.h"
@@ -561,6 +559,7 @@ namespace fcitx {
 namespace {
 
 std::uint32_t tsfHostKeyboardStateMaskForPipe() {
+#if FCITX5_WINDOWS_IME_IPC
     std::uint32_t m = 0;
     if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
         m |= static_cast<std::uint32_t>(KeyState::Shift);
@@ -582,6 +581,9 @@ std::uint32_t tsfHostKeyboardStateMaskForPipe() {
         m |= static_cast<std::uint32_t>(KeyState::NumLock);
     }
     return m;
+#else
+    return 0;
+#endif
 }
 
 } // namespace
