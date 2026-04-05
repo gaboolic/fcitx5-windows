@@ -2305,8 +2305,8 @@ bool Tsf::initShellTrayIcon() {
         bool usedGuid = true;
         const bool chineseMode = langBarChineseMode();
         if (!shellTrayNotifyAdd(shellTrayHostHwnd_,
-                                shellTrayIconForMode(chineseMode),
-                                chineseMode, &usedGuid)) {
+                                shellTrayIconForMode(chineseMode), chineseMode,
+                                &usedGuid)) {
             tsfTrace("initShellTrayIcon shellTrayNotifyAdd failed; scheduling "
                      "retry");
             scheduleShellTrayRetry();
