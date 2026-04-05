@@ -99,7 +99,7 @@ class Tsf : public ITfTextInputProcessorEx,
     void langBarScheduleSetChineseMode(bool wantChinese);
     void langBarScheduleActivateInputMethod(const std::string &uniqueName);
     void langBarNotifyIconUpdate();
-    bool langBarChineseMode() const { return chineseActive_; }
+    bool langBarChineseMode() const;
     bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
     bool sharedTrayStatusActionRequestPending() const;

@@ -128,17 +128,14 @@ STDAPI Tsf::Deactivate() {
     if (currentProcessIsExplorerForMinimalTray()) {
         initTextEditSink(nullptr);
         trayEditContextFallback_.Reset();
-        if (!destroying_) {
-            tsfTrace("Deactivate explorer minimal keepalive");
-            return S_OK;
-        }
         uninitLangBarTrayItem();
         uninitCompartmentEventSinks();
         uninitActiveLanguageProfileNotifySink();
         uninitProfileActivationSink();
         threadMgr_.Reset();
         clientId_ = TF_CLIENTID_NULL;
-        tsfTrace("Deactivate explorer minimal final cleanup");
+        tsfTrace(destroying_ ? "Deactivate explorer minimal final cleanup"
+                             : "Deactivate explorer minimal cleanup");
         return S_OK;
     }
     flushSharedTrayScheduleFromFocusIfPending();

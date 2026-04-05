@@ -1456,7 +1456,7 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         FCITX_INFO() << "DoEditSession pending tray input method target="
                      << uniqueName << " fromShared=" << fromSharedRequest
                      << " pid=" << GetCurrentProcessId();
-        chineseActive_ = true;
+        chineseActive_ = uniqueName != "keyboard-us";
         if (composition_) {
             endCompositionCancel(ec);
         } else {

@@ -169,6 +169,10 @@ bool currentProcessIsExplorer() {
                                      L"explorer.exe") == 0;
 }
 
+bool currentProcessUsesSharedTrayState() {
+    return currentProcessIsShellInputHost();
+}
+
 bool launchDetachedProcess(const std::wstring &application,
                            const std::wstring &arguments,
                            const std::wstring &workingDirectory = {}) {
@@ -1409,6 +1413,28 @@ void FcitxLangBarButton::notifyModeChanged() {
     }
 }
 
+bool Tsf::langBarChineseMode() const {
+    std::string currentInputMethod;
+    if (engine_) {
+        currentInputMethod = engine_->currentInputMethod();
+    }
+    if (currentInputMethod.empty() && currentProcessUsesSharedTrayState()) {
+        currentInputMethod = readSharedTrayCurrentInputMethodState();
+    }
+    if (currentInputMethod == "keyboard-us") {
+        return false;
+    }
+
+    bool mode = chineseActive_;
+    if (currentProcessUsesSharedTrayState()) {
+        bool sharedMode = mode;
+        if (readSharedTrayChineseModeState(&sharedMode)) {
+            mode = sharedMode;
+        }
+    }
+    return mode;
+}
+
 STDMETHODIMP FcitxLangBarButton::QueryInterface(REFIID riid, void **ppvObject) {
     if (!ppvObject) {
         return E_INVALIDARG;
@@ -1630,15 +1656,16 @@ bool Tsf::initLangBarTrayItem() {
                  "(lang bar item still active)");
     }
     // Some Windows setups never query ITfLangBarItemButton::GetIcon for the
-    // SHOWNINTRAY item. Keep a Shell_NotifyIcon fallback, but only from
-    // explorer.exe so one process owns one tray icon globally.
-    if (currentProcessIsExplorer()) {
+    // SHOWNINTRAY item. Keep a Shell_NotifyIcon fallback for shell input-host
+    // processes as well, otherwise the icon may never appear outside
+    // explorer.exe-hosted paths.
+    if (currentProcessIsShellInputHost()) {
         if (!initShellTrayIcon()) {
             tsfTrace("initLangBarTrayItem initShellTrayIcon fallback failed");
         }
     } else {
         tsfTrace("initLangBarTrayItem skip Shell_NotifyIcon fallback in non-"
-                 "explorer process");
+                 "shell-input-host process");
     }
     tsfTrace("initLangBarTrayItem success (SHOWNINTRAY + Shell_NotifyIcon "
              "fallback)");
@@ -1662,7 +1689,7 @@ void Tsf::uninitLangBarTrayItem() {
 }
 
 void Tsf::langBarScheduleToggleChinese() {
-    if (currentProcessIsExplorer()) {
+    if (currentProcessUsesSharedTrayState()) {
         bool current = chineseActive_;
         readSharedTrayChineseModeState(&current);
         langBarScheduleSetChineseMode(!current);
@@ -1692,7 +1719,7 @@ void Tsf::langBarScheduleToggleChinese() {
 }
 
 void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
-    if (currentProcessIsExplorer()) {
+    if (currentProcessUsesSharedTrayState()) {
         chineseActive_ = wantChinese;
         persistSharedTrayChineseModeRequest(wantChinese);
         persistSharedTrayChineseModeState(wantChinese);
@@ -1714,8 +1741,8 @@ void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
     persistSharedTrayCurrentInputMethodState(uniqueName);
     persistSharedTrayChineseModeRequest(true);
     persistSharedTrayChineseModeState(true);
-    if (currentProcessIsExplorer() || !engine_) {
-        chineseActive_ = true;
+    if (currentProcessUsesSharedTrayState() || !engine_) {
+        chineseActive_ = uniqueName != "keyboard-us";
         langBarNotifyIconUpdate();
         return;
     }
@@ -1740,7 +1767,7 @@ void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
     if (FAILED(hr)) {
         const auto im = pendingTrayInputMethod_;
         pendingTrayInputMethod_.clear();
-        chineseActive_ = true;
+        chineseActive_ = im != "keyboard-us";
         candidateWin_.hide();
         endCandidateListUiElement();
         engine_->clear();
@@ -1827,7 +1854,7 @@ bool Tsf::scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext) {
     if (pendingTraySetChineseModeValid_) {
         return false;
     }
-    if (currentProcessIsExplorer()) {
+    if (currentProcessUsesSharedTrayState()) {
         return false;
     }
     bool wantChinese = false;
@@ -1880,7 +1907,7 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
                       << " pid=" << GetCurrentProcessId();
         return false;
     }
-    if (currentProcessIsExplorer()) {
+    if (currentProcessUsesSharedTrayState()) {
         tsfTrace("scheduleSharedTrayInputMethodRequest skipped in explorer");
         FCITX_DEBUG()
             << "scheduleSharedTrayInputMethodRequest skipped in explorer"
@@ -1973,7 +2000,7 @@ bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
 
 bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
     if (!engine_ || !pendingTrayStatusAction_.empty() ||
-        currentProcessIsExplorer()) {
+        currentProcessUsesSharedTrayState()) {
         return false;
     }
     const auto uniqueName = readSharedTrayStatusActionRequestFile();
@@ -2016,7 +2043,7 @@ bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
 
 bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
     if (!engine_ || pendingTrayReloadPinyinConfig_ ||
-        currentProcessIsExplorer()) {
+        currentProcessUsesSharedTrayState()) {
         return false;
     }
     if (!readSharedTrayPinyinReloadRequestFile()) {
@@ -2053,8 +2080,11 @@ bool Tsf::scheduleSharedTrayPinyinReloadRequest(ITfContext *preferredContext) {
 }
 
 void Tsf::langBarNotifyIconUpdate() {
+    if (currentProcessUsesSharedTrayState()) {
+        chineseActive_ = langBarChineseMode();
+    }
     syncInputModeConversionCompartment(true);
-    persistSharedTrayChineseModeState(chineseActive_);
+    persistSharedTrayChineseModeState(langBarChineseMode());
     if (engine_) {
         const auto current = engine_->currentInputMethod();
         if (!current.empty()) {
@@ -2231,8 +2261,8 @@ bool Tsf::initShellTrayHostForMessages() {
 }
 
 bool Tsf::initShellTrayIcon() {
-    if (!currentProcessIsExplorer()) {
-        tsfTrace("initShellTrayIcon skip non-explorer process");
+    if (!currentProcessUsesSharedTrayState()) {
+        tsfTrace("initShellTrayIcon skip non-shell-input-host process");
         return false;
     }
     if (!acquireSharedShellTrayHost()) {
@@ -2250,9 +2280,10 @@ bool Tsf::initShellTrayIcon() {
     }
     if (!gShellTrayNotifyAdded) {
         bool usedGuid = true;
+        const bool chineseMode = langBarChineseMode();
         if (!shellTrayNotifyAdd(shellTrayHostHwnd_,
-                                shellTrayIconForMode(chineseActive_),
-                                chineseActive_, &usedGuid)) {
+                                shellTrayIconForMode(chineseMode),
+                                chineseMode, &usedGuid)) {
             tsfTrace("initShellTrayIcon shellTrayNotifyAdd failed; scheduling "
                      "retry");
             scheduleShellTrayRetry();
@@ -2329,32 +2360,33 @@ void Tsf::cancelShellTrayRetry() {
 }
 
 void Tsf::updateShellTrayTooltip() {
-    if (!currentProcessIsExplorer()) {
+    if (!currentProcessUsesSharedTrayState()) {
         return;
     }
     if (!shellTrayHostHwnd_ || !gShellTrayNotifyAdded) {
         return;
     }
-    HICON icon = shellTrayIconForMode(chineseActive_);
+    const bool chineseMode = langBarChineseMode();
+    HICON icon = shellTrayIconForMode(chineseMode);
     NOTIFYICONDATAW nid = {};
     fillShellTrayNidIdentity(&nid, shellTrayHostHwnd_,
                              gShellTrayUseGuidIdentity);
     nid.uFlags |= NIF_ICON;
     nid.hIcon = icon;
-    shellTrayFillTip(&nid, chineseActive_);
+    shellTrayFillTip(&nid, chineseMode);
     if (!Shell_NotifyIconW(NIM_MODIFY, &nid)) {
         NOTIFYICONDATAW legacy = {};
         fillShellTrayNidIdentity(&legacy, shellTrayHostHwnd_,
                                  !gShellTrayUseGuidIdentity);
         legacy.uFlags |= NIF_ICON;
         legacy.hIcon = icon;
-        shellTrayFillTip(&legacy, chineseActive_);
+        shellTrayFillTip(&legacy, chineseMode);
         Shell_NotifyIconW(NIM_MODIFY, &legacy);
     }
 }
 
 void Tsf::recreateShellTrayIcon() {
-    if (!currentProcessIsExplorer()) {
+    if (!currentProcessUsesSharedTrayState()) {
         return;
     }
     if (!shellTrayHostHwnd_) {
@@ -2369,11 +2401,12 @@ void Tsf::recreateShellTrayIcon() {
         scheduleShellTrayRetry();
         return;
     }
+    const bool chineseMode = langBarChineseMode();
     shellTrayNotifyRemoveAll(shellTrayHostHwnd_);
     gShellTrayNotifyAdded = false;
     bool usedGuid = true;
     if (shellTrayNotifyAdd(shellTrayHostHwnd_,
-                           shellTrayIconForMode(chineseActive_), chineseActive_,
+                           shellTrayIconForMode(chineseMode), chineseMode,
                            &usedGuid)) {
         gShellTrayNotifyAdded = true;
         gShellTrayUseGuidIdentity = usedGuid;

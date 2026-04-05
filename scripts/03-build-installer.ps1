@@ -13,14 +13,14 @@
   .\scripts\03-build-installer.ps1 -StageDir D:\fcitx5-windows\stage
 #>
 param(
-    [Parameter(Mandatory = $true)]
-    [string] $StageDir
+  [Parameter(Mandatory = $true)]
+  [string] $StageDir = 'D:\vscode\fcitx_projs\fcitx5-windows\stage'
 )
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path $PSScriptRoot -Parent
 $installer = Join-Path $repo 'installer\build-installer.ps1'
 if (-not (Test-Path -LiteralPath $installer)) {
-    Write-Error "Missing: $installer"
+  Write-Error "Missing: $installer"
 }
 & $installer -StageDir $StageDir
