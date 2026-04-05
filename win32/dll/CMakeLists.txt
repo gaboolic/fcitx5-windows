@@ -51,7 +51,7 @@ if(NOT MSVC)
   target_compile_options(fcitx5-x86_64 PRIVATE "-Wno-dll-attribute-on-redeclaration")
 endif()
 
-target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32 shell32)
+target_link_libraries(fcitx5-x86_64 PRIVATE tsf ole32 oleaut32 shell32 shlwapi)
 if(NOT MSVC)
   if(WIN32 OR CYGWIN OR MSYS OR CMAKE_SYSTEM_NAME STREQUAL "MSYS")
     target_link_libraries(fcitx5-x86_64 PRIVATE uuid)
@@ -120,4 +120,26 @@ if(TARGET Fcitx5Core AND TARGET Fcitx5Utils)
         COMMENT "Copy MinGW/Clang runtime DLLs next to IME DLL")
     endif()
   endif()
+endif()
+
+if(FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW AND WIN32)
+  set(_fcitx_webview_assets "${FCITX_WIN32_WEBVIEW_DIST_DIR}")
+  add_dependencies(fcitx5-x86_64 GenerateWebViewAssets)
+  add_custom_command(
+    TARGET fcitx5-x86_64
+    POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory
+            "$<TARGET_FILE_DIR:fcitx5-x86_64>/fcitx5-webview"
+    COMMAND ${CMAKE_COMMAND} -E copy_directory
+            "${_fcitx_webview_assets}"
+            "$<TARGET_FILE_DIR:fcitx5-x86_64>/fcitx5-webview"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${FCITX_WIN32_WEBVIEW2_LOADER_DLL}"
+            $<TARGET_FILE_DIR:fcitx5-x86_64>
+    COMMENT "Stage WebView2 loader and candidate assets")
+
+  install(FILES "${FCITX_WIN32_WEBVIEW2_LOADER_DLL}"
+          DESTINATION "${CMAKE_INSTALL_BINDIR}")
+  install(DIRECTORY "${_fcitx_webview_assets}/"
+          DESTINATION "${CMAKE_INSTALL_BINDIR}/fcitx5-webview")
 endif()

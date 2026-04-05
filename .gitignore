@@ -9,6 +9,9 @@ build-portable
 build-win32-test
 build-ci-test
 build-ipc-test
+build-agent-win32
+build-agent-win32-rc
+build-stage-refresh
 stage
 stage-pinyin
 stage-test
@@ -30,3 +33,7 @@ install
 
 # User-local CMake
 CMakeUserPresets.json
+
+# fcitx5-webview submodule build deps
+fcitx5-webview/node_modules/
+fcitx5-webview/package-lock.json

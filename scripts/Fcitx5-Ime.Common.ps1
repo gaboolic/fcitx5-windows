@@ -285,3 +285,47 @@ function Get-FcitxImeProcessesLockingBin {
     }
     return $rows | Sort-Object ProcessId, Kind, Path -Unique
 }
+
+function Stop-FcitxImeProcessesLockingBin {
+    <#
+    .SYNOPSIS
+      Stops processes that keep DeployDir\bin or fcitx5 IME modules loaded.
+    #>
+    param(
+        [string] $DeployDir = 'C:\Fcitx5Portable',
+        [switch] $IncludeExplorer
+    )
+    $rows = Get-FcitxImeProcessesLockingBin -DeployDir $DeployDir
+    $myPid = $PID
+    $stopped = New-Object System.Collections.Generic.List[string]
+    $skipped = New-Object System.Collections.Generic.List[string]
+    foreach ($procId in ($rows | Select-Object -ExpandProperty ProcessId -Unique | Sort-Object)) {
+        if ($procId -eq $myPid) {
+            $skipped.Add("PID $procId (current shell)")
+            continue
+        }
+        try {
+            $p = Get-Process -Id $procId -ErrorAction Stop
+        }
+        catch {
+            $skipped.Add("PID $procId (already exited)")
+            continue
+        }
+        if (-not $IncludeExplorer -and $p.ProcessName -eq 'explorer') {
+            $skipped.Add("PID $procId explorer")
+            continue
+        }
+        try {
+            Stop-Process -Id $procId -Force -ErrorAction Stop
+            $stopped.Add("$($p.ProcessName) (PID $procId)")
+        }
+        catch {
+            $skipped.Add("PID $procId $($p.ProcessName) ($($_.Exception.Message))")
+        }
+    }
+    [PSCustomObject]@{
+        Rows    = $rows
+        Stopped = @($stopped)
+        Skipped = @($skipped)
+    }
+}

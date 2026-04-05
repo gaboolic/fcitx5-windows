@@ -237,6 +237,8 @@ jobs:
         run: git config --global core.autocrlf false
 
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Validate PowerShell scripts
         working-directory: .
