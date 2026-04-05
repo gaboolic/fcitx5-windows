@@ -844,6 +844,12 @@ void CandidateWindow::pushWebViewState() {
     }
     ++webViewEpoch_;
     const std::string styleJson = config_->styleJson();
+    std::string stylePreview = styleJson;
+    constexpr size_t kStylePreviewLimit = 512;
+    if (stylePreview.size() > kStylePreviewLimit) {
+        stylePreview.resize(kStylePreviewLimit);
+        stylePreview += "...";
+    }
     std::ostringstream script;
     script << "(function(){try{if(!window.fcitx)return;";
     script << "window.fcitx.setHost('Windows',11);";
@@ -853,12 +859,17 @@ void CandidateWindow::pushWebViewState() {
            << static_cast<int>(config_->typography.layout) << ");";
     script << "window.fcitx.setWritingMode("
            << static_cast<int>(config_->typography.writingMode) << ");";
+    script << "window.fcitx.log(\"win:setStyle.begin\");";
+    script << "window.fcitx.log(\"win:stylePreview="
+           << jsonEscape(stylePreview) << "\");";
     script << "window.fcitx.setStyle(\"" << jsonEscape(styleJson) << "\");";
+    script << "window.fcitx.log(\"win:setStyle.ok\");";
     script << "window.fcitx.updateInputPanel([],false,[],[],[]);";
     script << "window.fcitx.setCandidates(" << buildCandidatesJson(candidates_)
            << "," << highlight_ << ",false,false,false,0,false,false);";
     script << "window.fcitx.resize(" << webViewEpoch_
-           << ",0,0,false,false);}catch(e){}})();";
+           << ",0,0,false,false);}catch(e){try{if(window.fcitx&&window.fcitx.log)"
+              "window.fcitx.log('win:pushWebViewState error:'+(e&&e.stack?e.stack:String(e)));}catch(_){}}})();";
     const std::wstring w = utf8ToWide(script.str());
     auto *done = new ExecuteScriptCompletedHandler();
     webView_->webview->ExecuteScript(w.c_str(), done);
