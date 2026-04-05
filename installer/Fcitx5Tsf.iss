@@ -49,6 +49,12 @@ Name: "{autoprograms}\{#MyAppName}\Uninstall"; Filename: "{uninstallexe}"
 Name: "{autoprograms}\{#MyAppName}\Fcitx5 user config"; Filename: "{win}\explorer.exe"; Parameters: """{userappdata}\Fcitx5"""
 Name: "{commondesktop}\Uninstall {#MyAppName}"; Filename: "{uninstallexe}"; Tasks: desktopuninstall
 
+[Registry]
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+  ValueType: string; ValueName: "Fcitx5"; \
+  ValueData: """{app}\bin\Fcitx5.exe"""; \
+  Flags: uninsdeletevalue
+
 [UninstallRun]
 Filename: "{sys}\regsvr32.exe"; \
   Parameters: "/u /s ""{code:GetImeDll}"""; \

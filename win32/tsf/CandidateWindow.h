@@ -9,6 +9,10 @@
 
 namespace fcitx {
 
+namespace webpanel {
+struct WebPanelConfig;
+}
+
 // Popup window: numbered candidates, highlight, mouse pick (keyboard handled in
 // Tsf).
 class CandidateWindow {
@@ -43,6 +47,8 @@ class CandidateWindow {
     LRESULT handleMessage(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp);
     void ensureClass();
     void ensureWindow();
+    void reloadConfig();
+    void recreateFont();
     void ensureWebView();
     void destroyWebView();
     void resizeWebView();
@@ -77,6 +83,7 @@ class CandidateWindow {
     int padY_ = 6;
     HFONT font_ = nullptr;
     unsigned webViewEpoch_ = 0;
+    std::unique_ptr<webpanel::WebPanelConfig> config_;
     std::function<void(int)> onPick_;
     std::unique_ptr<WebViewState> webView_;
 };

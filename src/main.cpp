@@ -5,6 +5,7 @@
 #include <fcitx/instance.h>
 #include <filesystem>
 #include <string>
+#include <vector>
 #include <windows.h>
 
 namespace fs = std::filesystem;
@@ -29,6 +30,68 @@ std::string pathUtf8ForFcitxEnv(const fs::path &p) {
                         static_cast<int>(native.size()), out.data(), n, nullptr,
                         nullptr);
     return out;
+}
+
+void prependProcessPath(const fs::path &dir) {
+    if (dir.empty() || !fs::exists(dir)) {
+        return;
+    }
+    const std::wstring dirWide = dir.wstring();
+    const DWORD existingLen = GetEnvironmentVariableW(L"PATH", nullptr, 0);
+    std::wstring existing;
+    if (existingLen > 0) {
+        existing.resize(existingLen - 1);
+        GetEnvironmentVariableW(L"PATH", existing.data(), existingLen);
+    }
+    const std::wstring prefix = dirWide + L";";
+    if (!existing.empty()) {
+        std::wstring existingLower(existing);
+        std::wstring prefixLower(prefix);
+        CharLowerBuffW(existingLower.data(),
+                       static_cast<DWORD>(existingLower.size()));
+        CharLowerBuffW(prefixLower.data(),
+                       static_cast<DWORD>(prefixLower.size()));
+        if (existingLower.rfind(prefixLower, 0) == 0) {
+            return;
+        }
+    }
+    SetEnvironmentVariableW(L"PATH", (prefix + existing).c_str());
+}
+
+void setupDllSearchPath(const fs::path &rootPath) {
+    static std::vector<DLL_DIRECTORY_COOKIE> cookies;
+    const std::vector<fs::path> dirs = {
+        (rootPath / "bin").lexically_normal(),
+        (rootPath / "lib").lexically_normal(),
+        (rootPath / "lib" / "fcitx5").lexically_normal(),
+    };
+
+    for (const auto &dir : dirs) {
+        prependProcessPath(dir);
+    }
+
+    const HMODULE kernel32 = GetModuleHandleW(L"kernel32.dll");
+    if (!kernel32) {
+        return;
+    }
+    using SetDefaultDllDirectoriesFn = BOOL(WINAPI *)(DWORD);
+    using AddDllDirectoryFn = DLL_DIRECTORY_COOKIE(WINAPI *)(PCWSTR);
+    auto setDefaultDllDirectories =
+        reinterpret_cast<SetDefaultDllDirectoriesFn>(
+            GetProcAddress(kernel32, "SetDefaultDllDirectories"));
+    auto addDllDirectory = reinterpret_cast<AddDllDirectoryFn>(
+        GetProcAddress(kernel32, "AddDllDirectory"));
+    if (!setDefaultDllDirectories || !addDllDirectory) {
+        return;
+    }
+    setDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS |
+                             LOAD_LIBRARY_SEARCH_USER_DIRS);
+    for (const auto &dir : dirs) {
+        if (dir.empty() || !fs::exists(dir)) {
+            continue;
+        }
+        cookies.push_back(addDllDirectory(dir.wstring().c_str()));
+    }
 }
 } // namespace
 
@@ -73,6 +136,7 @@ void setupEnv() {
     buf.resize(r);
     const auto rootPath =
         ::fs::path(buf).parent_path().parent_path().lexically_normal();
+    setupDllSearchPath(rootPath);
     const auto fcitx_addon_dirs = rootPath / "lib" / "fcitx5";
     setenv("FCITX_ADDON_DIRS", pathUtf8ForFcitxEnv(fcitx_addon_dirs));
     const auto xdg_data_dirs = rootPath / "share";

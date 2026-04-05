@@ -1,5 +1,6 @@
 #include "CandidateWindow.h"
 
+#include "../WebPanelConfig.h"
 #include "../dll/register.h"
 
 #include <algorithm>
@@ -128,6 +129,78 @@ std::string buildCandidatesJson(const std::vector<std::wstring> &candidates) {
     return json;
 }
 
+bool systemPrefersDarkMode() {
+    DWORD value = 1;
+    DWORD size = sizeof(value);
+    const LSTATUS status = RegGetValueW(
+        HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Themes\\Personalize",
+        L"AppsUseLightTheme", RRF_RT_REG_DWORD, nullptr, &value, &size);
+    return status == ERROR_SUCCESS && value == 0;
+}
+
+COLORREF parseCssColor(const std::string &text, COLORREF fallback) {
+    std::string value = text;
+    if (!value.empty() && value.front() == '#') {
+        value.erase(value.begin());
+    }
+    if (value.size() != 6 && value.size() != 8) {
+        return fallback;
+    }
+    try {
+        const unsigned rgb =
+            static_cast<unsigned>(std::stoul(value.substr(0, 6), nullptr, 16));
+        return RGB((rgb >> 16) & 0xff, (rgb >> 8) & 0xff, rgb & 0xff);
+    } catch (...) {
+        return fallback;
+    }
+}
+
+struct FallbackPalette {
+    COLORREF background = RGB(255, 255, 255);
+    COLORREF text = RGB(0, 0, 0);
+    COLORREF highlight = RGB(200, 220, 255);
+    COLORREF highlightText = RGB(0, 0, 0);
+};
+
+const webpanel::ColorModeConfig &
+activeColorMode(const webpanel::WebPanelConfig &config, bool dark) {
+    return dark ? config.darkMode : config.lightMode;
+}
+
+FallbackPalette fallbackPalette(const webpanel::WebPanelConfig &config) {
+    const bool dark = config.basic.theme == webpanel::Theme::Dark ||
+                      (config.basic.theme == webpanel::Theme::System &&
+                       systemPrefersDarkMode());
+    const auto &mode = activeColorMode(config, dark);
+    const bool useCustom = mode.overrideDefault;
+
+    FallbackPalette palette;
+    if (dark) {
+        palette.background = RGB(32, 32, 32);
+        palette.text = RGB(255, 255, 255);
+        palette.highlight = RGB(70, 100, 160);
+        palette.highlightText = RGB(255, 255, 255);
+    }
+    if (useCustom) {
+        palette.background =
+            parseCssColor(mode.panelColor, palette.background);
+        palette.text = parseCssColor(mode.textColor, palette.text);
+        palette.highlight =
+            parseCssColor(mode.highlightColor, palette.highlight);
+        palette.highlightText =
+            parseCssColor(mode.highlightTextColor, palette.highlightText);
+    }
+    return palette;
+}
+
+std::wstring fallbackFontFamily(const webpanel::WebPanelConfig &config) {
+    if (!config.font.textFontFamily.empty()) {
+        return utf8ToWide(config.font.textFontFamily);
+    }
+    return L"Segoe UI";
+}
+
 std::wstring moduleDirectory() {
     wchar_t modulePath[MAX_PATH] = {};
     const DWORD len = GetModuleFileNameW(dllInstance, modulePath, MAX_PATH);
@@ -153,22 +226,14 @@ std::wstring appendPath(const std::wstring &base, const wchar_t *segment) {
 }
 
 #if FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW
+constexpr wchar_t kCandidateHostName[] = L"fcitx-webview.local";
+
+std::wstring candidateWebRootPath() {
+    return appendPath(moduleDirectory(), L"fcitx5-webview");
+}
+
 std::wstring candidateHtmlUrl() {
-    const std::wstring htmlPath = appendPath(
-        appendPath(moduleDirectory(), L"fcitx5-webview"), L"index.html");
-    DWORD urlLen = 0;
-    UrlCreateFromPathW(htmlPath.c_str(), nullptr, &urlLen, 0);
-    if (urlLen == 0) {
-        return {};
-    }
-    std::wstring url(static_cast<size_t>(urlLen), L'\0');
-    if (FAILED(UrlCreateFromPathW(htmlPath.c_str(), url.data(), &urlLen, 0))) {
-        return {};
-    }
-    if (!url.empty() && url.back() == L'\0') {
-        url.pop_back();
-    }
-    return url;
+    return std::wstring(L"https://") + kCandidateHostName + L"/index.html";
 }
 
 std::wstring candidateUserDataDirectory() {
@@ -195,7 +260,7 @@ std::wstring candidateUserDataDirectory() {
 // Wraps window.fcitx(...) so host messages reach WebView2 postMessage (string
 // protocol).
 constexpr wchar_t kHostBridgeScript[] =
-    LR"((function(){var q=window.chrome&&window.chrome.webview;if(!q)return;var t=setInterval(function(){if(!window.fcitx||typeof window.fcitx.setCandidates!=='function')return;if(window.fcitx.__fcitxWinHost){clearInterval(t);return;}var inner=window.fcitx;var w=function(){var a=arguments;if(!a.length)return;var n=a[0];if(n==='onload')q.postMessage('onload');else if(n==='log'&&a.length>1)q.postMessage('log:'+String(a[1]));else if(n==='select'&&a.length>1)q.postMessage('select:'+a[1]);else if(n==='resize'&&a.length>1)q.postMessage('resize:'+Array.prototype.slice.call(a,1).join(','));};Object.setPrototypeOf(w,Object.getPrototypeOf(inner));for(var k in inner){try{if(Object.prototype.hasOwnProperty.call(inner,k))w[k]=inner[k];}catch(e){}}w.__fcitxWinHost=1;window.fcitx=w;clearInterval(t);},5);})();)";
+    LR"((function(){var q=window.chrome&&window.chrome.webview;if(!q)return;var sentReady=false;var sendReady=function(){if(sentReady)return;sentReady=true;q.postMessage('ready');};var t=setInterval(function(){if(!window.fcitx||typeof window.fcitx.setCandidates!=='function')return;if(window.fcitx.__fcitxWinHost){clearInterval(t);sendReady();return;}var inner=window.fcitx;var w=function(){var a=arguments;if(!a.length)return;var n=a[0];if(n==='onload'||n==='ready'){sendReady();}else if(n==='log'&&a.length>1)q.postMessage('log:'+String(a[1]));else if(n==='select'&&a.length>1)q.postMessage('select:'+a[1]);else if(n==='resize'&&a.length>1)q.postMessage('resize:'+Array.prototype.slice.call(a,1).join(','));};Object.setPrototypeOf(w,Object.getPrototypeOf(inner));for(var k in inner){try{if(Object.prototype.hasOwnProperty.call(inner,k))w[k]=inner[k];}catch(e){}}w.__fcitxWinHost=1;window.fcitx=w;clearInterval(t);sendReady();},5);})();)";
 
 using Microsoft::WRL::ComPtr;
 
@@ -363,7 +428,8 @@ class ExecuteScriptCompletedHandler
 };
 #endif
 
-CandidateWindow::CandidateWindow() = default;
+CandidateWindow::CandidateWindow()
+    : config_(std::make_unique<webpanel::WebPanelConfig>()) {}
 
 CandidateWindow::~CandidateWindow() {
     destroyWebView();
@@ -402,6 +468,29 @@ void CandidateWindow::ensureWindow() {
         CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
                         kClassName, L"", WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
                         100, 100, nullptr, nullptr, dllInstance, this);
+}
+
+void CandidateWindow::reloadConfig() {
+    *config_ = webpanel::loadConfigFromDisk();
+}
+
+void CandidateWindow::recreateFont() {
+    if (!hwnd_) {
+        return;
+    }
+    if (font_) {
+        DeleteObject(font_);
+        font_ = nullptr;
+    }
+    const UINT dpi = GetDpiForWindow(hwnd_);
+    lastFontDpi_ = dpi;
+    const int fontPx = MulDiv(config_->font.textFontSize,
+                              static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    const std::wstring family = fallbackFontFamily(*config_);
+    font_ = CreateFontW(-fontPx, 0, 0, 0, config_->font.textFontWeight, FALSE,
+                        FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                        CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
+                        DEFAULT_PITCH | FF_DONTCARE, family.c_str());
 }
 
 LRESULT CALLBACK CandidateWindow::staticWndProc(HWND hwnd, UINT msg, WPARAM wp,
@@ -461,6 +550,8 @@ LRESULT CandidateWindow::handleMessage(HWND hwnd, UINT msg, WPARAM wp,
             font_ = nullptr;
         }
         lastFontDpi_ = 0;
+        reloadConfig();
+        recreateFont();
         layoutAndPaint();
         syncWebView();
         return 0;
@@ -572,20 +663,27 @@ std::wstring CandidateWindow::candidateDisplayText(size_t index) const {
 }
 
 void CandidateWindow::paintFallback(HDC hdc, const RECT &cr) {
-    FillRect(hdc, &cr, (HBRUSH)(COLOR_WINDOW + 1));
+    const auto palette = fallbackPalette(*config_);
+    HBRUSH backgroundBrush = CreateSolidBrush(palette.background);
+    FillRect(hdc, &cr, backgroundBrush);
+    DeleteObject(backgroundBrush);
     HFONT old = nullptr;
     if (font_) {
         old = (HFONT)SelectObject(hdc, font_);
     }
     SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, palette.text);
     for (size_t i = 0; i < candidates_.size(); ++i) {
         RECT line = cr;
         line.top = static_cast<LONG>(padY_ + static_cast<int>(i) * lineHeight_);
         line.bottom = line.top + lineHeight_;
         if (static_cast<int>(i) == highlight_) {
-            HBRUSH hi = CreateSolidBrush(RGB(200, 220, 255));
+            HBRUSH hi = CreateSolidBrush(palette.highlight);
             FillRect(hdc, &line, hi);
             DeleteObject(hi);
+            SetTextColor(hdc, palette.highlightText);
+        } else {
+            SetTextColor(hdc, palette.text);
         }
         RECT textRc = line;
         textRc.left += padX_;
@@ -603,14 +701,26 @@ void CandidateWindow::layoutAndPaint() {
         return;
     }
     const UINT dpi = GetDpiForWindow(hwnd_);
-    padX_ = MulDiv(8, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
-    padY_ = MulDiv(6, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    if (config_->size.overrideDefault) {
+        padX_ = MulDiv((std::max)(config_->size.leftPadding,
+                                  config_->size.rightPadding),
+                      static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+        padY_ = MulDiv((std::max)(config_->size.topPadding,
+                                  config_->size.bottomPadding),
+                      static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    } else {
+        padX_ = MulDiv(8, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+        padY_ = MulDiv(6, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    }
     HDC hdc = GetDC(hwnd_);
     HFONT old = nullptr;
     if (font_) {
         old = (HFONT)SelectObject(hdc, font_);
     }
-    int maxW = MulDiv(80, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
+    int maxW = config_->size.overrideDefault
+                   ? MulDiv(config_->size.verticalMinWidth, static_cast<int>(dpi),
+                            USER_DEFAULT_SCREEN_DPI)
+                   : MulDiv(80, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
     for (size_t i = 0; i < candidates_.size(); ++i) {
         const std::wstring s = candidateDisplayText(i);
         SIZE sz = {};
@@ -619,7 +729,13 @@ void CandidateWindow::layoutAndPaint() {
     }
     TEXTMETRICW tm = {};
     GetTextMetricsW(hdc, &tm);
-    lineHeight_ = tm.tmHeight + tm.tmExternalLeading + 2;
+    const int extraHeight =
+        config_->size.overrideDefault
+            ? MulDiv(config_->size.topPadding + config_->size.bottomPadding +
+                         config_->size.margin * 2,
+                     static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI)
+            : 2;
+    lineHeight_ = tm.tmHeight + tm.tmExternalLeading + extraHeight;
     if (old) {
         SelectObject(hdc, old);
     }
@@ -727,12 +843,17 @@ void CandidateWindow::pushWebViewState() {
         return;
     }
     ++webViewEpoch_;
+    const std::string styleJson = config_->styleJson();
     std::ostringstream script;
     script << "(function(){try{if(!window.fcitx)return;";
     script << "window.fcitx.setHost('Windows',11);";
-    script << "window.fcitx.setTheme(0);";
-    script << "window.fcitx.setLayout(0);";
-    script << "window.fcitx.setWritingMode(0);";
+    script << "window.fcitx.setTheme("
+           << static_cast<int>(config_->basic.theme) << ");";
+    script << "window.fcitx.setLayout("
+           << static_cast<int>(config_->typography.layout) << ");";
+    script << "window.fcitx.setWritingMode("
+           << static_cast<int>(config_->typography.writingMode) << ");";
+    script << "window.fcitx.setStyle(\"" << jsonEscape(styleJson) << "\");";
     script << "window.fcitx.updateInputPanel([],false,[],[],[]);";
     script << "window.fcitx.setCandidates(" << buildCandidatesJson(candidates_)
            << "," << highlight_ << ",false,false,false,0,false,false);";
@@ -843,6 +964,7 @@ HRESULT CandidateWindow::onWebViewEnvironmentCreated(HRESULT result,
         return S_OK;
     }
     if (FAILED(result) || !env || !hwnd_) {
+        RegisterTrace("CandidateWindow webview environment create failed");
         webView_->initFailed = true;
         return S_OK;
     }
@@ -861,6 +983,7 @@ HRESULT CandidateWindow::onWebViewControllerCreated(HRESULT result,
         return S_OK;
     }
     if (FAILED(result) || !controller) {
+        RegisterTrace("CandidateWindow webview controller create failed");
         webView_->initFailed = true;
         return S_OK;
     }
@@ -868,6 +991,7 @@ HRESULT CandidateWindow::onWebViewControllerCreated(HRESULT result,
     if (FAILED(controller->get_CoreWebView2(
             webView_->webview.ReleaseAndGetAddressOf())) ||
         !webView_->webview) {
+        RegisterTrace("CandidateWindow webview get_CoreWebView2 failed");
         webView_->initFailed = true;
         return S_OK;
     }
@@ -888,8 +1012,27 @@ HRESULT CandidateWindow::onWebViewControllerCreated(HRESULT result,
         COREWEBVIEW2_COLOR color = {0, 0, 0, 0};
         controller2->put_DefaultBackgroundColor(color);
     }
-    webView_->webview->AddScriptToExecuteOnDocumentCreated(kHostBridgeScript,
-                                                           nullptr);
+    ComPtr<ICoreWebView2_3> webview3;
+    if (SUCCEEDED(webView_->webview->QueryInterface(
+            IID_ICoreWebView2_3,
+            reinterpret_cast<void **>(webview3.ReleaseAndGetAddressOf()))) &&
+        webview3) {
+        const std::wstring rootPath = candidateWebRootPath();
+        const HRESULT mapHr = webview3->SetVirtualHostNameToFolderMapping(
+            kCandidateHostName, rootPath.c_str(),
+            COREWEBVIEW2_HOST_RESOURCE_ACCESS_KIND_ALLOW);
+        if (FAILED(mapHr)) {
+            RegisterTrace("CandidateWindow webview host mapping failed");
+        }
+    } else {
+        RegisterTrace("CandidateWindow webview ICoreWebView2_3 unavailable");
+    }
+    const HRESULT addScriptHr =
+        webView_->webview->AddScriptToExecuteOnDocumentCreated(
+            kHostBridgeScript, nullptr);
+    if (FAILED(addScriptHr)) {
+        RegisterTrace("CandidateWindow webview AddScriptToExecuteOnDocumentCreated failed");
+    }
     auto *messageHandler = new MessageReceivedHandler(this);
     webView_->webview->add_WebMessageReceived(messageHandler,
                                               &webView_->messageToken);
@@ -902,6 +1045,7 @@ HRESULT CandidateWindow::onWebViewControllerCreated(HRESULT result,
     webView_->controller->put_IsVisible(isVisible() ? TRUE : FALSE);
     const std::wstring url = candidateHtmlUrl();
     if (url.empty() || FAILED(webView_->webview->Navigate(url.c_str()))) {
+        RegisterTrace("CandidateWindow webview navigate failed");
         webView_->initFailed = true;
     }
     return S_OK;
@@ -938,11 +1082,12 @@ HRESULT CandidateWindow::onWebViewNavigationCompleted(void *argsRaw) {
         args->get_IsSuccess(&ok);
     }
     if (!ok || !webView_) {
+        RegisterTrace("CandidateWindow webview navigation failed");
         return S_OK;
     }
-    webView_->pageReady = true;
-    syncWebView();
-    InvalidateRect(hwnd_, nullptr, TRUE);
+    // Wait for the injected bridge to report ready. NavigationCompleted can
+    // happen before the bundled page code installs window.fcitx APIs.
+    webView_->syncPending = true;
     return S_OK;
 }
 #endif
@@ -971,20 +1116,8 @@ void CandidateWindow::show(int screenX, int screenY,
     if (!hwnd_) {
         return;
     }
-    const UINT dpi = GetDpiForWindow(hwnd_);
-    if (!font_ || lastFontDpi_ != dpi) {
-        if (font_) {
-            DeleteObject(font_);
-            font_ = nullptr;
-        }
-        lastFontDpi_ = dpi;
-        const int fontPx =
-            MulDiv(14, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI);
-        font_ = CreateFontW(-fontPx, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-                            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
-                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY,
-                            DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    }
+    reloadConfig();
+    recreateFont();
     layoutAndPaint();
     clampToWorkArea(&screenX, &screenY);
     SetWindowPos(hwnd_, HWND_TOPMOST, screenX, screenY, 0, 0,

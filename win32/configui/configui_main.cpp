@@ -26,6 +26,8 @@
 #include <fcitx/globalconfig.h>
 #include <fcitx/inputcontextmanager.h>
 
+#include "../WebPanelConfig.h"
+
 namespace fcitx {
 extern HINSTANCE mainInstanceHandle;
 }
@@ -83,6 +85,9 @@ enum CmdId : int {
     IDC_BTN_REC_ENUMGB,
     IDC_GROUP_PROF,
     IDC_EDIT_PROFILE,
+    IDC_LABEL_WEBPANEL_HINT,
+    IDC_GROUP_WEBPANEL,
+    IDC_EDIT_WEBPANEL,
     IDC_BTN_SAVE,
     IDC_BTN_RELOAD = 2100,
     IDC_BTN_FOLDER,
@@ -127,7 +132,9 @@ enum class TextId {
     PinyinConfig,
     ShuangpinScheme,
     ProfileRawIni,
+    WebPanelRawIni,
     ProfileEditHint,
+    WebPanelEditHint,
     ApplyRecommendedProfile,
     SaveAll,
     ReloadFromDisk,
@@ -136,6 +143,7 @@ enum class TextId {
     SaveConfigFailed,
     SavePinyinFailed,
     SaveProfileFailed,
+    SaveWebPanelFailed,
     SaveSuccess,
     PageSizeInvalid,
     LoadConfigWarning,
@@ -233,11 +241,19 @@ const wchar_t *tr(TextId id, UiLang lang) {
         return lang == UiLang::ZhCN
                    ? L"配置（输入法 / 分组）- 原始 INI"
                    : L"Profile (input methods / groups) - raw INI";
+    case TextId::WebPanelRawIni:
+        return lang == UiLang::ZhCN ? L"候选框样式（conf/webpanel.conf）- 原始 INI"
+                                    : L"Candidate style (conf/webpanel.conf) - raw INI";
     case TextId::ProfileEditHint:
         return lang == UiLang::ZhCN
                    ? L"其他输入法仍可在下方原始 INI 中继续添加、删除或修改。"
                    : L"You can still add, remove, or edit other input methods "
                      L"in the raw INI below.";
+    case TextId::WebPanelEditHint:
+        return lang == UiLang::ZhCN
+                   ? L"此文件对齐 macOS WebPanel，支持候选字大小、颜色和横竖排等样式。"
+                   : L"This file mirrors macOS WebPanel settings for font size, "
+                     L"colors, and horizontal/vertical candidate layouts.";
     case TextId::ApplyRecommendedProfile:
         return lang == UiLang::ZhCN ? L"填入热门输入法模板"
                                     : L"Fill popular IM template";
@@ -258,6 +274,9 @@ const wchar_t *tr(TextId id, UiLang lang) {
     case TextId::SaveProfileFailed:
         return lang == UiLang::ZhCN ? L"无法写入 profile 文件。"
                                     : L"Could not write profile file.";
+    case TextId::SaveWebPanelFailed:
+        return lang == UiLang::ZhCN ? L"无法写入 conf/webpanel.conf。"
+                                    : L"Could not write conf/webpanel.conf.";
     case TextId::SaveSuccess:
         return lang == UiLang::ZhCN ? L"已保存。如果配置未生效，请重启正在使用 "
                                       L"TSF 输入法的应用。"
@@ -389,6 +408,12 @@ bool writeProfileUtf8(const std::string &utf8) {
     return static_cast<bool>(out);
 }
 
+std::string readWebPanelUtf8() { return fcitx::webpanel::readConfigTextUtf8(); }
+
+bool writeWebPanelUtf8(const std::string &utf8) {
+    return fcitx::webpanel::writeConfigTextUtf8(utf8);
+}
+
 std::filesystem::path appDataRoot() {
     wchar_t appData[MAX_PATH] = {};
     DWORD len = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
@@ -513,6 +538,7 @@ struct UiState {
     HWND editEnumGroupB = nullptr;
     HWND comboShuangpin = nullptr;
     HWND editProfile = nullptr;
+    HWND editWebPanel = nullptr;
 };
 
 void loadGcFromDisk(UiState &s) {
@@ -622,6 +648,7 @@ void syncControlsFromGc(HWND hwnd, UiState &st) {
 
     syncShuangpinSchemeFromDisk(st);
     SetWindowTextW(st.editProfile, utf8ToWide(readProfileUtf8()).c_str());
+    SetWindowTextW(st.editWebPanel, utf8ToWide(readWebPanelUtf8()).c_str());
 }
 
 bool saveAll(HWND hwnd, UiState &st) {
@@ -772,6 +799,17 @@ bool saveAll(HWND hwnd, UiState &st) {
         return false;
     }
 
+    std::wstring webpanel;
+    const int wlen = GetWindowTextLengthW(st.editWebPanel);
+    webpanel.resize(static_cast<size_t>(wlen + 1), L'\0');
+    GetWindowTextW(st.editWebPanel, webpanel.data(), wlen + 1);
+    webpanel.resize(wcslen(webpanel.c_str()));
+    if (!writeWebPanelUtf8(wideToUtf8(webpanel))) {
+        MessageBoxW(hwnd, tr(TextId::SaveWebPanelFailed, st.lang),
+                    tr(TextId::MessageBoxCaption, st.lang), MB_ICONERROR);
+        return false;
+    }
+
     MessageBoxW(hwnd, tr(TextId::SaveSuccess, st.lang),
                 tr(TextId::MessageBoxCaption, st.lang), MB_ICONINFORMATION);
     return true;
@@ -879,6 +917,9 @@ void applyLanguage(HWND hwnd, UiState &st) {
     setControlText(hwnd, IDC_GROUP_PROF, tr(TextId::ProfileRawIni, st.lang));
     setControlText(hwnd, IDC_LABEL_PROFILE_HINT,
                    tr(TextId::ProfileEditHint, st.lang));
+    setControlText(hwnd, IDC_LABEL_WEBPANEL_HINT,
+                   tr(TextId::WebPanelEditHint, st.lang));
+    setControlText(hwnd, IDC_GROUP_WEBPANEL, tr(TextId::WebPanelRawIni, st.lang));
     setControlText(hwnd, IDC_BTN_APPLY_POPULAR_PROFILE,
                    tr(TextId::ApplyRecommendedProfile, st.lang));
     setControlText(hwnd, IDC_BTN_SAVE, tr(TextId::SaveAll, st.lang));
@@ -1379,6 +1420,22 @@ void createUi(HWND hwnd, UiState &st, HINSTANCE inst) {
     setGuiFont(st.editProfile);
     y += 188;
 
+    label(hwnd, IDC_LABEL_WEBPANEL_HINT, tr(TextId::WebPanelEditHint, st.lang),
+          12, y, 500, 18);
+    y += 24;
+    label(hwnd, IDC_GROUP_WEBPANEL, tr(TextId::WebPanelRawIni, st.lang), 12, y,
+          500, 18);
+    y += 20;
+    st.editWebPanel = CreateWindowExW(
+        WS_EX_CLIENTEDGE, L"EDIT", L"",
+        WS_CHILD | WS_VISIBLE | WS_VSCROLL | ES_MULTILINE | ES_AUTOVSCROLL |
+            ES_WANTRETURN,
+        12, y, 500, 220, hwnd,
+        reinterpret_cast<HMENU>(static_cast<INT_PTR>(IDC_EDIT_WEBPANEL)), inst,
+        nullptr);
+    setGuiFont(st.editWebPanel);
+    y += 228;
+
     mkBtn(hwnd, IDC_BTN_SAVE, tr(TextId::SaveAll, st.lang), 12, y, 120, 28);
     mkBtn(hwnd, IDC_BTN_RELOAD, tr(TextId::ReloadFromDisk, st.lang), 140, y,
           140, 28);
@@ -1507,7 +1564,7 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int) {
     HWND hwnd = CreateWindowExW(
         WS_EX_APPWINDOW, cls, tr(TextId::WindowTitle, g_uiLang),
         WS_OVERLAPPEDWINDOW & ~WS_THICKFRAME & ~WS_MAXIMIZEBOX, CW_USEDEFAULT,
-        CW_USEDEFAULT, 560, 980, nullptr, nullptr, hInst, nullptr);
+        CW_USEDEFAULT, 560, 1240, nullptr, nullptr, hInst, nullptr);
     ShowWindow(hwnd, SW_SHOW);
 
     MSG msg{};
