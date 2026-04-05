@@ -42,19 +42,6 @@ bool tsfLatinKeyShouldPassToApp() {
     return ctrlDown || altDown;
 }
 
-/// VK_A..VK_Z → Latin character; matches Windows (Shift XOR Caps Lock), same
-/// idea as Weasel's KeyEvent with SHIFT_MASK + letter.
-wchar_t tsfLatinLetterFromVk(unsigned vk) {
-    if (vk < static_cast<unsigned>('A') || vk > static_cast<unsigned>('Z')) {
-        return L'\0';
-    }
-    const bool shiftDown = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
-    const bool capsLock = (GetKeyState(VK_CAPITAL) & 0x0001) != 0;
-    const bool upper = shiftDown ^ capsLock;
-    return upper ? static_cast<wchar_t>(vk)
-                 : static_cast<wchar_t>(vk - L'A' + L'a');
-}
-
 std::string tsfWideToUtf8(const std::wstring &text) {
     if (text.empty()) {
         return {};
@@ -568,6 +555,38 @@ bool tsfScreenPtFocusClientBottomCenter(POINT *out) {
 } // namespace
 
 namespace fcitx {
+
+namespace {
+
+std::uint32_t tsfHostKeyboardStateMaskForPipe() {
+#if FCITX5_WINDOWS_IME_IPC
+    std::uint32_t m = 0;
+    if ((GetKeyState(VK_SHIFT) & 0x8000) != 0) {
+        m |= static_cast<std::uint32_t>(KeyState::Shift);
+    }
+    if ((GetKeyState(VK_CAPITAL) & 1) != 0) {
+        m |= static_cast<std::uint32_t>(KeyState::CapsLock);
+    }
+    if ((GetKeyState(VK_CONTROL) & 0x8000) != 0) {
+        m |= static_cast<std::uint32_t>(KeyState::Ctrl);
+    }
+    if ((GetKeyState(VK_MENU) & 0x8000) != 0) {
+        m |= static_cast<std::uint32_t>(KeyState::Alt);
+    }
+    if (((GetKeyState(VK_LWIN) & 0x8000) != 0) ||
+        ((GetKeyState(VK_RWIN) & 0x8000) != 0)) {
+        m |= static_cast<std::uint32_t>(KeyState::Super);
+    }
+    if ((GetKeyState(VK_NUMLOCK) & 1) != 0) {
+        m |= static_cast<std::uint32_t>(KeyState::NumLock);
+    }
+    return m;
+#else
+    return 0;
+#endif
+}
+
+} // namespace
 
 bool Tsf::queryCandidateAnchor(TfEditCookie ec, POINT *screenPt) {
     if (!textEditSinkContext_ || !screenPt) {
@@ -1146,6 +1165,10 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         return S_OK;
     }
     const UINT vk = static_cast<UINT>(wp);
+    const std::uint32_t rawKeyStateMask =
+        engine_->usesHostKeyboardStateForRawKeyDelivery()
+            ? tsfHostKeyboardStateMaskForPipe()
+            : ImeEngine::kFcitxRawKeyUseProcessKeyboardState;
     const bool traceLatinO = (vk == 'O');
     if (traceLatinO) {
         tsfTrace(
@@ -1158,7 +1181,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
     }
     if (engine_->fcitxModifierHotkeyUsesFullKeyEvent(vk)) {
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
-            vk, static_cast<std::uintptr_t>(lp), isRelease);
+            vk, static_cast<std::uintptr_t>(lp), isRelease, rawKeyStateMask);
         if (pendingKeyHandled_) {
             afterFcitxEngineKey(ec);
         }
@@ -1180,7 +1203,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
 
     if (tsfChordHasCtrlOrAlt() && tsfCanAttemptRawImeKey(vk)) {
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
-            vk, static_cast<std::uintptr_t>(lp), false);
+            vk, static_cast<std::uintptr_t>(lp), false, rawKeyStateMask);
         if (pendingKeyHandled_) {
             afterFcitxEngineKey(ec);
         }
@@ -1221,14 +1244,15 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             return S_OK;
         }
         if (!engine_->preedit().empty()) {
-            pendingKeyHandled_ = true;
-            engine_->backspace();
-            if (engine_->preedit().empty()) {
-                endCompositionCancel(ec);
-            } else {
-                ensureCompositionStarted(ec);
-                updatePreeditText(ec);
-                syncCandidateWindow(ec);
+            if (engine_->backspace()) {
+                pendingKeyHandled_ = true;
+                if (engine_->preedit().empty()) {
+                    endCompositionCancel(ec);
+                } else {
+                    ensureCompositionStarted(ec);
+                    updatePreeditText(ec);
+                    syncCandidateWindow(ec);
+                }
             }
         }
         drainCommitsAfterEngine(ec);
@@ -1322,14 +1346,14 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             drainCommitsAfterEngine(ec);
             return S_OK;
         }
-        const wchar_t ch = tsfLatinLetterFromVk(vk);
-        if (ch == L'\0') {
-            drainCommitsAfterEngine(ec);
-            return S_OK;
+        // Table engines like Wubi need the real vk/lParam/modifier context;
+        // the simplified appendLatin path can be accepted by pinyin but ignored
+        // by fcitx-table.
+        pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
+            vk, static_cast<std::uintptr_t>(lp), false, rawKeyStateMask);
+        if (pendingKeyHandled_) {
+            afterFcitxEngineKey(ec);
         }
-        pendingKeyHandled_ = true;
-        engine_->appendLatinLowercase(ch);
-        afterFcitxEngineKey(ec);
         if (traceLatinO) {
             tsfTrace(std::string("o-runKeyEditSession handled preedit=") +
                      tsfWideToUtf8(engine_->preedit()) + " candidateCount=" +
@@ -1348,7 +1372,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
             return S_OK;
         }
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
-            vk, static_cast<std::uintptr_t>(lp), false);
+            vk, static_cast<std::uintptr_t>(lp), false, rawKeyStateMask);
         if (pendingKeyHandled_) {
             afterFcitxEngineKey(ec);
         }
@@ -1366,7 +1390,7 @@ HRESULT Tsf::runKeyEditSession(TfEditCookie ec, WPARAM wp, LPARAM lp,
         }
         FCITX_INFO() << "Delivering Shift+number key to engine: vk=" << vk;
         pendingKeyHandled_ = engine_->deliverFcitxRawKeyEvent(
-            vk, static_cast<std::uintptr_t>(lp), false);
+            vk, static_cast<std::uintptr_t>(lp), false, rawKeyStateMask);
         if (pendingKeyHandled_) {
             afterFcitxEngineKey(ec);
         } else {
@@ -1432,7 +1456,7 @@ STDMETHODIMP Tsf::DoEditSession(TfEditCookie ec) {
         FCITX_INFO() << "DoEditSession pending tray input method target="
                      << uniqueName << " fromShared=" << fromSharedRequest
                      << " pid=" << GetCurrentProcessId();
-        chineseActive_ = true;
+        chineseActive_ = uniqueName != "keyboard-us";
         if (composition_) {
             endCompositionCancel(ec);
         } else {

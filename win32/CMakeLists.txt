@@ -18,11 +18,16 @@ else()
   set(FCITX_WIN32_IME_WITH_CORE OFF)
 endif()
 
+option(FCITX5_WINDOWS_IME_IPC
+       "TSF uses named pipe to Fcitx5ImePipeServer (out-of-process core)" OFF)
+if(FCITX5_WINDOWS_IME_IPC AND FCITX_WIN32_IME_WITH_CORE)
+  add_subdirectory(ipc)
+endif()
+
 add_subdirectory(assets)
 add_subdirectory(tsf)
 add_subdirectory(dll)
 add_subdirectory(configui)
-add_subdirectory(trayhelper)
 
 enable_testing()
 add_subdirectory(tests)

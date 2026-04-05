@@ -1,8 +1,9 @@
 # Windows 安装程序默认种子（Inno Setup → %AppData%\Fcitx5\config\fcitx5\profile）
 # 托盘「切换输入法」只显示本分组下列出的 Name=，与 fcitx5-config / Linux 版行为一致。
+# - TSF IME：第一项必须是 keyboard-us，否则 DefaultIM=pinyin 无法激活，管道会话 current IM 为空、打不出字
+#   （见 win32/tsf/Fcitx5ImeEngine.cpp ensurePortableImGroupHasEntries）
 # - pinyin / shuangpin / wbx：libime + fcitx5-chinese-addons；wbx 见 share/fcitx5/inputmethod/wbx.conf
 # - rime：需 stage 含 fcitx5-rime、share/rime-data 与 bin 下 librime 及 glog/gflags 等依赖 DLL（见 02-build-deps.sh copy_librime_*）
-# - 未安装 keyboard 引擎时勿加 keyboard-us（见 profile.pinyin.example / PINYIN_WINDOWS.md）
 # - fcitx5-lua 为 addon 加载器，不在此列表；需时在 addon 配置里启用
 
 [Groups/0]
@@ -11,18 +12,22 @@ Default Layout=us
 DefaultIM=pinyin
 
 [Groups/0/Items/0]
-Name=pinyin
+Name=keyboard-us
 Layout=
 
 [Groups/0/Items/1]
-Name=shuangpin
+Name=pinyin
 Layout=
 
 [Groups/0/Items/2]
-Name=wbx
+Name=shuangpin
 Layout=
 
 [Groups/0/Items/3]
+Name=wbx
+Layout=
+
+[Groups/0/Items/4]
 Name=rime
 Layout=
 

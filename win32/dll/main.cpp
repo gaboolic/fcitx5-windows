@@ -8,49 +8,6 @@ void DllAddRef() { InterlockedIncrement(&dllRefCount); }
 
 void DllRelease() { InterlockedDecrement(&dllRefCount); }
 
-class NoopTextInputProcessor final : public ITfTextInputProcessorEx {
-  public:
-    NoopTextInputProcessor() { DllAddRef(); }
-
-    ~NoopTextInputProcessor() { DllRelease(); }
-
-    STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject) override {
-        if (ppvObject == nullptr) {
-            return E_INVALIDARG;
-        }
-        *ppvObject = nullptr;
-        if (IsEqualIID(riid, IID_IUnknown) ||
-            IsEqualIID(riid, IID_ITfTextInputProcessor) ||
-            IsEqualIID(riid, IID_ITfTextInputProcessorEx)) {
-            *ppvObject = static_cast<ITfTextInputProcessorEx *>(this);
-            AddRef();
-            return S_OK;
-        }
-        return E_NOINTERFACE;
-    }
-
-    STDMETHODIMP_(ULONG) AddRef() override { return ++refCount_; }
-
-    STDMETHODIMP_(ULONG) Release() override {
-        const LONG ret = --refCount_;
-        if (ret == 0) {
-            delete this;
-        }
-        return ret;
-    }
-
-    STDMETHODIMP Activate(ITfThreadMgr *, TfClientId) override { return S_OK; }
-
-    STDMETHODIMP Deactivate() override { return S_OK; }
-
-    STDMETHODIMP ActivateEx(ITfThreadMgr *, TfClientId, DWORD) override {
-        return S_OK;
-    }
-
-  private:
-    LONG refCount_ = 1;
-};
-
 class ClassFactory : public IClassFactory {
   public:
     // IUnknown methods
@@ -83,17 +40,6 @@ class ClassFactory : public IClassFactory {
         *ppvObject = nullptr;
         if (pUnkOuter != nullptr)
             return CLASS_E_NOAGGREGATION;
-        if (fcitx::currentProcessIsStandaloneTrayHelper()) {
-            auto *noop = new NoopTextInputProcessor();
-            if (noop == nullptr) {
-                return E_OUTOFMEMORY;
-            }
-            fcitx::tsfTrace(
-                "ClassFactory::CreateInstance returning helper noop TIP");
-            const HRESULT hr = noop->QueryInterface(riid, ppvObject);
-            noop->Release();
-            return hr;
-        }
         auto *tsf = new fcitx::Tsf();
         if (tsf == nullptr)
             return E_OUTOFMEMORY;
@@ -134,16 +80,37 @@ __declspec(dllexport) STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid,
 __declspec(dllexport) STDAPI DllCanUnloadNow() { return dllRefCount == 0; }
 
 __declspec(dllexport) STDAPI DllUnregisterServer() {
+    fcitx::RegisterTrace("DllUnregisterServer begin");
     fcitx::UnregisterCategoriesAndProfiles();
     fcitx::UnregisterServer();
+    fcitx::RegisterTrace("DllUnregisterServer end");
     return S_OK;
 }
 
 __declspec(dllexport) STDAPI DllRegisterServer() {
-    if (fcitx::RegisterServer() && fcitx::RegisterProfiles() &&
-        fcitx::RegisterCategories()) {
+    fcitx::RegisterTrace("DllRegisterServer begin");
+    // Re-register from a clean TIP state so stale LanguageProfile/Category
+    // values (for example SubstituteLayout left from an older build) do not
+    // survive incremental registrations.
+    fcitx::UnregisterCategoriesAndProfiles();
+    fcitx::UnregisterServer();
+    const BOOL registerServerOk = fcitx::RegisterServer();
+    fcitx::RegisterTrace(std::string("DllRegisterServer RegisterServer=") +
+                         (registerServerOk ? "true" : "false"));
+    const BOOL registerProfilesOk =
+        registerServerOk ? fcitx::RegisterProfiles() : FALSE;
+    fcitx::RegisterTrace(std::string("DllRegisterServer RegisterProfiles=") +
+                         (registerProfilesOk ? "true" : "false"));
+    const BOOL registerCategoriesOk = (registerServerOk && registerProfilesOk)
+                                          ? fcitx::RegisterCategories()
+                                          : FALSE;
+    fcitx::RegisterTrace(std::string("DllRegisterServer RegisterCategories=") +
+                         (registerCategoriesOk ? "true" : "false"));
+    if (registerServerOk && registerProfilesOk && registerCategoriesOk) {
+        fcitx::RegisterTrace("DllRegisterServer success");
         return S_OK;
     }
+    fcitx::RegisterTrace("DllRegisterServer failure -> cleanup");
     DllUnregisterServer();
     return E_FAIL;
 }

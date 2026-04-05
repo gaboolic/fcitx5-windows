@@ -23,6 +23,13 @@ struct TrayStatusActionItem {
 // and commits strings; replace Stub with fcitx5/libime-backed engine later.
 class ImeEngine {
   public:
+    /// Sent as `hostKeyboardStateMask` to mean: build modifiers from
+    /// `GetKeyState` in the process that runs `deliverFcitxRawKeyEvent`
+    /// (in-proc IME). Pipe client must send real `KeyState` bits from the TSF
+    /// process.
+    static constexpr std::uint32_t kFcitxRawKeyUseProcessKeyboardState =
+        0xffffffffu;
+
     virtual ~ImeEngine() = default;
 
     /// Refresh cached preedit/candidates from IME (fcitx InputPanel); no-op for
@@ -40,8 +47,10 @@ class ImeEngine {
     virtual int highlightIndex() const = 0;
     virtual void setHighlightIndex(int index) = 0;
 
-    virtual void appendLatinLowercase(wchar_t ch) = 0;
-    virtual void backspace() = 0;
+    /// @return false if the operation did not reach the engine (e.g. pipe I/O
+    /// failure); TSF must not claim the key was eaten in that case.
+    virtual bool appendLatinLowercase(wchar_t ch) = 0;
+    virtual bool backspace() = 0;
     /// delta +1 / −1; wraps when candidates non-empty.
     virtual void moveHighlight(int delta) = 0;
 
@@ -76,9 +85,19 @@ class ImeEngine {
     /// `OnKeyUp`. Stub: false.
     virtual bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const;
     /// Forward one key to fcitx `Instance` key watcher; returns
-    /// KeyEvent::accepted().
-    virtual bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                         bool isRelease);
+    /// KeyEvent::accepted(). \p hostKeyboardStateMask is OR of `KeyState`
+    /// bits from the TSF host when `usesHostKeyboardStateForRawKeyDelivery()`
+    /// is true; otherwise pass `kFcitxRawKeyUseProcessKeyboardState`.
+    virtual bool
+    deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam, bool isRelease,
+                            std::uint32_t hostKeyboardStateMask =
+                                kFcitxRawKeyUseProcessKeyboardState);
+
+    /// Pipe client: send real modifier/caps state — the pipe server process has
+    /// no meaningful `GetKeyState` for the focused app.
+    virtual bool usesHostKeyboardStateForRawKeyDelivery() const {
+        return false;
+    }
 
     /// List input methods in the current profile group for tray menus.
     virtual std::vector<ProfileInputMethodItem> profileInputMethods() const;
@@ -92,9 +111,14 @@ class ImeEngine {
     virtual bool activateTrayStatusAction(const std::string &uniqueName);
     /// Reload pinyin addon config from disk so shuangpin changes apply now.
     virtual bool reloadPinyinConfig();
+    /// Reload Rime addon config after deploy / user data changes.
+    virtual bool reloadRimeAddonConfig();
     /// Invoke addon sub-config action for a specific input method engine.
     virtual bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                             const std::string &subPath);
+
+    /// Pump async UI hooks (libuv) used by in-process TSF and the pipe server.
+    virtual void pumpEventLoopForUi() {}
 };
 
 std::unique_ptr<ImeEngine> makeStubImeEngine();

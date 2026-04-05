@@ -188,6 +188,15 @@ void CandidateWindow::show(int screenX, int screenY,
                            int highlightIndex) {
     labels_ = labels;
     highlight_ = highlightIndex;
+    if (!labels_.empty()) {
+        if (highlight_ < 0) {
+            highlight_ = 0;
+        }
+        const int n = static_cast<int>(labels_.size());
+        if (highlight_ >= n) {
+            highlight_ = n - 1;
+        }
+    }
     if (labels_.empty()) {
         hide();
         return;

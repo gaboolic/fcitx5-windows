@@ -24,9 +24,9 @@ bool ImeEngine::fcitxModifierHotkeyUsesFullKeyEvent(unsigned /*vk*/) const {
     return false;
 }
 
-bool ImeEngine::deliverFcitxRawKeyEvent(unsigned /*vk*/,
-                                        std::uintptr_t /*lParam*/,
-                                        bool /*isRelease*/) {
+bool ImeEngine::deliverFcitxRawKeyEvent(
+    unsigned /*vk*/, std::uintptr_t /*lParam*/, bool /*isRelease*/,
+    std::uint32_t /*hostKeyboardStateMask*/) {
     return false;
 }
 
@@ -49,6 +49,8 @@ bool ImeEngine::activateTrayStatusAction(const std::string & /*uniqueName*/) {
 }
 
 bool ImeEngine::reloadPinyinConfig() { return false; }
+
+bool ImeEngine::reloadRimeAddonConfig() { return false; }
 
 bool ImeEngine::invokeInputMethodSubConfig(const std::string & /*uniqueName*/,
                                            const std::string & /*subPath*/) {
@@ -77,16 +79,18 @@ class StubImeEngine : public ImeEngine {
         }
     }
 
-    void appendLatinLowercase(wchar_t ch) override {
+    bool appendLatinLowercase(wchar_t ch) override {
         preedit_.push_back(ch);
         regenerateCandidates();
+        return true;
     }
 
-    void backspace() override {
+    bool backspace() override {
         if (!preedit_.empty()) {
             preedit_.pop_back();
             regenerateCandidates();
         }
+        return true;
     }
 
     void moveHighlight(int delta) override {

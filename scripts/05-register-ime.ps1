@@ -13,10 +13,10 @@
   .\scripts\05-register-ime.ps1 -DeployDir C:\Fcitx5Portable
 #>
 param(
-    [Parameter(Mandatory = $true)]
-    [string] $DeployDir,
-    [ValidateSet('auto', 'en', 'zh')]
-    [string] $UICulture = 'auto'
+  [Parameter(Mandatory = $true)]
+  [string] $DeployDir,
+  [ValidateSet('auto', 'en', 'zh')]
+  [string] $UICulture = 'auto'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -27,26 +27,27 @@ $lang = if ($UICulture -eq 'auto') { Resolve-FcitxImeLang } else { $UICulture }
 $S = Get-FcitxImeStrings -Lang $lang
 
 if (-not (Test-FcitxImeAdmin)) {
-    Write-Warning $S.AdminWarn
+  Write-Warning $S.AdminWarn
 }
 
 $DeployDir = $DeployDir.TrimEnd('\', '/')
 $binDir = Join-Path $DeployDir 'bin'
 $imeDll = Get-FcitxImeDll -BinDir $binDir
 if (-not $imeDll) {
-    Write-Error "$($S.ImeMissing) $binDir"
+  Write-Error "$($S.ImeMissing) $binDir"
 }
 
 $ico = Join-Path $binDir 'penguin.ico'
 if (-not (Test-Path -LiteralPath $ico)) {
-    Write-Warning $S.IcoWarn
+  Write-Warning $S.IcoWarn
 }
 
 Write-Host ($S.Register + " $($imeDll.FullName)")
 try {
-    Invoke-FcitxImeRegister -Dll $imeDll
-} catch {
-    Write-Error "$($S.RegsvrFail) $($_.Exception.Message)"
+  Invoke-FcitxImeRegister -Dll $imeDll
+}
+catch {
+  Write-Error "$($S.RegsvrFail) $($_.Exception.Message)"
 }
 
 Write-Host ''

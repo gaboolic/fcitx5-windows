@@ -29,6 +29,28 @@ $ErrorActionPreference = 'Stop'
 $common = Join-Path $PSScriptRoot 'Fcitx5-Ime.Common.ps1'
 . $common
 
+function Sync-FcitxPortableDataLayout {
+  param([string] $DeployDir)
+
+  $shareDir = Join-Path $DeployDir 'share'
+  $dataDir = Join-Path $DeployDir 'data'
+
+  if (-not (Test-Path -LiteralPath $shareDir)) {
+    Write-Warning "share not found under $DeployDir; skipped syncing data."
+    return
+  }
+
+  New-Item -ItemType Directory -Force -Path $dataDir | Out-Null
+  Write-Host "Syncing share -> data"
+  $rc = Start-Process -FilePath 'robocopy.exe' -ArgumentList @(
+    $shareDir, $dataDir, '/MIR', '/COPY:DAT',
+    '/R:3', '/W:2', '/NFL', '/NDL', '/NJH', '/NJS'
+  ) -Wait -PassThru
+  if ($rc.ExitCode -gt 7) {
+    throw "robocopy share -> data exit $($rc.ExitCode)"
+  }
+}
+
 if (-not $SkipCopy) {
   if ([string]::IsNullOrWhiteSpace($Stage)) {
     $defaultStage = Join-Path (Split-Path -Parent $PSScriptRoot) 'stage'
@@ -55,6 +77,13 @@ Stage = cmake install prefix (same tree as after 01-build / 02-build-deps: bin, 
 }
 else {
   $DeployDir = $DeployDir.TrimEnd('\', '/')
+}
+
+try {
+  Sync-FcitxPortableDataLayout -DeployDir $DeployDir
+}
+catch {
+  Write-Error "Syncing share -> data failed: $($_.Exception.Message)"
 }
 
 $binDir = Join-Path $DeployDir 'bin'

@@ -11,84 +11,12 @@
 #include <Windows.h>
 #include <filesystem>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <vector>
 
+#include "TsfTrace.h"
+
 namespace fcitx {
-
-inline std::filesystem::path tsfTraceLogPath() {
-    wchar_t appData[MAX_PATH] = {};
-    DWORD len = GetEnvironmentVariableW(L"APPDATA", appData, MAX_PATH);
-    std::filesystem::path dir;
-    if (len > 0 && len < MAX_PATH) {
-        dir = std::filesystem::path(appData) / "Fcitx5";
-    } else {
-        wchar_t tempPath[MAX_PATH] = {};
-        len = GetTempPathW(MAX_PATH, tempPath);
-        if (len > 0 && len < MAX_PATH) {
-            dir = std::filesystem::path(tempPath);
-        } else {
-            dir = std::filesystem::temp_directory_path();
-        }
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(dir, ec);
-    return dir / "tsf-trace.log";
-}
-
-inline std::wstring currentProcessExeBaseName() {
-    WCHAR exePath[MAX_PATH] = {};
-    if (!GetModuleFileNameW(nullptr, exePath, MAX_PATH)) {
-        return {};
-    }
-    return std::filesystem::path(exePath).filename().wstring();
-}
-
-inline std::string currentProcessExeBaseNameUtf8() {
-    const std::wstring baseName = currentProcessExeBaseName();
-    return std::string(baseName.begin(), baseName.end());
-}
-
-inline void tsfTrace(const std::string &message) {
-    const auto path = tsfTraceLogPath();
-    const std::wstring wpath = pathAsWide(path);
-    HANDLE file = CreateFileW(wpath.c_str(), FILE_APPEND_DATA,
-                              FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                              OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (file == INVALID_HANDLE_VALUE) {
-        return;
-    }
-    std::ostringstream ss;
-    ss << "[pid=" << GetCurrentProcessId()
-       << " process=" << currentProcessExeBaseNameUtf8() << "] " << message
-       << "\r\n";
-    const std::string line = ss.str();
-    DWORD written = 0;
-    WriteFile(file, line.data(), static_cast<DWORD>(line.size()), &written,
-              nullptr);
-    CloseHandle(file);
-}
-
-inline bool currentProcessExeBaseNameEquals(const wchar_t *expected) {
-    const std::wstring baseName = currentProcessExeBaseName();
-    return !baseName.empty() && expected &&
-           wideStringCompareI(baseName.c_str(), expected) == 0;
-}
-
-inline bool currentProcessIsStandaloneTrayHelper() {
-    return currentProcessExeBaseNameEquals(L"fcitx5-tray-helper.exe");
-}
-
-inline bool currentProcessUsesMinimalTsfMode() {
-    return currentProcessExeBaseNameEquals(L"explorer.exe") ||
-           currentProcessIsStandaloneTrayHelper();
-}
-
-/// Start fcitx5-tray-helper at most once per explorer.exe load. Avoids repeated
-/// FindWindow/CreateProcess during MSCTF focus/ActivateEx bursts (faults in
-/// MSCTF.dll).
-bool explorerTrayHelperPrimedOnce();
 
 template <typename T> using ComPtr = Microsoft::WRL::ComPtr<T>;
 class FcitxLangBarButton;
@@ -96,6 +24,7 @@ class Tsf : public ITfTextInputProcessorEx,
             public ITfActiveLanguageProfileNotifySink,
             public ITfInputProcessorProfileActivationSink,
             public ITfThreadMgrEventSink,
+            public ITfCompartmentEventSink,
             public ITfTextEditSink,
             public ITfKeyEventSink,
             public ITfCompositionSink,
@@ -137,6 +66,9 @@ class Tsf : public ITfTextInputProcessorEx,
     STDMETHODIMP OnPushContext(ITfContext *pContext) override;
     STDMETHODIMP OnPopContext(ITfContext *pContext) override;
 
+    // ITfCompartmentEventSink
+    STDMETHODIMP OnChange(REFGUID rguid) override;
+
     // ITfTextEditSink
     STDMETHODIMP OnEndEdit(ITfContext *pic, TfEditCookie ecReadOnly,
                            ITfEditRecord *pEditRecord) override;
@@ -167,7 +99,7 @@ class Tsf : public ITfTextInputProcessorEx,
     void langBarScheduleSetChineseMode(bool wantChinese);
     void langBarScheduleActivateInputMethod(const std::string &uniqueName);
     void langBarNotifyIconUpdate();
-    bool langBarChineseMode() const { return chineseActive_; }
+    bool langBarChineseMode() const;
     bool sharedTrayChineseModeRequestPending() const;
     bool sharedTrayInputMethodRequestPending() const;
     bool sharedTrayStatusActionRequestPending() const;
@@ -195,15 +127,24 @@ class Tsf : public ITfTextInputProcessorEx,
     bool initActiveLanguageProfileNotifySink();
     void uninitProfileActivationSink();
     void uninitActiveLanguageProfileNotifySink();
+    bool initCompartmentEventSinks();
+    void uninitCompartmentEventSinks();
+    bool readThreadCompartmentDword(REFGUID guid, DWORD *value) const;
+    bool writeThreadCompartmentDword(REFGUID guid, DWORD value) const;
+    void syncKeyboardOpenCompartment(bool forceOpen);
+    void syncInputModeConversionCompartment(bool forceWrite = false);
+    void handleProfileActivated(bool active);
     void traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese);
     void trayToggleChineseInEditSession(TfEditCookie ec);
     void trayToggleChineseWithoutContext();
     bool initShellTrayIcon();
+    /// Hidden tray host window only (no Shell_NotifyIcon). Used when
+    /// ITfLangBarItemMgr::AddItem + TF_LBI_STYLE_SHOWNINTRAY provides the
+    /// taskbar indicator so Rime balloons / menu ownership still work.
+    bool initShellTrayHostForMessages();
+    /// Shared hidden window + ref-count across Tsf instances in this process.
+    bool acquireSharedShellTrayHost();
     void uninitShellTrayIcon();
-    void pushTrayServiceStateSnapshot() const;
-    void pushTrayServiceUiEvent() const;
-    void pushTrayServiceStatusEvent() const;
-    void pushTrayServiceTipSessionEvent(bool active) const;
     void updateShellTrayTooltip();
     void recreateShellTrayIcon();
     void scheduleShellTrayRetry(UINT delayMs = 1000);
@@ -230,6 +171,13 @@ class Tsf : public ITfTextInputProcessorEx,
     DWORD activeLanguageProfileNotifySinkCookie_ = TF_INVALID_COOKIE;
     DWORD profileActivationSinkCookie_ = TF_INVALID_COOKIE;
     DWORD threadMgrEventSinkCookie_ = TF_INVALID_COOKIE;
+    DWORD keyboardOpenCompartmentSinkCookie_ = TF_INVALID_COOKIE;
+    DWORD inputModeConversionCompartmentSinkCookie_ = TF_INVALID_COOKIE;
+    ComPtr<ITfCompartment> keyboardOpenCompartment_;
+    ComPtr<ITfCompartment> inputModeConversionCompartment_;
+    bool suppressKeyboardOpenCompartmentChange_ = false;
+    bool suppressInputModeConversionCompartmentChange_ = false;
+    bool destroying_ = false;
 
     // ITfTextEditSink
     bool initTextEditSink(ITfDocumentMgr *documentMgr);
@@ -261,13 +209,6 @@ class Tsf : public ITfTextInputProcessorEx,
     bool chineseActive_ = true;
     FcitxLangBarButton *langBarItem_ = nullptr;
     HWND shellTrayHostHwnd_ = nullptr;
-    bool shellTrayHostDllPinned_ = false;
-    bool shellTrayHostClosing_ = false;
-    HICON shellTrayIcon_ = nullptr;
-    bool shellTrayIconOwned_ = false;
-    bool shellTrayAdded_ = false;
-    bool shellTrayUseGuidIdentity_ = true;
-    bool shellTrayRetryPending_ = false;
     static UINT taskbarCreatedMessage_;
     bool pendingTrayToggleChinese_ = false;
     bool pendingTraySetChineseMode_ = false;

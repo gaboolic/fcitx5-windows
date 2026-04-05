@@ -1,9 +1,12 @@
 #include "tsf.h"
 #include <cassert>
-#include <string_view>
 
 #if FCITX_WIN32_IME_WITH_CORE
+#if FCITX5_WINDOWS_IME_IPC
+#include "PipeImeEngine.h"
+#else
 #include "Fcitx5ImeEngine.h"
+#endif
 #endif
 
 extern void DllAddRef();
@@ -16,20 +19,24 @@ namespace {
 LONG gExplorerProcessLifetimeDllPinned = 0;
 
 bool currentProcessIsExplorerForDefaultEngine() {
-    return currentProcessExeBaseNameEquals(L"explorer.exe");
-}
-
-bool currentProcessShouldBypassDefaultEngine() {
-    return currentProcessUsesMinimalTsfMode();
+    return currentProcessIsShellInputHost();
 }
 
 std::unique_ptr<ImeEngine> makeDefaultImeEngine() {
 #if FCITX_WIN32_IME_WITH_CORE
-    if (!currentProcessShouldBypassDefaultEngine()) {
+#if FCITX5_WINDOWS_IME_IPC
+    if (!currentProcessIsExplorerForDefaultEngine()) {
+        if (auto e = makePipeImeEngineAttempt()) {
+            return e;
+        }
+    }
+#else
+    if (!currentProcessIsExplorerForDefaultEngine()) {
         if (auto e = makeFcitx5ImeEngineAttempt()) {
             return e;
         }
     }
+#endif
 #endif
     return makeStubImeEngine();
 }
@@ -45,9 +52,6 @@ Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
         DllAddRef();
         tsfTrace("Tsf::Tsf pinned DLL for explorer process lifetime");
     }
-    if (currentProcessIsStandaloneTrayHelper()) {
-        tsfTrace("Tsf::Tsf helper process using isolated minimal TSF path");
-    }
     candidateWin_.setOnPick([this](int idx) {
         pendingMousePick_ = idx;
         if (!textEditSinkContext_) {
@@ -60,6 +64,7 @@ Tsf::Tsf(std::unique_ptr<ImeEngine> engine)
 }
 
 Tsf::~Tsf() {
+    destroying_ = true;
     if (threadMgr_ || langBarItem_ || shellTrayHostHwnd_ ||
         textEditSinkContext_ || trayEditContextFallback_) {
         Deactivate();
@@ -87,6 +92,8 @@ STDAPI Tsf::QueryInterface(REFIID riid, void **ppvObject) {
         *ppvObject = (ITfInputProcessorProfileActivationSink *)this;
     else if (IsEqualIID(riid, IID_ITfThreadMgrEventSink))
         *ppvObject = (ITfThreadMgrEventSink *)this;
+    else if (IsEqualIID(riid, IID_ITfCompartmentEventSink))
+        *ppvObject = (ITfCompartmentEventSink *)this;
     else if (IsEqualIID(riid, IID_ITfTextEditSink))
         *ppvObject = (ITfTextEditSink *)this;
     else if (IsEqualIID(riid, IID_ITfKeyEventSink))

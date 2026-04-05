@@ -13,6 +13,7 @@ namespace fcitx {
 
 class Instance;
 class TsfInputContext;
+class Fcitx5ImePipeShared;
 
 /// Try to create an engine backed by in-process `fcitx::Instance` + dynamic
 /// addons. Returns nullptr if initialization fails (caller should use stub).
@@ -25,6 +26,13 @@ class Fcitx5ImeEngine : public ImeEngine {
 
     bool init();
 
+    /// Pipe server: share one `Instance` from \p host; own a dedicated
+    /// `TsfInputContext`. Does not create an `Instance`.
+    bool initAsPipeSession(Fcitx5ImePipeShared *host);
+
+    /// Pump libuv a few times (in-process TSF and pipe server use this).
+    void pumpEventLoopForUi() override;
+
     void enqueueCommitUtf8(std::string text);
 
     void clear() override;
@@ -35,8 +43,8 @@ class Fcitx5ImeEngine : public ImeEngine {
     int highlightIndex() const override;
     void setHighlightIndex(int index) override;
 
-    void appendLatinLowercase(wchar_t ch) override;
-    void backspace() override;
+    bool appendLatinLowercase(wchar_t ch) override;
+    bool backspace() override;
     void moveHighlight(int delta) override;
 
     bool hasCandidate(size_t index) const override;
@@ -54,13 +62,15 @@ class Fcitx5ImeEngine : public ImeEngine {
 
     bool fcitxModifierHotkeyUsesFullKeyEvent(unsigned vk) const override;
     bool deliverFcitxRawKeyEvent(unsigned vk, std::uintptr_t lParam,
-                                 bool isRelease) override;
+                                 bool isRelease,
+                                 std::uint32_t hostKeyboardStateMask) override;
     std::vector<ProfileInputMethodItem> profileInputMethods() const override;
     bool activateProfileInputMethod(const std::string &uniqueName) override;
     std::string currentInputMethod() const override;
     std::vector<TrayStatusActionItem> trayStatusActions() const override;
     bool activateTrayStatusAction(const std::string &uniqueName) override;
     bool reloadPinyinConfig() override;
+    bool reloadRimeAddonConfig() override;
     bool invokeInputMethodSubConfig(const std::string &uniqueName,
                                     const std::string &subPath) override;
 
@@ -73,11 +83,24 @@ class Fcitx5ImeEngine : public ImeEngine {
     /// cannot call setCurrentInputMethod for pinyin — repair in-memory and
     /// persist so new installs work without manually copying profile.example.
     void ensurePortableImGroupHasEntries();
+    /// @param localIm If true (in-proc TSF), apply as per-IC local IM. If false
+    /// (pipe server session), follow global profile so every app’s context
+    /// tracks tray / defaultInputMethod instead of sticking on pinyin.
     void
-    activatePreferredInputMethod(const std::string &preferredInputMethod = {});
+    activatePreferredInputMethod(const std::string &preferredInputMethod = {},
+                                 bool localIm = true);
+    /// Pipe session: same refresh/activate sequence as the original in-proc
+    /// init (single pass; avoid repeated activate/save confusing fcitx state).
+    void activatePreferredInputMethodPipeSync(
+        Instance *inst, const std::string &preferredInputMethod);
+
+    Instance *instancePtr() const;
 
     bool loggingAttached_ = false;
 
+    /// When non-null, `instance_` is unused; `Instance` comes from the pipe
+    /// host.
+    Fcitx5ImePipeShared *pipeSharedHost_ = nullptr;
     std::unique_ptr<Instance> instance_;
     std::unique_ptr<TsfInputContext> ic_;
 

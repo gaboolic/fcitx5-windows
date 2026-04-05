@@ -1,10 +1,8 @@
 #include "register.h"
 #include "util.h"
-#include <filesystem>
 #include <msctf.h>
+#include <format>
 #include <wrl/client.h>
-
-namespace fs = std::filesystem;
 
 #define FCITX5 "Fcitx5"
 #define THREADING_MODEL "ThreadingModel"
@@ -13,8 +11,84 @@ namespace fs = std::filesystem;
 namespace fcitx {
 HINSTANCE dllInstance; // Set by DllMain.
 
+void RegisterTrace(const std::string &message) {
+    const std::string line = message + "\r\n";
+    const auto appendLine = [&](const std::wstring &file) {
+        HANDLE h = CreateFileW(file.c_str(), FILE_APPEND_DATA,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
+                               OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (h == INVALID_HANDLE_VALUE) {
+            return;
+        }
+        DWORD written = 0;
+        WriteFile(h, line.data(), static_cast<DWORD>(line.size()), &written,
+                  nullptr);
+        CloseHandle(h);
+    };
+
+    WCHAR value[MAX_PATH];
+    const DWORD appDataLen =
+        GetEnvironmentVariableW(L"APPDATA", value, MAX_PATH);
+    if (appDataLen != 0 && appDataLen < MAX_PATH) {
+        const std::wstring dir = std::wstring(value) + L"\\Fcitx5";
+        CreateDirectoryW(dir.c_str(), nullptr);
+        appendLine(dir + L"\\register-trace.log");
+    }
+
+    const DWORD programDataLen =
+        GetEnvironmentVariableW(L"PROGRAMDATA", value, MAX_PATH);
+    if (programDataLen != 0 && programDataLen < MAX_PATH) {
+        const std::wstring dir = std::wstring(value) + L"\\Fcitx5";
+        CreateDirectoryW(dir.c_str(), nullptr);
+        appendLine(dir + L"\\register-trace.log");
+    }
+
+    WCHAR dllPath[MAX_PATH];
+    if (GetModuleFileNameW(dllInstance, dllPath, MAX_PATH) != 0) {
+        std::wstring dir(dllPath);
+        const size_t pos = dir.find_last_of(L"\\/");
+        if (pos != std::wstring::npos) {
+            dir.resize(pos);
+            appendLine(dir + L"\\register-trace.log");
+        }
+    }
+}
+
+namespace {
+
+HKL findImeKeyboardLayoutForLang(LANGID langid) {
+    HKEY hKey = nullptr;
+    if (RegOpenKeyExW(HKEY_LOCAL_MACHINE,
+                      L"SYSTEM\\CurrentControlSet\\Control\\Keyboard Layouts",
+                      0, KEY_READ, &hKey) != ERROR_SUCCESS) {
+        return nullptr;
+    }
+    WCHAR keyName[KL_NAMELENGTH] = {};
+    // Align with Weasel: only treat IME-style E0xx HKLs as substitute layouts.
+    // Binding to the generic 0000xxxx keyboard layout causes TSF to emit a
+    // SubstituteLayout entry that does not correspond to a dedicated TIP/IME.
+    for (DWORD value = (0xE0200000u | langid); value <= (0xE0FF0000u | langid);
+         value += 0x10000u) {
+        if (swprintf(keyName, ARRAYSIZE(keyName), L"%08X", value) < 0) {
+            continue;
+        }
+        HKEY hSubKey = nullptr;
+        if (RegOpenKeyExW(hKey, keyName, 0, KEY_READ, &hSubKey) ==
+            ERROR_SUCCESS) {
+            RegCloseKey(hSubKey);
+            RegCloseKey(hKey);
+            return reinterpret_cast<HKL>(static_cast<ULONG_PTR>(value));
+        }
+    }
+    RegCloseKey(hKey);
+    return nullptr;
+}
+
+} // namespace
+
 /*
-HKEY_CLASSES_ROOT\CLSID\{FC3869BA-51E3-4078-8EE2-5FE49493A1F4}: Fcitx5
+HKEY_LOCAL_MACHINE\SOFTWARE\Classes\CLSID\{FC3869BA-51E3-4078-8EE2-5FE49493A1F4}:
+Fcitx5
   - InprocServer32: C:\Windows\system32
     ThreadingModel: Apartment
 */
@@ -23,31 +97,61 @@ BOOL RegisterServer() {
     HKEY hKey = nullptr;
     HKEY hSubKey = nullptr;
     WCHAR dllPath[MAX_PATH];
-    auto achIMEKey = "CLSID\\" + guidToString(FCITX_CLSID);
-    BOOL ret = RegCreateKeyExA(HKEY_CLASSES_ROOT, achIMEKey.c_str(), 0, nullptr,
-                               REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr,
-                               &hKey, &dw);
-    ret |=
+    auto achIMEKey = "SOFTWARE\\Classes\\CLSID\\" + guidToString(FCITX_CLSID);
+    const LSTATUS status = RegCreateKeyExA(
+        HKEY_LOCAL_MACHINE, achIMEKey.c_str(), 0, nullptr,
+        REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hKey, &dw);
+    RegisterTrace(std::format("RegisterServer RegCreateKeyExA status={}",
+                              static_cast<long>(status)));
+    if (status != ERROR_SUCCESS) {
+        return FALSE;
+    }
+    LSTATUS ret =
         RegSetValueExA(hKey, nullptr, 0, REG_SZ,
                        reinterpret_cast<const BYTE *>(FCITX5), sizeof FCITX5);
-    ret |= RegCreateKeyExA(hKey, "InprocServer32", 0, nullptr,
-                           REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr,
-                           &hSubKey, &dw);
-    auto hr = GetModuleFileNameW(dllInstance, dllPath, MAX_PATH);
-    ret |= RegSetValueExW(hSubKey, nullptr, 0, REG_SZ,
-                          reinterpret_cast<const BYTE *>(dllPath),
-                          hr * sizeof(WCHAR));
-    ret |= RegSetValueExA(hSubKey, THREADING_MODEL, 0, REG_SZ,
-                          reinterpret_cast<const BYTE *>(APARTMENT),
-                          sizeof APARTMENT);
+    RegisterTrace(std::format("RegisterServer RegSetValueExA(name) status={}",
+                              static_cast<long>(ret)));
+    if (ret != ERROR_SUCCESS) {
+        RegCloseKey(hKey);
+        return FALSE;
+    }
+    ret = RegCreateKeyExA(hKey, "InprocServer32", 0, nullptr,
+                          REG_OPTION_NON_VOLATILE, KEY_WRITE, nullptr, &hSubKey,
+                          &dw);
+    RegisterTrace(
+        std::format("RegisterServer RegCreateKeyExA(InprocServer32) status={}",
+                    static_cast<long>(ret)));
+    if (ret != ERROR_SUCCESS) {
+        RegCloseKey(hKey);
+        return FALSE;
+    }
+    const auto hr = GetModuleFileNameW(dllInstance, dllPath, MAX_PATH);
+    RegisterTrace(std::format("RegisterServer dllPathLen={}",
+                              static_cast<unsigned long>(hr)));
+    ret = RegSetValueExW(hSubKey, nullptr, 0, REG_SZ,
+                         reinterpret_cast<const BYTE *>(dllPath),
+                         hr * sizeof(WCHAR));
+    RegisterTrace(std::format("RegisterServer RegSetValueExW(path) status={}",
+                              static_cast<long>(ret)));
+    if (ret != ERROR_SUCCESS) {
+        RegCloseKey(hSubKey);
+        RegCloseKey(hKey);
+        return FALSE;
+    }
+    ret = RegSetValueExA(hSubKey, THREADING_MODEL, 0, REG_SZ,
+                         reinterpret_cast<const BYTE *>(APARTMENT),
+                         sizeof APARTMENT);
+    RegisterTrace(
+        std::format("RegisterServer RegSetValueExA(ThreadingModel) status={}",
+                    static_cast<long>(ret)));
     RegCloseKey(hSubKey);
     RegCloseKey(hKey);
     return ret == ERROR_SUCCESS;
 }
 
 void UnregisterServer() {
-    auto achIMEKey = "CLSID\\" + guidToString(FCITX_CLSID);
-    RegDeleteTreeA(HKEY_CLASSES_ROOT, achIMEKey.c_str());
+    auto achIMEKey = "SOFTWARE\\Classes\\CLSID\\" + guidToString(FCITX_CLSID);
+    RegDeleteTreeA(HKEY_LOCAL_MACHINE, achIMEKey.c_str());
 }
 
 /*
@@ -57,25 +161,59 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\CTF\TIP\{FC3869BA-51E3-4078-8EE2-5FE49493A
       - {9A92B895-29B9-4F19-9627-9F626C9490F2}
         Description: Fcitx5
         Enable: 0x00000001
-        IconFile: /path/to/icon in the same directory with dll
+        IconFile: current IME dll path (module resource icon)
         IconIndex: 0x00000000
 */
 BOOL RegisterProfiles() {
     std::wstring pchDesc = stringToWString(FCITX5, CP_UTF8);
     WCHAR dllPath[MAX_PATH];
-    GetModuleFileNameW(dllInstance, dllPath, MAX_PATH);
-    fs::path path = dllPath;
-    path = path.remove_filename().append("penguin.ico");
+    const DWORD dllPathLen = GetModuleFileNameW(dllInstance, dllPath, MAX_PATH);
+    if (dllPathLen == 0 || dllPathLen >= MAX_PATH) {
+        return FALSE;
+    }
     Microsoft::WRL::ComPtr<ITfInputProcessorProfileMgr> mgr;
     HRESULT hrCo = CoCreateInstance(CLSID_TF_InputProcessorProfiles, nullptr,
                                     CLSCTX_ALL, IID_PPV_ARGS(&mgr));
+    RegisterTrace(std::format("RegisterProfiles CoCreateInstance hr=0x{:08X}",
+                              static_cast<unsigned long>(hrCo)));
     if (FAILED(hrCo)) {
         return FALSE;
     }
-    auto hr = mgr->RegisterProfile(
-        FCITX_CLSID, TEXTSERVICE_LANGID_HANS, PROFILE_GUID, pchDesc.c_str(),
-        pchDesc.size() * sizeof(WCHAR), path.c_str(),
-        path.wstring().size() * sizeof(WCHAR), 0, nullptr, 0, 1, 0);
+    const auto registerProfile = [&](LANGID langid, HKL hkl, BOOL enable) {
+        const HRESULT hr = mgr->RegisterProfile(
+            FCITX_CLSID, langid, PROFILE_GUID, pchDesc.c_str(),
+            pchDesc.size() * sizeof(WCHAR), dllPath, dllPathLen, 0, hkl, 0,
+            enable, 0);
+        RegisterTrace(std::format(
+            "RegisterProfiles lang=0x{:04X} hkl=0x{:08X} enable={} hr=0x{:08X}",
+            static_cast<unsigned>(langid),
+            static_cast<unsigned>(reinterpret_cast<ULONG_PTR>(hkl)),
+            enable ? 1 : 0, static_cast<unsigned long>(hr)));
+        return hr;
+    };
+
+    HRESULT hr = S_OK;
+    hr = registerProfile(TEXTSERVICE_LANGID_HANS,
+                         findImeKeyboardLayoutForLang(TEXTSERVICE_LANGID_HANS),
+                         TRUE);
+    if (FAILED(hr)) {
+        return FALSE;
+    }
+    hr = registerProfile(TEXTSERVICE_LANGID_HANT,
+                         findImeKeyboardLayoutForLang(TEXTSERVICE_LANGID_HANT),
+                         FALSE);
+    if (FAILED(hr)) {
+        return FALSE;
+    }
+    hr = registerProfile(TEXTSERVICE_LANGID_HONGKONG, nullptr, FALSE);
+    if (FAILED(hr)) {
+        return FALSE;
+    }
+    hr = registerProfile(TEXTSERVICE_LANGID_MACAU, nullptr, FALSE);
+    if (FAILED(hr)) {
+        return FALSE;
+    }
+    hr = registerProfile(TEXTSERVICE_LANGID_SINGAPORE, nullptr, FALSE);
     return hr == S_OK;
 }
 
@@ -120,6 +258,13 @@ const GUID kRegisterTipCategories[] = {
      0x560b,
      0x46cd,
      {0x94, 0x7a, 0x4c, 0x3a, 0xf1, 0xe0, 0xe3, 0x5d}},
+    // Present in the working Weasel installation on Win11. Microsoft headers in
+    // our toolchain do not name this newer TIP capability GUID, but without it
+    // fcitx's installed Category tree differs from Weasel by exactly one item.
+    {0x24af3031,
+     0x852d,
+     0x40a2,
+     {0xbc, 0x09, 0x89, 0x92, 0x89, 0x8c, 0xe7, 0x22}},
     {0x25504fb4,
      0x7bab,
      0x4bc1,
@@ -184,15 +329,26 @@ HKEY_LOCAL_MACHINE\SOFTWARE\Microsoft\CTF\TIP\{FC3869BA-51E3-4078-8EE2-5FE49493A
 */
 BOOL RegisterCategories() {
     ITfCategoryMgr *mgr;
-    CoCreateInstance(CLSID_TF_CategoryMgr, nullptr, CLSCTX_INPROC_SERVER,
-                     IID_ITfCategoryMgr, reinterpret_cast<void **>(&mgr));
+    const HRESULT createHr =
+        CoCreateInstance(CLSID_TF_CategoryMgr, nullptr, CLSCTX_INPROC_SERVER,
+                         IID_ITfCategoryMgr, reinterpret_cast<void **>(&mgr));
+    RegisterTrace(std::format("RegisterCategories CoCreateInstance hr=0x{:08X}",
+                              static_cast<unsigned long>(createHr)));
+    if (FAILED(createHr)) {
+        return FALSE;
+    }
     HRESULT hr = S_OK;
 #if defined(__MINGW32__) || defined(__MSYS__)
     for (const auto &guid : kRegisterTipCategories) {
 #else
     for (const auto &guid : Categories) {
 #endif
-        hr |= mgr->RegisterCategory(FCITX_CLSID, guid, FCITX_CLSID);
+        const HRESULT catHr =
+            mgr->RegisterCategory(FCITX_CLSID, guid, FCITX_CLSID);
+        RegisterTrace(std::format("RegisterCategories guid={} hr=0x{:08X}",
+                                  guidToString(guid),
+                                  static_cast<unsigned long>(catHr)));
+        hr |= catHr;
     }
     mgr->Release();
     return hr == S_OK;
