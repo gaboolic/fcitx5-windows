@@ -110,6 +110,28 @@ begin
     RegDeleteKeyIncludingSubkeys(HKEY_CURRENT_USER, 'Software\Classes\CLSID\{#ImeClsid}');
 end;
 
+procedure TryKillProcessImage(const ImageName: String);
+var
+  R: Integer;
+begin
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/F /T /IM "' + ImageName + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, R);
+end;
+
+procedure StopFcitxUninstallProcesses;
+begin
+  TryKillProcessImage('Fcitx5ImePipeServer.exe');
+  TryKillProcessImage('fcitx5-config-win32.exe');
+end;
+
+procedure RemoveResidualInstallDirs;
+begin
+  if DirExists(ExpandConstant('{app}\bin')) then
+    DelTree(ExpandConstant('{app}\bin'), True, True, True);
+  if DirExists(ExpandConstant('{app}\lib')) then
+    DelTree(ExpandConstant('{app}\lib'), True, True, True);
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   Dll: String;
@@ -128,6 +150,11 @@ end;
 
 procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
 begin
+  if CurUninstallStep = usUninstall then
+    StopFcitxUninstallProcesses;
   if CurUninstallStep = usPostUninstall then
+  begin
     RegPurgeFcitxResiduals;
+    RemoveResidualInstallDirs;
+  end;
 end;

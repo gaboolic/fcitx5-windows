@@ -325,24 +325,6 @@ void openDirectoryInDetachedExplorer(const std::wstring &dir) {
     ShellExecuteExW(&sei);
 }
 
-std::filesystem::path sharedTrayInputMethodRequestFile() {
-    WCHAR appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return {};
-    }
-    return std::filesystem::path(appData) / L"Fcitx5" /
-           L"pending-tray-input-method.txt";
-}
-
-std::filesystem::path sharedTrayCurrentInputMethodFile() {
-    WCHAR appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return {};
-    }
-    return std::filesystem::path(appData) / L"Fcitx5" /
-           L"current-tray-input-method.txt";
-}
-
 std::filesystem::path sharedTrayChineseModeRequestFile() {
     WCHAR appData[MAX_PATH];
     if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
@@ -350,15 +332,6 @@ std::filesystem::path sharedTrayChineseModeRequestFile() {
     }
     return std::filesystem::path(appData) / L"Fcitx5" /
            L"pending-tray-chinese-mode.txt";
-}
-
-std::filesystem::path sharedTrayChineseModeStateFile() {
-    WCHAR appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return {};
-    }
-    return std::filesystem::path(appData) / L"Fcitx5" /
-           L"current-tray-chinese-mode.txt";
 }
 
 std::filesystem::path sharedTrayStatusActionRequestFile() {
@@ -377,15 +350,6 @@ std::filesystem::path sharedTrayPinyinReloadRequestFile() {
     }
     return std::filesystem::path(appData) / L"Fcitx5" /
            L"pending-tray-pinyin-reload.txt";
-}
-
-std::filesystem::path sharedTrayStatusActionStateFile() {
-    WCHAR appData[MAX_PATH];
-    if (FAILED(SHGetFolderPathW(nullptr, CSIDL_APPDATA, nullptr, 0, appData))) {
-        return {};
-    }
-    return std::filesystem::path(appData) / L"Fcitx5" /
-           L"current-tray-status-actions.txt";
 }
 
 std::filesystem::path fcitx5LogDir();
@@ -488,9 +452,7 @@ void writeSharedTrayChineseModeFile(const std::filesystem::path &path,
     writeSharedTrayTextFile(path, value ? "1" : "0");
 }
 
-std::string readSharedTrayInputMethodRequestFile() {
-    return readSharedTrayTextFile(sharedTrayInputMethodRequestFile());
-}
+std::string readSharedTrayInputMethodRequestFile() { return {}; }
 
 std::string readSharedTrayStatusActionRequestFile() {
     return readSharedTrayTextFile(sharedTrayStatusActionRequestFile());
@@ -500,65 +462,19 @@ bool readSharedTrayPinyinReloadRequestFile() {
     return readSharedTrayTextFile(sharedTrayPinyinReloadRequestFile()) == "1";
 }
 
-std::vector<TrayStatusActionItem> readTrayStatusActionsFromStateFile() {
-    std::vector<TrayStatusActionItem> items;
-    const auto path = sharedTrayStatusActionStateFile();
-    if (path.empty()) {
-        return items;
-    }
-    std::ifstream in(path, std::ios::binary);
-    if (!in.is_open()) {
-        return items;
-    }
-    std::string line;
-    while (std::getline(in, line)) {
-        line = trimSharedTrayValue(std::move(line));
-        if (line.empty()) {
-            continue;
-        }
-        const size_t firstTab = line.find('\t');
-        const size_t secondTab = firstTab == std::string::npos
-                                     ? std::string::npos
-                                     : line.find('\t', firstTab + 1);
-        if (firstTab == std::string::npos || secondTab == std::string::npos) {
-            continue;
-        }
-        const std::string uniqueName = line.substr(0, firstTab);
-        const std::string checked =
-            line.substr(firstTab + 1, secondTab - firstTab - 1);
-        const std::string label = line.substr(secondTab + 1);
-        if (uniqueName.empty() || label.empty()) {
-            continue;
-        }
-        items.push_back(
-            TrayStatusActionItem{uniqueName, utf8ToWideString(label),
-                                 checked == "1" || checked == "true"});
-    }
-    return items;
-}
-
 void persistSharedTrayCurrentInputMethodState(const std::string &uniqueName) {
-    if (!uniqueName.empty()) {
-        writeSharedTrayTextFile(sharedTrayCurrentInputMethodFile(), uniqueName);
-    }
+    (void)uniqueName;
 }
 
-std::string readSharedTrayCurrentInputMethodState() {
-    auto current = readSharedTrayTextFile(sharedTrayCurrentInputMethodFile());
-    if (current.empty()) {
-        current = readSharedTrayInputMethodRequestFile();
-    }
-    return current;
-}
+std::string readSharedTrayCurrentInputMethodState() { return {}; }
 
 void persistSharedTrayChineseModeState(bool chineseMode) {
-    writeSharedTrayChineseModeFile(sharedTrayChineseModeStateFile(),
-                                   chineseMode);
+    (void)chineseMode;
 }
 
 bool readSharedTrayChineseModeState(bool *value) {
-    return readSharedTrayChineseModeFile(sharedTrayChineseModeStateFile(),
-                                         value);
+    (void)value;
+    return false;
 }
 
 void persistSharedTrayChineseModeRequest(bool chineseMode) {
@@ -842,10 +758,7 @@ std::vector<ProfileInputMethodItem> readProfileInputMethodsFromConfig() {
             }
         }
     }
-    std::string current = readSharedTrayCurrentInputMethodState();
-    if (current.empty()) {
-        current = defaultIm;
-    }
+    std::string current = defaultIm;
     std::vector<ProfileInputMethodItem> items;
     items.reserve(names.size());
     for (const auto &name : names) {
@@ -1215,17 +1128,6 @@ trayStatusActionsForShellMenu(ImeEngine *engine) {
     std::vector<TrayStatusActionItem> live =
         engine ? engine->trayStatusActions()
                : std::vector<TrayStatusActionItem>{};
-    const auto persisted = readTrayStatusActionsFromStateFile();
-    static constexpr const char *kCanonicalStatusNames[] = {
-        "fullwidth", "chttrans", "punctuation"};
-    for (const char *name : kCanonicalStatusNames) {
-        if (findTrayStatusAction(live, name)) {
-            continue;
-        }
-        if (const auto *p = findTrayStatusAction(persisted, name)) {
-            live.push_back(*p);
-        }
-    }
     return live;
 }
 
@@ -1431,21 +1333,10 @@ bool Tsf::langBarChineseMode() const {
     if (engine_) {
         currentInputMethod = engine_->currentInputMethod();
     }
-    if (currentInputMethod.empty() && currentProcessUsesSharedTrayState()) {
-        currentInputMethod = readSharedTrayCurrentInputMethodState();
-    }
     if (currentInputMethod == "keyboard-us") {
         return false;
     }
-
-    bool mode = chineseActive_;
-    if (currentProcessUsesSharedTrayState()) {
-        bool sharedMode = mode;
-        if (readSharedTrayChineseModeState(&sharedMode)) {
-            mode = sharedMode;
-        }
-    }
-    return mode;
+    return chineseActive_;
 }
 
 STDMETHODIMP FcitxLangBarButton::QueryInterface(REFIID riid, void **ppvObject) {
@@ -1703,9 +1594,7 @@ void Tsf::uninitLangBarTrayItem() {
 
 void Tsf::langBarScheduleToggleChinese() {
     if (currentProcessUsesSharedTrayState()) {
-        bool current = chineseActive_;
-        readSharedTrayChineseModeState(&current);
-        langBarScheduleSetChineseMode(!current);
+        langBarScheduleSetChineseMode(!langBarChineseMode());
         return;
     }
     pendingTrayToggleChinese_ = true;
@@ -1735,7 +1624,6 @@ void Tsf::langBarScheduleSetChineseMode(bool wantChinese) {
     if (currentProcessUsesSharedTrayState()) {
         chineseActive_ = wantChinese;
         persistSharedTrayChineseModeRequest(wantChinese);
-        persistSharedTrayChineseModeState(wantChinese);
         langBarNotifyIconUpdate();
         return;
     }
@@ -1750,12 +1638,10 @@ void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
     if (uniqueName.empty()) {
         return;
     }
-    persistSharedTrayInputMethodRequest(uniqueName);
-    persistSharedTrayCurrentInputMethodState(uniqueName);
-    persistSharedTrayChineseModeRequest(true);
-    persistSharedTrayChineseModeState(true);
+    const bool wantChinese = uniqueName != "keyboard-us";
+    persistSharedTrayChineseModeRequest(wantChinese);
     if (currentProcessUsesSharedTrayState() || !engine_) {
-        chineseActive_ = uniqueName != "keyboard-us";
+        chineseActive_ = wantChinese;
         langBarNotifyIconUpdate();
         return;
     }
@@ -1791,51 +1677,16 @@ void Tsf::langBarScheduleActivateInputMethod(const std::string &uniqueName) {
 
 void Tsf::persistSharedTrayInputMethodRequest(
     const std::string &uniqueName) const {
-    const auto path = sharedTrayInputMethodRequestFile();
-    if (path.empty()) {
-        return;
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        return;
-    }
-    out << uniqueName;
+    (void)uniqueName;
 }
 
-void Tsf::clearSharedTrayInputMethodRequest() const {
-    const auto path = sharedTrayInputMethodRequestFile();
-    if (path.empty()) {
-        return;
-    }
-    std::error_code ec;
-    std::filesystem::remove(path, ec);
-}
+void Tsf::clearSharedTrayInputMethodRequest() const {}
 
 void Tsf::clearSharedTrayPinyinReloadRequest() const {
     clearSharedTrayPinyinReloadRequestFile();
 }
 
-void Tsf::persistSharedTrayStatusActionState() const {
-    const auto path = sharedTrayStatusActionStateFile();
-    if (path.empty()) {
-        return;
-    }
-    std::error_code ec;
-    std::filesystem::create_directories(path.parent_path(), ec);
-    std::ofstream out(path, std::ios::binary | std::ios::trunc);
-    if (!out.is_open()) {
-        return;
-    }
-    if (!engine_) {
-        return;
-    }
-    for (const auto &item : engine_->trayStatusActions()) {
-        out << item.uniqueName << '\t' << (item.isChecked ? '1' : '0') << '\t'
-            << wideToUtf8(item.displayName) << '\n';
-    }
-}
+void Tsf::persistSharedTrayStatusActionState() const {}
 
 void Tsf::clearSharedTrayStatusActionRequest() const {
     const auto path = sharedTrayStatusActionRequestFile();
@@ -1852,7 +1703,7 @@ bool Tsf::sharedTrayChineseModeRequestPending() const {
 }
 
 bool Tsf::sharedTrayInputMethodRequestPending() const {
-    return !readSharedTrayInputMethodRequestFile().empty();
+    return false;
 }
 
 bool Tsf::sharedTrayStatusActionRequestPending() const {
@@ -1912,103 +1763,8 @@ bool Tsf::scheduleSharedTrayChineseModeRequest(ITfContext *preferredContext) {
 }
 
 bool Tsf::scheduleSharedTrayInputMethodRequest(ITfContext *preferredContext) {
-    if (!engine_ || !pendingTrayInputMethod_.empty()) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest skipped engine/pending");
-        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest skipped"
-                      << " engine=" << (engine_ != nullptr)
-                      << " pending=" << pendingTrayInputMethod_
-                      << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    if (currentProcessUsesSharedTrayState()) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest skipped in explorer");
-        FCITX_DEBUG()
-            << "scheduleSharedTrayInputMethodRequest skipped in explorer"
-            << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    const auto uniqueName = readSharedTrayInputMethodRequestFile();
-    if (uniqueName.empty()) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest no shared request");
-        FCITX_DEBUG()
-            << "scheduleSharedTrayInputMethodRequest no shared request"
-            << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    if (!preferredContext) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest deferred until key "
-                 "event target=" +
-                 uniqueName);
-        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest deferred until "
-                         "key event target="
-                      << uniqueName << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    if (uniqueName == deferredSharedTrayInputMethod_) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest deferred target=" +
-                 uniqueName);
-        FCITX_DEBUG() << "scheduleSharedTrayInputMethodRequest deferred target="
-                      << uniqueName << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    const auto current = engine_->currentInputMethod();
-    if (current == uniqueName) {
-        clearSharedTrayInputMethodRequest();
-        persistSharedTrayCurrentInputMethodState(uniqueName);
-        tsfTrace("scheduleSharedTrayInputMethodRequest cleared already-current "
-                 "target=" +
-                 uniqueName);
-        FCITX_INFO() << "scheduleSharedTrayInputMethodRequest cleared "
-                        "already-current target="
-                     << uniqueName << " pid=" << GetCurrentProcessId();
-        return false;
-    }
-    tsfTrace("scheduleSharedTrayInputMethodRequest consume target=" +
-             uniqueName + " current=" + current);
-    FCITX_INFO()
-        << "scheduleSharedTrayInputMethodRequest consume request target="
-        << uniqueName << " current=" << current
-        << " pid=" << GetCurrentProcessId();
-    pendingTrayInputMethod_ = uniqueName;
-    pendingTrayInputMethodFromSharedRequest_ = true;
-    HRESULT hr = E_FAIL;
-    ComPtr<ITfContext> ctx;
-    if (preferredContext) {
-        ctx = preferredContext;
-    } else {
-        ctx = textEditSinkContext_;
-    }
-    if (!ctx && threadMgr_) {
-        ComPtr<ITfDocumentMgr> dm;
-        if (SUCCEEDED(threadMgr_->GetFocus(dm.ReleaseAndGetAddressOf())) &&
-            dm) {
-            dm->GetTop(ctx.ReleaseAndGetAddressOf());
-        }
-    }
-    if (ctx) {
-        ctx->RequestEditSession(clientId_, this, TF_ES_SYNC | TF_ES_READWRITE,
-                                &hr);
-    }
-    if (FAILED(hr)) {
-        tsfTrace("scheduleSharedTrayInputMethodRequest RequestEditSession "
-                 "failed target=" +
-                 uniqueName);
-        FCITX_WARN() << "scheduleSharedTrayInputMethodRequest edit session "
-                        "failed target="
-                     << uniqueName << " hr=0x" << std::hex
-                     << static_cast<unsigned long>(hr) << std::dec
-                     << " pid=" << GetCurrentProcessId();
-        pendingTrayInputMethod_.clear();
-        pendingTrayInputMethodFromSharedRequest_ = false;
-        return false;
-    }
-    tsfTrace("scheduleSharedTrayInputMethodRequest RequestEditSession success "
-             "target=" +
-             uniqueName);
-    FCITX_INFO()
-        << "scheduleSharedTrayInputMethodRequest edit session scheduled target="
-        << uniqueName << " pid=" << GetCurrentProcessId();
-    return true;
+    (void)preferredContext;
+    return false;
 }
 
 bool Tsf::scheduleSharedTrayStatusActionRequest(ITfContext *preferredContext) {
@@ -2097,14 +1853,6 @@ void Tsf::langBarNotifyIconUpdate() {
         chineseActive_ = langBarChineseMode();
     }
     syncInputModeConversionCompartment(true);
-    persistSharedTrayChineseModeState(langBarChineseMode());
-    if (engine_) {
-        const auto current = engine_->currentInputMethod();
-        if (!current.empty()) {
-            persistSharedTrayCurrentInputMethodState(current);
-        }
-    }
-    persistSharedTrayStatusActionState();
     updateShellTrayTooltip();
     if (langBarItem_) {
         langBarItem_->notifyModeChanged();
@@ -2470,7 +2218,15 @@ void Tsf::showShellTrayContextMenuAt(POINT pt, HWND owner) {
         std::string currentInputMethod =
             engine_ ? engine_->currentInputMethod() : std::string{};
         if (currentInputMethod.empty()) {
-            currentInputMethod = readSharedTrayCurrentInputMethodState();
+            for (const auto &item : profileItems) {
+                if (item.isCurrent) {
+                    currentInputMethod = item.uniqueName;
+                    break;
+                }
+            }
+        }
+        if (currentInputMethod.empty() && !langBarChineseMode()) {
+            currentInputMethod = "keyboard-us";
         }
         bool currentIsRime = false;
         // Show 双拼方案 for both pinyin and shuangpin IMs: fcitx uses two

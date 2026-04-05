@@ -42,6 +42,21 @@ $common = Join-Path $PSScriptRoot 'Fcitx5-Ime.Common.ps1'
 $lang = if ($UICulture -eq 'auto') { Resolve-FcitxImeLang } else { $UICulture }
 $S = Get-FcitxImeStrings -Lang $lang
 
+function Remove-FcitxPathTree {
+    param([string] $Path)
+    if ([string]::IsNullOrWhiteSpace($Path) -or -not (Test-Path -LiteralPath $Path)) {
+        return $true
+    }
+    try {
+        Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop
+        return $true
+    }
+    catch {
+        Write-Warning "Remove failed: $Path ($($_.Exception.Message))"
+        return $false
+    }
+}
+
 if ($PurgeRegistryOnly) {
     if (-not (Test-FcitxImeAdmin)) {
         Write-Warning $S.AdminWarn
@@ -117,8 +132,40 @@ if ($RemoveFiles) {
             exit 0
         }
     }
-    Write-Host ($S.RemoveTree + " $DeployDir")
-    Remove-Item -LiteralPath $DeployDir -Recurse -Force
+    $libDir = Join-Path $DeployDir 'lib'
+    Write-Host "Stopping processes that still use $binDir ..."
+    $stopInfo = Stop-FcitxImeProcessesLockingBin -DeployDir $DeployDir
+    foreach ($line in $stopInfo.Stopped) {
+        Write-Host "  stopped: $line"
+    }
+    foreach ($line in $stopInfo.Skipped) {
+        Write-Host "  skipped: $line"
+    }
+
+    $allRemoved = $true
+    foreach ($path in @($binDir, $libDir, $DeployDir)) {
+        if (-not (Remove-FcitxPathTree -Path $path)) {
+            $allRemoved = $false
+        }
+    }
+
+    if (-not $allRemoved) {
+        Write-Host 'Retrying removal after stopping explorer-hosted locks ...'
+        $stopInfo = Stop-FcitxImeProcessesLockingBin -DeployDir $DeployDir -IncludeExplorer
+        foreach ($line in $stopInfo.Stopped) {
+            Write-Host "  stopped: $line"
+        }
+        foreach ($path in @($binDir, $libDir, $DeployDir)) {
+            Remove-FcitxPathTree -Path $path | Out-Null
+        }
+    }
+
+    $residual = @($binDir, $libDir, $DeployDir) | Where-Object {
+        Test-Path -LiteralPath $_
+    }
+    if ($residual.Count -gt 0) {
+        Write-Warning ("Residual paths remain after uninstall: " + ($residual -join ', '))
+    }
 }
 
 exit 0
