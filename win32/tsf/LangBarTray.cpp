@@ -173,6 +173,19 @@ bool currentProcessUsesSharedTrayState() {
     return currentProcessIsShellInputHost();
 }
 
+UINT shellTrayStateChangedMessage() {
+    static const UINT msg =
+        RegisterWindowMessageW(L"Fcitx5ShellTrayStateChanged");
+    return msg;
+}
+
+void broadcastShellTrayStateChanged() {
+    const UINT msg = shellTrayStateChangedMessage();
+    if (msg != 0) {
+        PostMessageW(HWND_BROADCAST, msg, 0, 0);
+    }
+}
+
 bool launchDetachedProcess(const std::wstring &application,
                            const std::wstring &arguments,
                            const std::wstring &workingDirectory = {}) {
@@ -2096,6 +2109,9 @@ void Tsf::langBarNotifyIconUpdate() {
     if (langBarItem_) {
         langBarItem_->notifyModeChanged();
     }
+    if (!currentProcessUsesSharedTrayState()) {
+        broadcastShellTrayStateChanged();
+    }
 }
 
 void Tsf::traySetChineseModeInEditSession(TfEditCookie ec, bool wantChinese) {
@@ -2196,6 +2212,13 @@ LRESULT CALLBACK Tsf::shellTrayHostWndProc(HWND hwnd, UINT msg, WPARAM wp,
     }
     if (!self) {
         return DefWindowProcW(hwnd, msg, wp, lp);
+    }
+    if (msg == shellTrayStateChangedMessage()) {
+        self->updateShellTrayTooltip();
+        if (self->langBarItem_) {
+            self->langBarItem_->notifyModeChanged();
+        }
+        return 0;
     }
     if (msg == kShellTrayCallback) {
         const UINT code = LOWORD(static_cast<DWORD_PTR>(lp));

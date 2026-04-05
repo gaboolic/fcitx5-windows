@@ -14,7 +14,7 @@
 #>
 param(
   [Parameter(Mandatory = $true)]
-  [string] $StageDir = 'D:\vscode\fcitx_projs\fcitx5-windows\stage'
+  [string] $StageDir = 'stage'
 )
 
 $ErrorActionPreference = 'Stop'
