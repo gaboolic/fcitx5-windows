@@ -1000,17 +1000,6 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
         endCandidateListUiElement();
         return;
     }
-    std::vector<std::wstring> labels;
-    labels.reserve(cands.size());
-    for (size_t i = 0; i < cands.size(); ++i) {
-        if (i < 9) {
-            labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
-        } else if (i == 9) {
-            labels.push_back(L"0. " + cands[i]);
-        } else {
-            labels.push_back(std::to_wstring(i + 1) + L". " + cands[i]);
-        }
-    }
     // Do not seed with GetCursorPos: if queryCandidateAnchor fails without
     // writing pt, we must not show the candidate list at the mouse (common in
     // Electron).
@@ -1074,7 +1063,7 @@ void Tsf::syncCandidateWindow(TfEditCookie ec) {
     fcitx::tsfTrace(std::string("candidatePos sync show pt=") +
                     std::to_string(static_cast<long>(pt.x)) + "," +
                     std::to_string(static_cast<long>(pt.y)));
-    candidateWin_.show(pt.x, pt.y, labels, engine_->highlightIndex());
+    candidateWin_.show(pt.x, pt.y, cands, engine_->highlightIndex());
     syncCandidateListUiElement();
 }
 

@@ -26,6 +26,13 @@ if(WIN32)
     target_link_libraries(tsf PUBLIC imm32)
 endif()
 
+if(FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW AND WIN32)
+    target_include_directories(tsf PRIVATE "${FCITX_WIN32_WEBVIEW2_INCLUDE_DIR}")
+    target_compile_definitions(tsf PUBLIC FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW=1)
+else()
+    target_compile_definitions(tsf PUBLIC FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW=0)
+endif()
+
 if(FCITX_WIN32_IME_WITH_CORE)
     if(FCITX5_WINDOWS_IME_IPC AND TARGET fcitx5_ime_ipc)
         target_sources(tsf PRIVATE ../ipc/PipeImeEngine.cpp)

@@ -6,4 +6,4 @@
 	url = https://github.com/gaboolic/windows-cross.git
 [submodule "fcitx5-webview"]
 	path = fcitx5-webview
-	url = https://github.com/fcitx-contrib/fcitx5-webview.git
+	url = https://github.com/fcitx-contrib/fcitx5-webview

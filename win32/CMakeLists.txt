@@ -12,6 +12,10 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
   set(CMAKE_CXX_STANDARD 20)
 endif()
 
+if(NOT DEFINED CMAKE_INSTALL_BINDIR)
+  include(GNUInstallDirs)
+endif()
+
 if(TARGET Fcitx5Core)
   set(FCITX_WIN32_IME_WITH_CORE ON)
 else()
@@ -22,6 +26,13 @@ option(FCITX5_WINDOWS_IME_IPC
        "TSF uses named pipe to Fcitx5ImePipeServer (out-of-process core)" OFF)
 if(FCITX5_WINDOWS_IME_IPC AND FCITX_WIN32_IME_WITH_CORE)
   add_subdirectory(ipc)
+endif()
+
+option(FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW
+       "Render candidate window with WebView2 when available" ON)
+if(FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW AND WIN32)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/WebView2Sdk.cmake)
+  include(${CMAKE_CURRENT_SOURCE_DIR}/WebViewFrontend.cmake)
 endif()
 
 add_subdirectory(assets)
