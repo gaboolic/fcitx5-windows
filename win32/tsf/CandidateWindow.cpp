@@ -49,9 +49,8 @@ std::wstring utf8ToWide(const std::string &text) {
     if (text.empty()) {
         return {};
     }
-    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(),
-                                         static_cast<int>(text.size()), nullptr,
-                                         0);
+    const int size = MultiByteToWideChar(
+        CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
     if (size <= 0) {
         return {};
     }
@@ -122,7 +121,8 @@ std::string buildCandidatesJson(const std::vector<std::wstring> &candidates) {
         json += jsonEscape(wideToUtf8(candidates[i]));
         json += "\",\"label\":\"";
         json += jsonEscape(candidateLabelUtf8(i));
-        json += "\",\"comment\":\"\",\"actions\":[],\"spaceBetweenComment\":true}";
+        json +=
+            "\",\"comment\":\"\",\"actions\":[],\"spaceBetweenComment\":true}";
     }
     json += "]";
     return json;
@@ -154,9 +154,8 @@ std::wstring appendPath(const std::wstring &base, const wchar_t *segment) {
 
 #if FCITX5_WINDOWS_CANDIDATE_UI_WEBVIEW
 std::wstring candidateHtmlUrl() {
-    const std::wstring htmlPath =
-        appendPath(appendPath(moduleDirectory(), L"fcitx5-webview"),
-                   L"index.html");
+    const std::wstring htmlPath = appendPath(
+        appendPath(moduleDirectory(), L"fcitx5-webview"), L"index.html");
     DWORD urlLen = 0;
     UrlCreateFromPathW(htmlPath.c_str(), nullptr, &urlLen, 0);
     if (urlLen == 0) {
@@ -193,16 +192,16 @@ std::wstring candidateUserDataDirectory() {
     return dir;
 }
 
-// Wraps window.fcitx(...) so host messages reach WebView2 postMessage (string protocol).
+// Wraps window.fcitx(...) so host messages reach WebView2 postMessage (string
+// protocol).
 constexpr wchar_t kHostBridgeScript[] =
     LR"((function(){var q=window.chrome&&window.chrome.webview;if(!q)return;var t=setInterval(function(){if(!window.fcitx||typeof window.fcitx.setCandidates!=='function')return;if(window.fcitx.__fcitxWinHost){clearInterval(t);return;}var inner=window.fcitx;var w=function(){var a=arguments;if(!a.length)return;var n=a[0];if(n==='onload')q.postMessage('onload');else if(n==='log'&&a.length>1)q.postMessage('log:'+String(a[1]));else if(n==='select'&&a.length>1)q.postMessage('select:'+a[1]);else if(n==='resize'&&a.length>1)q.postMessage('resize:'+Array.prototype.slice.call(a,1).join(','));};Object.setPrototypeOf(w,Object.getPrototypeOf(inner));for(var k in inner){try{if(Object.prototype.hasOwnProperty.call(inner,k))w[k]=inner[k];}catch(e){}}w.__fcitxWinHost=1;window.fcitx=w;clearInterval(t);},5);})();)";
 
 using Microsoft::WRL::ComPtr;
 
-using CreateCoreWebView2EnvironmentWithOptionsFn =
-    HRESULT(STDAPICALLTYPE *)(PCWSTR, PCWSTR,
-                              ICoreWebView2EnvironmentOptions *,
-                              ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
+using CreateCoreWebView2EnvironmentWithOptionsFn = HRESULT(STDAPICALLTYPE *)(
+    PCWSTR, PCWSTR, ICoreWebView2EnvironmentOptions *,
+    ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler *);
 #endif
 
 } // namespace
@@ -222,8 +221,7 @@ struct CandidateWindow::WebViewState {
     bool syncPending = false;
 };
 
-template <typename Interface>
-const IID &comInterfaceIid();
+template <typename Interface> const IID &comInterfaceIid();
 
 template <>
 const IID &
@@ -252,8 +250,7 @@ const IID &comInterfaceIid<ICoreWebView2ExecuteScriptCompletedHandler>() {
     return IID_ICoreWebView2ExecuteScriptCompletedHandler;
 }
 
-template <typename Interface>
-class ComCallbackBase : public Interface {
+template <typename Interface> class ComCallbackBase : public Interface {
   public:
     STDMETHODIMP QueryInterface(REFIID riid, void **ppvObject) override {
         if (!ppvObject) {
@@ -290,9 +287,11 @@ class EnvironmentCompletedHandler
     : public ComCallbackBase<
           ICoreWebView2CreateCoreWebView2EnvironmentCompletedHandler> {
   public:
-    explicit EnvironmentCompletedHandler(CandidateWindow *owner) : owner_(owner) {}
+    explicit EnvironmentCompletedHandler(CandidateWindow *owner)
+        : owner_(owner) {}
 
-    STDMETHODIMP Invoke(HRESULT result, ICoreWebView2Environment *env) override {
+    STDMETHODIMP Invoke(HRESULT result,
+                        ICoreWebView2Environment *env) override {
         return owner_ ? owner_->onWebViewEnvironmentCreated(result, env) : S_OK;
     }
 
@@ -304,7 +303,8 @@ class ControllerCompletedHandler
     : public ComCallbackBase<
           ICoreWebView2CreateCoreWebView2ControllerCompletedHandler> {
   public:
-    explicit ControllerCompletedHandler(CandidateWindow *owner) : owner_(owner) {}
+    explicit ControllerCompletedHandler(CandidateWindow *owner)
+        : owner_(owner) {}
 
     STDMETHODIMP Invoke(HRESULT result,
                         ICoreWebView2Controller *controller) override {
@@ -321,8 +321,9 @@ class MessageReceivedHandler
   public:
     explicit MessageReceivedHandler(CandidateWindow *owner) : owner_(owner) {}
 
-    STDMETHODIMP Invoke(ICoreWebView2 *,
-                        ICoreWebView2WebMessageReceivedEventArgs *args) override {
+    STDMETHODIMP
+    Invoke(ICoreWebView2 *,
+           ICoreWebView2WebMessageReceivedEventArgs *args) override {
         return owner_ ? owner_->onWebViewMessage(args) : S_OK;
     }
 
@@ -333,10 +334,12 @@ class MessageReceivedHandler
 class NavigationCompletedHandler
     : public ComCallbackBase<ICoreWebView2NavigationCompletedEventHandler> {
   public:
-    explicit NavigationCompletedHandler(CandidateWindow *owner) : owner_(owner) {}
+    explicit NavigationCompletedHandler(CandidateWindow *owner)
+        : owner_(owner) {}
 
-    STDMETHODIMP Invoke(ICoreWebView2 *,
-                        ICoreWebView2NavigationCompletedEventArgs *args) override {
+    STDMETHODIMP
+    Invoke(ICoreWebView2 *,
+           ICoreWebView2NavigationCompletedEventArgs *args) override {
         return owner_ ? owner_->onWebViewNavigationCompleted(args) : S_OK;
     }
 
@@ -349,7 +352,8 @@ class ExecuteScriptCompletedHandler
   public:
     ExecuteScriptCompletedHandler() = default;
 
-    STDMETHODIMP Invoke(HRESULT errorCode, LPCWSTR resultObjectAsJson) override {
+    STDMETHODIMP Invoke(HRESULT errorCode,
+                        LPCWSTR resultObjectAsJson) override {
         (void)resultObjectAsJson;
         if (FAILED(errorCode)) {
             RegisterTrace("CandidateWindow ExecuteScript failed");
@@ -394,10 +398,10 @@ void CandidateWindow::ensureWindow() {
     if (hwnd_) {
         return;
     }
-    hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-                            kClassName, L"", WS_POPUP, CW_USEDEFAULT,
-                            CW_USEDEFAULT, 100, 100, nullptr, nullptr,
-                            dllInstance, this);
+    hwnd_ =
+        CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                        kClassName, L"", WS_POPUP, CW_USEDEFAULT, CW_USEDEFAULT,
+                        100, 100, nullptr, nullptr, dllInstance, this);
 }
 
 LRESULT CALLBACK CandidateWindow::staticWndProc(HWND hwnd, UINT msg, WPARAM wp,
@@ -647,7 +651,8 @@ void CandidateWindow::destroyWebView() {
     }
     if (webView_->webview) {
         webView_->webview->remove_WebMessageReceived(webView_->messageToken);
-        webView_->webview->remove_NavigationCompleted(webView_->navigationToken);
+        webView_->webview->remove_NavigationCompleted(
+            webView_->navigationToken);
     }
     webView_->webview.Reset();
     webView_->controller.Reset();
@@ -671,7 +676,8 @@ void CandidateWindow::ensureWebView() {
     if (webView_->initStarted || webView_->initFailed || webView_->controller) {
         return;
     }
-    std::wstring loaderPath = appendPath(moduleDirectory(), L"WebView2Loader.dll");
+    std::wstring loaderPath =
+        appendPath(moduleDirectory(), L"WebView2Loader.dll");
     webView_->loaderModule = LoadLibraryW(loaderPath.c_str());
     if (!webView_->loaderModule) {
         webView_->loaderModule = LoadLibraryW(L"WebView2Loader.dll");
@@ -691,8 +697,8 @@ void CandidateWindow::ensureWebView() {
     const std::wstring userDataDir = candidateUserDataDirectory();
     webView_->initStarted = true;
     auto *envHandler = new EnvironmentCompletedHandler(this);
-    const HRESULT hr = webView_->createEnvironment(
-        nullptr, userDataDir.c_str(), nullptr, envHandler);
+    const HRESULT hr = webView_->createEnvironment(nullptr, userDataDir.c_str(),
+                                                   nullptr, envHandler);
     envHandler->Release();
     if (FAILED(hr)) {
         webView_->initFailed = true;
@@ -729,8 +735,7 @@ void CandidateWindow::pushWebViewState() {
     script << "window.fcitx.setWritingMode(0);";
     script << "window.fcitx.updateInputPanel([],false,[],[],[]);";
     script << "window.fcitx.setCandidates(" << buildCandidatesJson(candidates_)
-           << "," << highlight_
-           << ",false,false,false,0,false,false);";
+           << "," << highlight_ << ",false,false,false,0,false,false);";
     script << "window.fcitx.resize(" << webViewEpoch_
            << ",0,0,false,false);}catch(e){}})();";
     const std::wstring w = utf8ToWide(script.str());
@@ -739,8 +744,9 @@ void CandidateWindow::pushWebViewState() {
     done->Release();
 }
 
-void CandidateWindow::applyWebViewLayoutRect(int contentRight, int contentBottom,
-                                             double dx, double dy, bool dragging) {
+void CandidateWindow::applyWebViewLayoutRect(int contentRight,
+                                             int contentBottom, double dx,
+                                             double dy, bool dragging) {
     if (!hwnd_) {
         return;
     }
@@ -753,8 +759,7 @@ void CandidateWindow::applyWebViewLayoutRect(int contentRight, int contentBottom
         ch = 1;
     }
     RECT clientRc = {0, 0, cw, ch};
-    const DWORD style =
-        static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
+    const DWORD style = static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_STYLE));
     const DWORD exStyle =
         static_cast<DWORD>(GetWindowLongPtrW(hwnd_, GWL_EXSTYLE));
     AdjustWindowRectEx(&clientRc, style, FALSE, exStyle);

@@ -468,9 +468,7 @@ void persistSharedTrayCurrentInputMethodState(const std::string &uniqueName) {
 
 std::string readSharedTrayCurrentInputMethodState() { return {}; }
 
-void persistSharedTrayChineseModeState(bool chineseMode) {
-    (void)chineseMode;
-}
+void persistSharedTrayChineseModeState(bool chineseMode) { (void)chineseMode; }
 
 bool readSharedTrayChineseModeState(bool *value) {
     (void)value;
@@ -1702,9 +1700,7 @@ bool Tsf::sharedTrayChineseModeRequestPending() const {
     return readSharedTrayChineseModeRequest(&value);
 }
 
-bool Tsf::sharedTrayInputMethodRequestPending() const {
-    return false;
-}
+bool Tsf::sharedTrayInputMethodRequestPending() const { return false; }
 
 bool Tsf::sharedTrayStatusActionRequestPending() const {
     return !readSharedTrayStatusActionRequestFile().empty();
